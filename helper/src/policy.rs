@@ -266,34 +266,6 @@ impl Setting {
     }
 }
 
-/// Every root-owned file AllyHub (the app Turbine Hub replaces) may have written. The cleanup job removes only these,
-/// backing each one up first.
-pub const ALLYHUB_FILES: &[&str] = &[
-    "/etc/udev/rules.d/99-allyhub-leds.rules",
-    "/etc/udev/rules.d/70-allyhub-hid.rules",
-    "/etc/systemd/system/allyhub-lighting-perms.service",
-    "/etc/allyhub/lighting-perms.sh",
-    "/etc/udev/rules.d/99-allyhub-charge.rules",
-    "/etc/udev/rules.d/71-allyhub-charge-perm.rules",
-    "/etc/udev/rules.d/71-allyhub-nowake.rules",
-    "/etc/udev/rules.d/70-allyhub-ntsync.rules",
-    "/etc/modules-load.d/allyhub-ntsync.conf",
-    "/etc/sysctl.d/99-zz-allyhub.conf",
-    "/etc/sysctl.d/99-zz-allyhub-zram.conf",
-    "/etc/tmpfiles.d/allyhub-tuneup.conf",
-    "/etc/systemd/system/allyhub-zram.service",
-    "/etc/allyhub/zram.sh",
-    "/etc/tmpfiles.d/allyhub-boost.conf",
-    "/etc/polkit-1/rules.d/49-allyhub-decky.rules",
-    "/etc/allyhub/decky-restart-allowed",
-    "/etc/systemd/system/allyhub-edid.service",
-    "/etc/allyhub/edid-override.sh",
-    "/etc/allyhub/edid-144.bin",
-];
-
-/// AllyHub's system services, turned off before their files go.
-pub const ALLYHUB_UNITS: &[&str] = &["allyhub-lighting-perms.service", "allyhub-zram.service", "allyhub-edid.service"];
-
 pub const SYSCTL_FILE: &str = "/etc/sysctl.d/99-zz-turbinehub.conf";
 pub const WAKE_FILE: &str = "/etc/udev/rules.d/71-turbinehub-wake.rules";
 pub const ACCESS_FILE: &str = "/etc/udev/rules.d/70-turbinehub-access.rules";

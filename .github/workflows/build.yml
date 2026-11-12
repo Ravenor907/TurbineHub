@@ -223,7 +223,7 @@ jobs:
         run: |
           # The quick panel's jobs, run the way the panel runs them, against tools/fake-home.py and the engine's
           # fake machines: every answer is one JSON object with ok true.
-          python3 tools/fake-home.py /tmp/th-home --allyhub
+          python3 tools/fake-home.py /tmp/th-home
           cargo +1.97.0 run --release --locked -q -p turbinehub-engine --example json -- --self-test /tmp/th-home
 
   live:

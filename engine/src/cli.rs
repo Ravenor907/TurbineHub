@@ -6,7 +6,7 @@ use crate::checkup::{self, Facts, Level};
 use crate::hardware::Machine;
 use crate::json::quote;
 use crate::switches::{GameSwitches, Switch};
-use crate::{glossary, helper, library, migrate, modules, sensors, settings::Settings, shortcuts, tuneup};
+use crate::{glossary, helper, library, modules, sensors, settings::Settings, shortcuts, tuneup};
 use std::path::{Path, PathBuf};
 
 /// Where to read from: "/" and the player's folders for real, fake ones for tests and screenshots.
@@ -106,7 +106,7 @@ pub fn take_open_request(config_home: &Path, now: u64) -> Option<String> {
     (at <= now && now - at <= OPEN_REQUEST_SECS).then(|| page.to_string())
 }
 
-pub const JOBS: &[&str] = &["version", "machine", "readings", "checkup", "cards", "tuneup", "changes", "glossary", "panel", "game", "open", "allyhub"];
+pub const JOBS: &[&str] = &["version", "machine", "readings", "checkup", "cards", "tuneup", "changes", "glossary", "panel", "game", "open"];
 
 fn refuse(words: &str) -> (String, i32) {
     (format!("{{\"ok\":false,\"error\":{}}}", quote(words)), 2)
@@ -176,12 +176,6 @@ pub fn run(job: &str, ctx: &Ctx) -> (String, i32) {
             let hub = shortcuts::find_self(&ctx.home).map(|(id, _)| shortcuts::rungameid_url(id)).unwrap_or_default();
             let noted = crate::write_atomic(&open_request_file(&ctx.config_home), format!("{{\"page\":{},\"at\":{}}}\n", quote(arg), crate::now()).as_bytes()).is_ok();
             format!("\"page\":{},\"noted\":{noted},\"hubUrl\":{}", quote(arg), quote(&hub))
-        }
-        "allyhub" => {
-            let found = migrate::detect(&ctx.root, &ctx.home);
-            let games = if found.any() { migrate::game_options(&ctx.home, &crate::scan_games(&ctx.home)) } else { Vec::new() };
-            let groups = migrate::groups(&found, &ctx.root, &games);
-            format!("\"found\":{},\"imported\":{},\"groups\":{}", found.any(), Settings::load(&ctx.config_home).allyhub_imported, migrate::groups_json(&groups))
         }
         _ => return refuse(&format!("Unknown job. Jobs: {}", JOBS.join(", "))),
     };
@@ -308,19 +302,6 @@ mod tests {
             assert_eq!(run(bad, &c).1, 2, "{bad}");
         }
         assert!(!open_request_file(&c.config_home).exists());
-        let _ = std::fs::remove_dir_all(&c.root);
-    }
-
-    #[test]
-    fn the_allyhub_job_says_what_there_is_to_move() {
-        let c = ctx("allyhub", Preset::AllyX);
-        let j = parse(&run("allyhub", &c).0).unwrap();
-        assert_eq!((j.get("found").and_then(Json::as_bool), j.get("groups").unwrap().as_array().len()), (Some(false), 0));
-        w(c.root.join("etc/modules-load.d/allyhub-ntsync.conf"), "ntsync\n");
-        w(c.home.join(".config/allyhub/config.json"), "{}");
-        let j = parse(&run("allyhub", &c).0).unwrap();
-        assert_eq!((j.get("found").and_then(Json::as_bool), j.get("imported").and_then(Json::as_bool)), (Some(true), Some(false)));
-        assert_eq!(j.get("groups").unwrap().as_array()[0].str_at("id"), Some("ntsync"));
         let _ = std::fs::remove_dir_all(&c.root);
     }
 }

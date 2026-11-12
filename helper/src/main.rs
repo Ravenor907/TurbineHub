@@ -75,7 +75,6 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
             let j = arg_json(arg)?;
             sys.decky_install(j.str_at("tag").ok_or("tag is missing")?, &owner).map(|id| format!(",\"id\":{id}"))
         }
-        "allyhub-cleanup" => sys.allyhub_cleanup(&owner).map(|id| format!(",\"id\":{id}")),
         "boot-next" => sys.boot_next(arg_json(arg)?.str_at("entry").ok_or("entry is missing")?).map(|_| String::new()),
         "uninstall" => sys.uninstall().map(|_| String::new()),
         _ => Err("Unknown job".into()),

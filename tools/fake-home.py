@@ -3,9 +3,7 @@
 library, launch options on some games, and Heroic (Flatpak) with an Epic and a GOG game. No art: Turbine Hub shows a
 game's name alone when it has no real art. Every game is an empty file with the right name.
 
-Usage: fake-home.py <folder> [--allyhub]
-  --allyhub  also leaves what AllyHub keeps in a home folder (its program, settings, agent unit, quick panel and
-             the files it adds for games), for the Moving from AllyHub screen."""
+Usage: fake-home.py <folder>"""
 import json
 import os
 import sys
@@ -39,7 +37,7 @@ GAMES = [
 ]
 
 
-def main(home, allyhub):
+def main(home):
     steam = os.path.join(home, ".local/share/Steam")
     sd = os.path.join(home, "sdcard")
     libs = {"internal": steam, "sd": sd}
@@ -64,29 +62,11 @@ def main(home, allyhub):
     write(os.path.join(heroic, "gog_store/installed.json"), json.dumps({"installed": [{"appName": "1453375253", "install_path": sv, "platform": "linux", "version": "1.6.15"}]}))
     write(os.path.join(heroic, "store_cache/gog_library.json"), json.dumps({"games": [{"app_name": "1453375253", "title": "Stardew Valley"}]}))
 
-    if allyhub:
-        write(os.path.join(home, ".local/share/allyhub/core.py"))
-        write(os.path.join(home, ".local/share/allyhub/VERSION"), "1.5.0.18\n")
-        write(os.path.join(home, ".config/allyhub/config.json"), json.dumps({
-            "theme": {"preset": "ROG Crimson", "scale": 110, "advanced": True},
-            "lighting": {"controller": "allyhub", "effect": "spiral", "custom": {"Evening": {}}},
-            "game_colors": {"1245620": {"color": "#c8102e"}},
-            "agent": {"enabled": True, "battery_rings": True},
-            "saves": {"time_machine": True, "keep": 5},
-            "performance": {"boost": True},
-            "battery": {"limit": "80"},
-            "updates": {"reporting": False, "channel": "stable"}}, indent=2))
-        write(os.path.join(home, ".config/systemd/user/allyhub-agent.service"), "[Unit]\nDescription=Ally Hub agent\n")
-        write(os.path.join(home, ".config/environment.d/90-allyhub-games.conf"), "PROTON_FSR4_UPGRADE=1\n")
-        write(os.path.join(home, ".local/bin/allyhub"), "#!/bin/sh\n")
-        write(os.path.join(home, ".local/share/applications/allyhub.desktop"), "[Desktop Entry]\nName=Ally Hub\n")
-        write(os.path.join(home, "homebrew/plugins/AllyHub/plugin.json"), "{}\n")
-        write(os.path.join(home, "AllyHub-Backups/saves/1245620/keep.txt"), "a save backup, which stays\n")
-    print(f"fake home at {home}: {len(GAMES)} Steam games, 2 Heroic games" + (", AllyHub's files" if allyhub else ""))
+    print(f"fake home at {home}: {len(GAMES)} Steam games, 2 Heroic games")
 
 
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 1:
         sys.exit(__doc__)
-    main(os.path.abspath(args[0]), "--allyhub" in sys.argv)
+    main(os.path.abspath(args[0]))

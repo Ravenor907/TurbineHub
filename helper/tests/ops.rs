@@ -223,30 +223,3 @@ fn install_and_uninstall() {
     assert!(!sys.p(ops::STATE_DIR).exists() && !sys.p(ops::POLKIT_RULE).exists());
 }
 
-#[test]
-fn allyhub_cleanup_removes_only_its_files_and_undo_puts_them_back() {
-    let mut sys = machine("allyhub");
-    let w = |sys: &Sys<Fake>, p: &str, t: &str| {
-        let f = sys.p(p);
-        fs::create_dir_all(f.parent().unwrap()).unwrap();
-        fs::write(f, t).unwrap();
-    };
-    w(&sys, "/etc/udev/rules.d/99-allyhub-leds.rules", "leds\n");
-    w(&sys, "/etc/systemd/system/allyhub-zram.service", "[Unit]\n");
-    w(&sys, "/etc/allyhub/zram.sh", "#!/bin/sh\n");
-    w(&sys, "/etc/udev/rules.d/99-other.rules", "keep\n");
-    w(&sys, "/home/deck/homebrew/plugins/AllyHub/main.py", "x");
-    w(&sys, "/home/deck/homebrew/plugins/Other/main.py", "x");
-    let o = owner(&sys);
-    let id = sys.allyhub_cleanup(&o).unwrap();
-    assert!(!sys.p("/etc/udev/rules.d/99-allyhub-leds.rules").exists());
-    assert!(!sys.p("/etc/allyhub").exists());
-    assert!(!sys.p("/home/deck/homebrew/plugins/AllyHub").exists());
-    assert_eq!(read(&sys, "/etc/udev/rules.d/99-other.rules"), "keep\n");
-    assert!(sys.p("/home/deck/homebrew/plugins/Other/main.py").exists());
-    assert!(sys.run.calls.iter().any(|c| c == "systemctl disable --now allyhub-zram.service"));
-    assert!(sys.allyhub_cleanup(&o).is_err());
-    sys.undo(id).unwrap();
-    assert_eq!(read(&sys, "/etc/allyhub/zram.sh"), "#!/bin/sh\n");
-    assert_eq!(read(&sys, "/etc/udev/rules.d/99-allyhub-leds.rules"), "leds\n");
-}

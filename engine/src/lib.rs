@@ -13,7 +13,6 @@ pub mod heroic;
 pub mod inflate;
 pub mod json;
 pub mod library;
-pub mod migrate;
 pub mod modules;
 pub mod net;
 pub mod report;

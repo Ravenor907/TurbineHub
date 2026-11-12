@@ -231,7 +231,6 @@ impl<R: Run> Sys<R> {
             }
             Change::Set(Setting::Module { .. } | Setting::Wake { .. } | Setting::Access { .. } | Setting::Zram { .. }) => Ok(()),
             Change::Decky { .. } => self.undo_decky(e),
-            Change::AllyHubRemoved => self.undo_allyhub(e),
         }
     }
 
@@ -457,63 +456,6 @@ impl<R: Run> Sys<R> {
         if e.before("enabled") == Some("true") {
             self.set_service("plugin_loader.service", true)?;
         }
-        Ok(())
-    }
-
-    // ---------------------------------------------------------------- AllyHub
-
-    /// Removes AllyHub's system side: turns off its services, backs up and removes each file on the fixed list,
-    /// removes /etc/allyhub when empty and its quick panel folder, then reloads udev and systemd. Recorded, so Undo
-    /// puts every file back.
-    pub fn allyhub_cleanup(&mut self, owner: &Owner) -> Result<u64, String> {
-        let mut l = self.ledger()?;
-        if l.find_key("allyhub").is_some() {
-            return Err("AllyHub's files were removed already".into());
-        }
-        let id = l.next.max(1);
-        fs::create_dir_all(self.p(BACKUP_DIR)).map_err(|e| io_err("make the backup folder", e))?;
-        for unit in policy::ALLYHUB_UNITS {
-            if self.p(&format!("/etc/systemd/system/{unit}")).exists() {
-                let _ = self.run.run(SYSTEMCTL, &["disable", "--now", unit]);
-            }
-        }
-        let mut before = Vec::new();
-        for (i, f) in policy::ALLYHUB_FILES.iter().enumerate() {
-            let p = self.p(f);
-            if p.symlink_metadata().is_ok() {
-                let b = format!("{BACKUP_DIR}/allyhub-{id}-{i}");
-                fs::copy(&p, self.p(&b)).map_err(|e| io_err(&format!("back up {f}"), e))?;
-                fs::remove_file(&p).map_err(|e| io_err(&format!("remove {f}"), e))?;
-                before.push((f.to_string(), b));
-            }
-        }
-        let _ = fs::remove_dir(self.p("/etc/allyhub"));
-        let plugin = owner.home.join("homebrew/plugins/AllyHub");
-        let plugin_full = self.p(&plugin.to_string_lossy());
-        if plugin_full.is_dir() && !plugin_full.is_symlink() {
-            fs::remove_dir_all(&plugin_full).map_err(|e| io_err("remove AllyHub's quick panel", e))?;
-            let _ = self.run.run(SYSTEMCTL, &["try-restart", "plugin_loader.service"]);
-        }
-        self.run.run(SYSTEMCTL, &["daemon-reload"])?;
-        let _ = self.run.run(UDEVADM, &["control", "--reload"]);
-        let steamos = self.steamos();
-        let id = l.record(Change::AllyHubRemoved, before, self.now, &steamos);
-        self.save(&l)?;
-        Ok(id)
-    }
-
-    fn undo_allyhub(&mut self, e: &Entry) -> Result<(), String> {
-        for (f, b) in &e.before {
-            if policy::ALLYHUB_FILES.contains(&f.as_str()) && b.starts_with(BACKUP_DIR) && !b.contains("..") {
-                let p = self.p(f);
-                if let Some(d) = p.parent() {
-                    fs::create_dir_all(d).map_err(|er| io_err("make a folder", er))?;
-                }
-                fs::copy(self.p(b), &p).map_err(|er| io_err(&format!("put back {f}"), er))?;
-            }
-        }
-        self.run.run(SYSTEMCTL, &["daemon-reload"])?;
-        let _ = self.run.run(UDEVADM, &["control", "--reload"]);
         Ok(())
     }
 

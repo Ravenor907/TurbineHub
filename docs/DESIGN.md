@@ -1,6 +1,6 @@
 # Turbine Hub design
 
-Turbine Hub is the first stop after installing SteamOS: everything the "first things to do" guides tell people to paste into Konsole, done from the couch with a controller (or at a desk with a mouse), explained in Windows terms, checked before it runs, and undoable. It is the successor to AllyHub and covers three kinds of machine: handhelds, desktop PCs, and media-center PCs used in Game Mode on a TV.
+Turbine Hub is the first stop after installing SteamOS: everything the "first things to do" guides tell people to paste into Konsole, done from the couch with a controller (or at a desk with a mouse), explained in Windows terms, checked before it runs, and undoable. It is a standalone SteamOS app and covers three kinds of machine: handhelds, desktop PCs, and media-center PCs used in Game Mode on a TV.
 
 The app name is two words, **Turbine Hub**. The repository, Flatpak ID and code use **TurbineHub** / `turbinehub`.
 
@@ -9,7 +9,7 @@ Turbine Mod Manager (github.com/Ravenor907/Turbine-Mod-Manager) is the reference
 ## 1. Who it is for
 
 - **Guided mode**: people new to SteamOS, often coming from Windows. Walks them through setup, explains things in Windows terms, hides expert controls.
-- **Veteran mode** ("I know more than you."): people who know what they want. One-screen setup, a dashboard Home, every control visible. Replaces AllyHub's Simple/Advanced switch.
+- **Veteran mode** ("I know more than you."): people who know what they want. One-screen setup, a dashboard Home, every control visible.
 - Both modes have the same features. The first-run screen asks which one; Settings switches any time without losing anything.
 
 Machines, all first-class:
@@ -61,9 +61,6 @@ Mode, interface size (50 to 150%, re-flows), animations, theme and accent (Turbi
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.
 
-### Dropped from AllyHub
-The git-clone installer, the Testing Rescue entry, four-part versions, layout variants (tabs on the side, bottom bar off), the extra AllyHub theme, anything that places files in a game folder (that is Turbine Mod Manager's job).
-
 ### Wording rules
 - Player-facing words are short and plain, with one glossary used everywhere.
 - No past tense about the player ("Your Windows apps", not "I used to use").
@@ -109,7 +106,7 @@ New:
 - `store`: Flathub (via `flatpak` on the host), Decky store, launchers, streaming tiles.
 - `saves`: save time machine on top of the Ludusavi CLI.
 - `ledger`: the change record shared with the helper (see 4).
-- `settings`, `glossary`, `mode`, `migrate` (AllyHub import, runs once).
+- `settings`, `glossary`, `mode`.
 - `cli`: `--json` verbs for the Decky backend and scripts.
 
 Every decision (filtering, sorting, what to warn about, what a check means) is Rust with tests. QML only shows what the engine says.
@@ -225,21 +222,13 @@ One JSON file, one entry per setting (a second change to the same setting update
 - CI follows Turbine's build.yml: house rules check, engine tests and `clippy -D warnings` on 1.97.0, QML syntax check, release rules, Flatpak build, screenshot shards at 1280x800, 1920x1080 and 1600x900 with SelfCheck, stand-in servers and fake home folders (a live check may warn, never fail), layout checks and before/after screenshot comparison.
 - The repo variable `TURBINE_RUNNER` picks GitHub's runners or the owner's PC. The PC gets its own runner set with the label `turbinehub`, and a matching switch next to `~/dev-setup/turbine-ci`.
 
-## 6. Migration from AllyHub
-
-1. Detect AllyHub's install, settings and every system change it made (its udev, polkit, sysctl, tmpfiles and service files, Decky changes, environment.d entries).
-2. For each change: take it over into the ledger (same effect, Turbine Hub's file) or undo it, with the player's choice per group.
-3. Import settings once (lighting, per-game switches, favorites). No compatibility code for old formats after that.
-4. Remove AllyHub.
-
-## 7. Build order
+## 6. Build order
 
 1. Feature inventory: done (this document, sections 1 and 2).
-2. Architecture and helper design: this document, sections 3 and 4. **Needs the owner's approval.**
+2. Architecture and helper design: this document, sections 3 and 4.
 3. Engine with tests.
 4. App UI (from the reviewed mockups).
 5. CI and runners.
 6. Decky plugin.
-7. Migration from AllyHub.
-8. Screenshot review of every screen at every size.
-9. A hands-on checklist for the owner to try in Game Mode.
+7. Screenshot review of every screen at every size.
+8. A hands-on checklist for the owner to try in Game Mode.

@@ -30,8 +30,6 @@ pub struct Settings {
     pub setup_done: Vec<String>,
     /// Bring it over steps finished ("stores", "gamepass", "windows", "apps", "tv").
     pub brought: Vec<String>,
-    /// The AllyHub import ran (it runs once).
-    pub allyhub_imported: bool,
 }
 
 pub const THEMES: &[&str] = &["dark", "black", "light", "contrast"];
@@ -52,7 +50,6 @@ impl Default for Settings {
             reports: false,
             setup_done: Vec::new(),
             brought: Vec::new(),
-            allyhub_imported: false,
         }
     }
 }
@@ -87,7 +84,6 @@ impl Settings {
             reports: b("reports", d.reports),
             setup_done: list(&j, "setupDone", SETUP_STEPS),
             brought: list(&j, "brought", BRING_STEPS),
-            allyhub_imported: b("allyhubImported", false),
         }
     }
 
@@ -99,7 +95,7 @@ impl Settings {
             None => "null",
         };
         format!(
-            "{{\n  \"mode\": {mode},\n  \"uiScale\": {},\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {},\n  \"allyhubImported\": {}\n}}\n",
+            "{{\n  \"mode\": {mode},\n  \"uiScale\": {},\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
             self.ui_scale,
             self.animations,
             quote(&self.theme),
@@ -108,8 +104,7 @@ impl Settings {
             self.test_builds,
             self.reports,
             l(&self.setup_done),
-            l(&self.brought),
-            self.allyhub_imported
+            l(&self.brought)
         )
     }
 

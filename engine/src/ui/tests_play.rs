@@ -373,7 +373,8 @@ fn the_store_search_looks_everywhere_and_names_come_first() {
     let j = parse(&u.page("store", "")).unwrap();
     assert_eq!(titles(&rows(&j))[0], "Decky Loader");
     u.act("search", "store", "battle");
-    assert_eq!(rows(&parse(&u.page("store", "")).unwrap())[0].str_at("act"), Some("launcher-guide"));
+    let first = rows(&parse(&u.page("store", "")).unwrap())[0].clone();
+    assert_eq!((first.str_at("title"), first.str_at("act"), first.str_at("arg")), (Some("Battle.net"), Some("open"), Some("store-item|nsl")));
     u.act("search", "store", "qqq");
     let j = parse(&u.page("store", "tv")).unwrap();
     assert!(rows(&j).is_empty());

@@ -46,6 +46,7 @@ pub struct Facts {
     /// Some(true) when the internet answered, Some(false) when it didn't, None when it wasn't asked.
     pub online: Option<bool>,
     pub decky_tag: Option<String>,
+    pub nsl_tag: Option<String>,
     /// Some(version) when a newer Turbine Hub is out, Some("") when this one is the newest.
     pub update: Option<String>,
     /// Decky plugins with a newer version, when the plugin store's list could be read.
@@ -244,9 +245,46 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             let _ = std::fs::remove_file(&got.path);
             if o.code == 0 { Ok(()) } else { Err(reason(&o)) }
         }
+        Step::Nsl { tag, plugin } => {
+            say("Getting NonSteamLaunchers".into());
+            start_nsl(job, tag, *plugin)
+        }
         // These need the engine's state: the interface thread does them once the rest worked.
         Step::Report { .. } | Step::SaveSetup | Step::Done { .. } | Step::SetupFinished { .. } => Ok(()),
     }
+}
+
+/// Fetches NonSteamLaunchers' script (or its plugin's installer) at the release tag into the cache folder, which the
+/// host sees at the same path, checks it is that script, and starts it on the host without waiting: the player
+/// works in its own window from here on. Its output goes to its own log.
+fn start_nsl(job: &Job, tag: &str, plugin: bool) -> Result<(), String> {
+    use turbinehub_engine::nsl;
+    if !nsl::tag_ok(tag) {
+        return Err("That isn't a NonSteamLaunchers release.".into());
+    }
+    let client = Client::new(&job.version, &job.cache);
+    let got = client.download(&nsl::script_url(tag, plugin), &turbinehub_engine::net::Expect::up_to(4 << 20), None).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&got.path).unwrap_or_default();
+    let _ = std::fs::remove_file(&got.path);
+    if !nsl::script_ok(&text, tag, plugin) {
+        return Err("What GitHub sent isn't NonSteamLaunchers' script. Nothing was started.".into());
+    }
+    let file = nsl::script_file(&job.cache, tag, plugin);
+    // Only the newest script is kept.
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&file, text).map_err(|e| format!("Couldn't keep the script: {e}"))?;
+    let mut c = command(&nsl::run_line(&file)).ok_or("Nothing to run")?;
+    let mut child = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| format!("Couldn't start NonSteamLaunchers: {e}"))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    if !plugin {
+        let _ = nsl::remember(&job.folder, tag);
+    }
+    Ok(())
 }
 
 /// Runs the steps in order on a new thread, stopping at the first that fails.
@@ -366,6 +404,7 @@ pub fn gather(g: Gather, tx: Sender<Event>) {
         let ids: Vec<String> = turbinehub_engine::scan_games(&g.home).games.into_iter().filter(|x| x.store == Store::Steam).map(|x| x.store_id).collect();
         let lists = sources::refresh(&g.cache, &ids, Some(&turbinehub_engine::cli::anticheat_cache(&g.config_home)), now, 40, &mut fetch);
         let decky = sources::get(&sources::DECKY_RELEASE, &g.cache, now, &mut fetch);
+        let nsl = sources::get(&sources::NSL_RELEASE, &g.cache, now, &mut fetch);
         let (found, updates_online) = look_for_updates(&g.home, &g.cache, &g.version, g.test_builds);
         let answers = [lists.online, if decky.origin == Origin::Live { Some(true) } else if decky.offline { Some(false) } else { None }, updates_online];
         let f = Facts {
@@ -373,6 +412,7 @@ pub fn gather(g: Gather, tx: Sender<Event>) {
             update: found.update,
             plugins: found.plugins,
             decky_tag: sources::release_tag(&decky.text),
+            nsl_tag: sources::release_tag(&nsl.text),
             online: if answers.contains(&Some(true)) { Some(true) } else if answers.contains(&Some(false)) { Some(false) } else { None },
             ..Facts::default()
         };

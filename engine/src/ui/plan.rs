@@ -46,6 +46,9 @@ pub enum Step {
     SelfTile { add: bool },
     /// Writes Turbine Hub's own library art for its entry, never over the player's pictures.
     SelfArt,
+    /// Fetches NonSteamLaunchers' script (or its Decky plugin's installer) at this release tag and starts it on the
+    /// host, where it shows its own windows. Not waited for: the player works in its window.
+    Nsl { tag: String, plugin: bool },
 }
 
 /// Which password the dialog asks for.
@@ -167,6 +170,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
         .or_else(|| super::selftile::act(ui, action, arg, value))
         .or_else(|| super::machine::act(ui, action, arg, value))
         .or_else(|| super::store::act(ui, action, arg, value))
+        .or_else(|| super::nsl::act(ui, action, arg, value))
         .or_else(|| super::bring::act(ui, action, arg, value))
         .or_else(|| super::setup::act(ui, action, arg, value))
         .or_else(|| super::help::act(ui, action, arg, value));

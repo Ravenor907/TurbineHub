@@ -37,7 +37,7 @@ Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs.
 Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pass titles) gets Works, Needs a fix (one tap), or Won't run here with the best alternative (GeForce NOW, Xbox Cloud, or Restart to Windows). Data: Valve's SteamOS ratings, anti-cheat lists, Turbine Hub's own fixes. Fetched fresh, never pinned in the app.
 
 ### Bring it over from Windows
-- Other stores: Heroic (Epic, GOG, Amazon) and NonSteamLaunchers (Battle.net, EA, Ubisoft, Rockstar) as library tiles with art.
+- Other stores: Heroic (Epic, GOG, Amazon) and NonSteamLaunchers (Battle.net, EA, Ubisoft, Rockstar and more), each launcher leading to NonSteamLaunchers' page in the Store.
 - Game Pass: Xbox Cloud as a tile. Local Game Pass (Xodus Nexus) only under Veteran, labeled Experimental.
 - Your Windows drive: found automatically, read only, never written. Copies Steam games into a SteamOS library (no re-download) and saves into the right Proton prefixes. Saves use Ludusavi's CLI with the Windows drive added as an "other Windows" root.
 - Your Windows apps: pick the Windows apps you use, get the SteamOS version of each in one install (Discord, MangoHud and MangoJuice for MSI Afterburner, Steam Input for DS4Windows, Xbox Cloud for the Xbox app, and so on).
@@ -49,6 +49,8 @@ Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, P
 
 ### Store
 Essentials, Apps (Flathub), Decky plugins (with turn-off and "Turn all off" for troubleshooting), Launchers, TV and streaming, Emulation (EmuDeck), Installed. Update all. Everything installed keeps itself current.
+
+NonSteamLaunchers (github.com/moraroy/NonSteamLaunchers-On-Steam-Deck, `engine/src/nsl.rs`) has its own page under Launchers. Install, Open and Update fetch the project's own `NonSteamLaunchers.sh` at its newest release tag (never `main`), check it names that version, and start it on the host with `flatpak-spawn --host bash`, as the player, without the helper or a password. Its windows need Desktop Mode, so in Game Mode the page says how to get there. With Decky Loader there, the page also offers its Decky plugin through the project's `NSLPluginInstaller.sh` (which asks for the password in its own window). Installed is read from its Windows files in Steam's compatdata folder; the version is the release Turbine Hub last started.
 
 ### My machine
 Capability modules, shown only when the hardware has them:

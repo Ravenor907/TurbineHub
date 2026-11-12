@@ -11,6 +11,7 @@ mod help;
 mod home;
 pub mod launch;
 pub mod machine;
+pub mod nsl;
 pub mod plan;
 mod sample;
 pub mod saves;
@@ -98,6 +99,8 @@ pub struct Ui {
     pub sound_now: String,
     /// Decky Loader's newest release tag, the last one that was found.
     pub decky_tag: Option<String>,
+    /// NonSteamLaunchers' newest release tag, the last one that was found.
+    pub nsl_tag: Option<String>,
     pub steam_running: bool,
     /// Free space where Steam's main library lives.
     pub free_bytes: Option<u64>,
@@ -125,7 +128,7 @@ pub struct Ui {
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
-        Ui { data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -361,3 +364,5 @@ mod tests;
 mod tests_play;
 #[cfg(test)]
 mod tests_background;
+#[cfg(test)]
+mod tests_nsl;

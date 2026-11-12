@@ -133,6 +133,7 @@ fn make_ui() -> Ui {
             sources::seed(list, &ui.cache);
         }
         ui.decky_tag = sources::release_tag(&sources::local(&sources::DECKY_RELEASE, &ui.cache));
+        ui.nsl_tag = sources::release_tag(&sources::local(&sources::NSL_RELEASE, &ui.cache));
         ui.absorb();
         ui.window = !run::in_game_mode();
         return ui;
@@ -156,6 +157,10 @@ fn make_ui() -> Ui {
     }
     if option("no-tool").is_some() {
         ui.sample_without_tool();
+    }
+    // NonSteamLaunchers set up, with two launchers ticked.
+    if option("nsl").is_some() {
+        ui.sample_with_nsl();
     }
     // An app the made-up machine has as well ("--installed=<app id>").
     if let Some(id) = option("installed") {
@@ -245,6 +250,9 @@ impl HubRust {
         }
         if f.decky_tag.is_some() {
             ui.decky_tag = f.decky_tag;
+        }
+        if f.nsl_tag.is_some() {
+            ui.nsl_tag = f.nsl_tag;
         }
         if let Some(v) = f.update {
             ui.update = Some(v).filter(|v| !v.is_empty());

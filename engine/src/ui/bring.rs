@@ -54,7 +54,7 @@ pub(crate) fn hub(ui: &mut Ui) -> Json {
         "note": s(""),
         "columns": n(3.0),
         "cards": arr([
-            card("stores", "bag", "Other stores", "Epic, GOG and Amazon through Heroic. Battle.net, EA, Ubisoft and Rockstar as tiles in your library.", if heroic { "Heroic installed" } else { "Not done yet" }, ui.brought("stores"), ("Add stores", "open", "store|launchers")),
+            card("stores", "bag", "Other stores", "Epic, GOG and Amazon through Heroic. Battle.net, EA, Ubisoft and more through NonSteamLaunchers.", if heroic { "Heroic installed" } else { "Not done yet" }, ui.brought("stores"), ("Add stores", "open", "store|launchers")),
             card("gamepass", "cloud", "Game Pass", pass_line, "Not done yet", xcloud, (if xcloud { "" } else { "Add Xbox Cloud" }, "tile", "xcloud")),
             card("windows", "drive", "Your Windows drive", &win_line, win_status, ui.brought("windows"), (win_button, win_act, win_arg)),
             card("apps", "swap", "Your Windows apps", "Pick the Windows apps you use. Get the SteamOS version of each in one install.", "Not done yet", ui.brought("apps"), ("Pick apps", "open", "winapps")),
@@ -180,12 +180,16 @@ fn installable(a: &bring::AppMap) -> bool {
     match a.becomes {
         Becomes::Flatpak(_) => true,
         Becomes::Tile(t) => store::tile(t).is_some(),
-        Becomes::BuiltIn => false,
+        Becomes::BuiltIn | Becomes::Nsl(_) => false,
     }
 }
 
 fn app_here(ui: &Ui, a: &bring::AppMap) -> bool {
-    matches!(a.becomes, Becomes::Flatpak(id) if store::is_installed(ui, id))
+    match a.becomes {
+        Becomes::Flatpak(id) => store::is_installed(ui, id),
+        Becomes::Nsl(id) => crate::nsl::launcher(id).is_some_and(|x| crate::nsl::launcher_here(&ui.ctx.home, x)),
+        _ => false,
+    }
 }
 
 /// Your Windows apps: each with what it becomes here, ticked when it was found on the Windows drive.
@@ -203,8 +207,14 @@ pub(crate) fn apps(ui: &mut Ui) -> Json {
                 with(with(row("none", "", "info", a.windows, &line), "badge", s("Installed")), "tone", s("ok"))
             } else if installable(a) {
                 with(with(with(row("tick", &format!("winapps|{}", a.id), "check", a.windows, &line), "on", b(picked.contains(a.id))), "badge", s(if on_drive { "On your Windows drive" } else { "" })), "tone", s("muted"))
-            } else if matches!(a.becomes, Becomes::Tile(_)) {
-                with(row("launcher-guide", match a.becomes { Becomes::Tile(t) => t, _ => "" }, "button", a.windows, &line), "button", s("How"))
+            } else if let Becomes::Nsl(id) = a.becomes {
+                // Its page in the Store says how, and what to tick once NonSteamLaunchers is there.
+                let nsl = super::nsl::state(ui);
+                let line = match crate::nsl::launcher(id) {
+                    Some(x) if nsl.installed => format!("{} \u{b7} Open NonSteamLaunchers and tick {}", a.steamos, x.tick),
+                    _ => line,
+                };
+                with(with(with(row("open", "store-item|nsl", "button", a.windows, &line), "button", s("How")), "badge", s(if on_drive { "On your Windows drive" } else { "" })), "tone", s("muted"))
             } else {
                 with(with(row("none", "", "info", a.windows, &line), "badge", s("Built in")), "tone", s("muted"))
             }

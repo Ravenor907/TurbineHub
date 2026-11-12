@@ -10,6 +10,9 @@ use crate::settings::{Mode, Settings};
 use std::fs;
 use std::path::Path;
 
+/// NonSteamLaunchers' newest release on the made-up machine.
+pub const NSL_TAG: &str = "v4.2.94";
+
 /// The made-up handheld of the pictures and tests.
 pub const HANDHELD: Preset = Preset::Handheld;
 
@@ -54,6 +57,14 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("store-item-update", "--page=store-item --arg=com.heroicgameslauncher.hgl --machine=handheld --mode=guided --offline"),
     ("store-item-tile", "--page=store-item --arg=tile:netflix --machine=tv --mode=guided"),
     ("store-item-decky", "--page=store-item --arg=decky --machine=handheld --mode=guided"),
+    ("store-launchers", "--page=store --arg=launchers --machine=handheld --mode=guided"),
+    ("store-launchers-nsl", "--page=store --arg=launchers --machine=handheld --mode=guided --nsl"),
+    ("store-item-nsl", "--page=store-item --arg=nsl --machine=handheld --mode=guided"),
+    ("store-item-nsl-desktop", "--page=store-item --arg=nsl --machine=desktop --mode=guided --window"),
+    ("store-item-nsl-installed", "--page=store-item --arg=nsl --machine=desktop --mode=guided --window --nsl"),
+    ("dialog-nsl", "--page=store-item --arg=nsl --act=nsl:install --machine=desktop --mode=guided --window"),
+    ("dialog-nsl-game-mode", "--page=store-item --arg=nsl --act=nsl:install --machine=handheld --mode=guided"),
+    ("dialog-nsl-plugin", "--page=store-item --arg=nsl --act=nsl-plugin: --machine=desktop --mode=guided --window --nsl"),
     ("machine", "--page=machine --machine=handheld --mode=guided"),
     ("lighting", "--page=module:lighting --machine=handheld --mode=guided"),
     ("power", "--page=module:power --machine=handheld --mode=veteran"),
@@ -238,6 +249,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     }
     ui.updates = vec![super::store::HEROIC.into()];
     ui.decky_tag = Some("v3.1.10".into());
+    ui.nsl_tag = Some(NSL_TAG.into());
     ui.free_bytes = Some(640_000_000_000);
     ui.sound = vec![("speakers".into(), "Speakers".into()), ("headset".into(), "Headset".into()), ("hdmi".into(), "TV over HDMI".into())];
     ui.sound_now = "headset".into();
@@ -268,6 +280,14 @@ impl Ui {
     /// A sample run on a machine where the launch tool was never set up.
     pub fn sample_without_tool(&mut self) {
         let _ = fs::remove_dir_all(crate::compat_tool::tool_dir(&self.ctx.home.join(".local/share/Steam")));
+    }
+    /// A sample run where NonSteamLaunchers was started by Turbine Hub at the newest release, with Battle.net in its
+    /// shared Windows files and the EA app in its own (the places NonSteamLaunchers.sh looks).
+    pub fn sample_with_nsl(&mut self) {
+        let cd = self.ctx.home.join(".local/share/Steam/steamapps/compatdata");
+        w(&cd, "NonSteamLaunchers/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe", "MZ");
+        let _ = fs::create_dir_all(cd.join("TheEAappLauncher/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/13.1"));
+        let _ = crate::nsl::remember(&self.folder(), NSL_TAG);
     }
     /// A sample run as if the internet were gone: the lists were fetched three days ago.
     pub fn sample_offline(&mut self) {

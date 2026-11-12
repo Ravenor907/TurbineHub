@@ -19,6 +19,7 @@ pub mod library;
 pub mod lights;
 pub mod modules;
 pub mod net;
+pub mod nsl;
 pub mod report;
 pub mod saves;
 pub mod selfupdate;

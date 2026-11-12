@@ -71,8 +71,10 @@ pub fn copy_plan(g: &WinGame, steamapps: &Path) -> Vec<(PathBuf, PathBuf)> {
 pub enum Becomes {
     /// The same or an equivalent app from Flathub.
     Flatpak(&'static str),
-    /// A library tile added to Steam (stores and launchers).
+    /// A library tile added to Steam (a cloud service).
     Tile(&'static str),
+    /// A Windows launcher NonSteamLaunchers installs (its id in `crate::nsl::LAUNCHERS`).
+    Nsl(&'static str),
     /// Nothing to install: SteamOS or Steam already does it, or a Turbine Hub switch does.
     BuiltIn,
 }
@@ -106,9 +108,10 @@ pub const APPS: &[AppMap] = &[
     AppMap { id: "edge", windows: "Microsoft Edge", steamos: "Microsoft Edge", note: "Same browser, sign in to sync", becomes: Becomes::Flatpak("com.microsoft.Edge"), found_at: &[] },
     AppMap { id: "epic", windows: "Epic Games Launcher", steamos: "Heroic Games Launcher", note: "Your Epic games in your library", becomes: Becomes::Flatpak("com.heroicgameslauncher.hgl"), found_at: &["Program Files (x86)/Epic Games", "Program Files/Epic Games"] },
     AppMap { id: "gog", windows: "GOG Galaxy", steamos: "Heroic Games Launcher", note: "Your GOG games in your library", becomes: Becomes::Flatpak("com.heroicgameslauncher.hgl"), found_at: &["Program Files (x86)/GOG Galaxy"] },
-    AppMap { id: "battlenet", windows: "Battle.net", steamos: "Battle.net", note: "Added as a library tile", becomes: Becomes::Tile("battlenet"), found_at: &["Program Files (x86)/Battle.net"] },
-    AppMap { id: "ea", windows: "EA app", steamos: "EA app", note: "Added as a library tile", becomes: Becomes::Tile("ea"), found_at: &["Program Files/Electronic Arts/EA Desktop"] },
-    AppMap { id: "ubisoft", windows: "Ubisoft Connect", steamos: "Ubisoft Connect", note: "Added as a library tile", becomes: Becomes::Tile("ubisoft"), found_at: &["Program Files (x86)/Ubisoft/Ubisoft Game Launcher"] },
+    AppMap { id: "battlenet", windows: "Battle.net", steamos: "Battle.net", note: "Through NonSteamLaunchers, in your library", becomes: Becomes::Nsl("battlenet"), found_at: &["Program Files (x86)/Battle.net"] },
+    AppMap { id: "ea", windows: "EA app", steamos: "EA app", note: "Through NonSteamLaunchers, in your library", becomes: Becomes::Nsl("ea"), found_at: &["Program Files/Electronic Arts/EA Desktop"] },
+    AppMap { id: "ubisoft", windows: "Ubisoft Connect", steamos: "Ubisoft Connect", note: "Through NonSteamLaunchers, in your library", becomes: Becomes::Nsl("ubisoft"), found_at: &["Program Files (x86)/Ubisoft/Ubisoft Game Launcher"] },
+    AppMap { id: "rockstar", windows: "Rockstar Games Launcher", steamos: "Rockstar Games Launcher", note: "Through NonSteamLaunchers, in your library", becomes: Becomes::Nsl("rockstar"), found_at: &["Program Files/Rockstar Games/Launcher"] },
     AppMap { id: "moonlight", windows: "Moonlight", steamos: "Moonlight", note: "Same app", becomes: Becomes::Flatpak("com.moonlight_stream.Moonlight"), found_at: &["Program Files/Moonlight Game Streaming"] },
     AppMap { id: "playnite", windows: "Playnite", steamos: "Steam library", note: "Every store's games in one library", becomes: Becomes::BuiltIn, found_at: &["~/AppData/Local/Playnite"] },
 ];
@@ -146,8 +149,10 @@ mod tests {
         for a in APPS {
             assert!(ids.insert(a.id), "{} twice", a.id);
             assert!(!a.windows.is_empty() && !a.steamos.is_empty() && !a.note.is_empty());
-            if let Becomes::Flatpak(id) = a.becomes {
-                assert!(id.split('.').count() >= 3, "{id}");
+            match a.becomes {
+                Becomes::Flatpak(id) => assert!(id.split('.').count() >= 3, "{id}"),
+                Becomes::Nsl(id) => assert!(crate::nsl::launcher(id).is_some(), "{id}"),
+                _ => {}
             }
         }
     }

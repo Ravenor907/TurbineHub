@@ -53,6 +53,9 @@ pub const FIXES: Source = Source {
 /// Decky Loader's newest release, from GitHub's API (the one place that lists it).
 pub const DECKY_RELEASE: Source = Source { name: "decky-release.json", urls: &["https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/latest"], fresh_s: 6 * 3600, bundled: None, valid: has_tag };
 
+/// NonSteamLaunchers' newest release: its tag picks the script Turbine Hub starts (see `nsl`).
+pub const NSL_RELEASE: Source = Source { name: "nsl-release.json", urls: &["https://api.github.com/repos/moraroy/NonSteamLaunchers-On-Steam-Deck/releases/latest"], fresh_s: 6 * 3600, bundled: None, valid: has_tag };
+
 /// The Decky plugin store's list, for telling which installed plugins have a newer version.
 pub const DECKY_PLUGINS: Source = Source { name: "decky-plugins.json", urls: &["https://plugins.deckbrew.xyz/plugins"], fresh_s: DAY, bundled: None, valid: json_array };
 
@@ -300,7 +303,7 @@ mod tests {
         assert_eq!((got.origin, got.words().as_str()), (Origin::Missing, "Offline: not checked yet"));
         assert_eq!(release_tag(r#"{"tag_name":"v3.1.10","name":"x"}"#).as_deref(), Some("v3.1.10"));
         assert!((DECKY_RELEASE.valid)(r#"{"tag_name":"v3.1.10"}"#) && !(DECKY_RELEASE.valid)(r#"{"message":"API rate limit exceeded"}"#));
-        for s in [&DECKY_RELEASE, &DECKY_PLUGINS] {
+        for s in [&DECKY_RELEASE, &DECKY_PLUGINS, &NSL_RELEASE] {
             assert!(s.urls.iter().all(|u| crate::net::allowed_url(u)), "{}", s.name);
         }
     }

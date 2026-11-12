@@ -40,7 +40,7 @@ fn every_page_is_valid_and_plainly_worded() {
     for (preset, mode) in [(HANDHELD, Mode::Guided), (HANDHELD, Mode::Veteran), (Preset::Desktop, Mode::Guided), (Preset::TvPc, Mode::Veteran)] {
         let mut u = ui("pages", preset, mode);
         assert!(parse(&u.state()).is_ok());
-        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "password", "games", "bring", "picks", "steam:1086940", "steam:367520", "steam:1172470", "steam:1245620", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix"] {
+        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "password", "games", "bring", "picks", "steam:1086940", "steam:367520", "steam:1172470", "steam:1245620", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix", "nsl"] {
             for p in PAGES {
                 let text = u.page(p, sections);
                 let j = parse(&text).unwrap_or_else(|e| panic!("{p} {sections}: {e}"));

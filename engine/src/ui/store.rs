@@ -1,7 +1,7 @@
 //! Store: what Turbine Hub offers to install, by section, with each thing's state on this machine, a search over
 //! all of it, and a page per thing (what it is, where it comes from, its size and version, install, update,
-//! remove). Apps come from Flathub through the host's flatpak, Decky Loader through the helper, and TV and cloud
-//! services become library tiles.
+//! remove). Apps come from Flathub through the host's flatpak, Decky Loader through the helper, NonSteamLaunchers
+//! from its own script (ui/nsl.rs), and TV and cloud services become library tiles.
 use super::games::{matches, query, search_box};
 use super::plan::{Plan, Step, dialog, guide, helper_plan, toast, with_helper};
 use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
@@ -87,9 +87,6 @@ pub const TILES: &[Tile] = &[
     Tile { id: "twitch", name: "Twitch", url: "https://www.twitch.tv", line: "Live streams" },
     Tile { id: "plex", name: "Plex", url: "https://app.plex.tv", line: "Your own films and series" },
 ];
-
-/// Windows launchers that need NonSteamLaunchers.
-const NSL: &[(&str, &str)] = &[("battlenet", "Battle.net"), ("ea", "EA app"), ("ubisoft", "Ubisoft Connect"), ("rockstar", "Rockstar Games Launcher")];
 
 const SECTIONS: &[(&str, &str, &str)] = &[
     ("essentials", "Essentials", "The few things nearly everyone wants."),
@@ -192,11 +189,7 @@ fn decky_row(ui: &Ui) -> Json {
     with(with(row("open", "store-item|decky", "button", "Decky Loader", DECKY_LINE), "badge", s(if has { "Installed" } else { "" })), "tone", s("ok"))
 }
 
-fn launcher_row(id: &str, name: &str) -> Json {
-    with(row("launcher-guide", id, "button", name, "Installs through NonSteamLaunchers"), "button", s("How"))
-}
-
-fn decky_installed(ui: &Ui) -> bool {
+pub(crate) fn decky_installed(ui: &Ui) -> bool {
     ui.ctx.home.join("homebrew/services/PluginLoader").exists()
 }
 
@@ -223,7 +216,11 @@ fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
                 out.extend(plugins(ui).iter().map(|p| row("none", "", "info", p, "Plugin")));
             }
         }
-        "launchers" => out.extend(NSL.iter().map(|(id, name)| launcher_row(id, name))),
+        "launchers" => {
+            // NonSteamLaunchers and the Windows launchers it installs, each leading to its page (ui/nsl.rs).
+            out.push(super::nsl::store_row(ui));
+            out.extend(super::nsl::launcher_rows(ui));
+        }
         "tv" => out.extend(TILES.iter().map(|t| tile_row(ui, t))),
         "emulation" => out.push(row("none", "", "info", "EmuDeck", "Installs from emudeck.com in Desktop Mode. RetroDECK above needs no setup outside the app.")),
         "installed" => {
@@ -232,6 +229,9 @@ fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
                 out.push(decky_row(ui));
             }
             out.extend(TILES.iter().filter(|t| tile_added(ui, t)).map(|t| tile_row(ui, t)));
+            if super::nsl::state(ui).installed {
+                out.push(super::nsl::store_row(ui));
+            }
         }
         _ => {}
     }
@@ -255,8 +255,10 @@ fn found(ui: &Ui, q: &str) -> Vec<Json> {
     }
     put("Decky Loader", &format!("{DECKY_LINE} plugins"), decky_row(ui));
     put(PANEL_TITLE, "Decky plugin quick menu readings switches", panel_row(ui));
-    for (id, name) in NSL {
-        put(name, "launcher NonSteamLaunchers", launcher_row(id, name));
+    put(super::nsl::NAME, &format!("{} {}", super::nsl::LINE, super::nsl::WORDS), super::nsl::store_row(ui));
+    let nsl = super::nsl::state(ui);
+    for x in crate::nsl::LAUNCHERS {
+        put(x.name, &format!("{} launcher NonSteamLaunchers nsl", x.tick), super::nsl::launcher_row(ui, &nsl, x));
     }
     for t in TILES {
         put(t.name, &format!("{} tile streaming", t.line), tile_row(ui, t));
@@ -380,8 +382,11 @@ fn missing_item() -> Json {
 }
 
 /// One thing's own page: what it is, where it comes from, its size and version when known, and install, update or
-/// remove. `arg` is an app's id, "decky", or "tile:<id>".
+/// remove. `arg` is an app's id, "decky", "nsl" (NonSteamLaunchers, in ui/nsl.rs) or "tile:<id>".
 pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
+    if arg == "nsl" {
+        return super::nsl::item(ui);
+    }
     if arg == "decky" {
         let has = decky_installed(ui);
         let action = with(with(row("decky", "", "button", if has { "Repair or update" } else { "Install" }, if has { "Installs the newest release again, over the one that is here" } else { "Asks for your SteamOS password once" }), "icon", s(if has { "refresh" } else { "download" })), "button", s(if has { "Repair" } else { "Install" }));
@@ -570,10 +575,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 items.insert(0, ("First", "Install Decky Loader: its row here in Store, Decky plugins."));
             }
             Some(guide("Get the Turbine Hub quick panel", "The quick panel puts Turbine Hub's readings and the running game's switches into Steam's quick menu. It isn't in Decky's own store, so Decky Loader installs it from an address: Turbine Hub's newest release. That takes a switch in Decky's settings and typing one address, a few minutes once.", &items))
-        }
-        "launcher-guide" => {
-            let (_, name) = NSL.iter().find(|(id, _)| *id == arg)?;
-            Some(guide(&format!("{name} on SteamOS"), "Windows launchers install through NonSteamLaunchers, a Decky plugin. Each one becomes a tile in your library.", &[("1", "Install Decky Loader: Store, Decky plugins."), ("2", "Open Steam's quick menu, the plug icon, then the store icon."), ("3", "Install NonSteamLaunchers and pick the launcher there.")]))
         }
         "decky" => {
             let Some(tag) = ui.decky_tag.clone() else { return Some(toast("Couldn't reach GitHub to find Decky Loader's newest release. Try again in a moment.")) };

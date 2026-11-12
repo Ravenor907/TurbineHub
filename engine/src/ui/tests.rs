@@ -200,7 +200,18 @@ fn switches_file_round_trips_and_drops_unknown_words() {
 
 #[test]
 fn library_check_counts_orders_filters_and_fixes() {
-    let mut u = ui("library", HANDHELD, Mode::Guided);
+    // The handheld's Radeon 890M can't run FSR 4: a fix that is only that switch isn't offered, nor the switch.
+    let mut h = ui("library-h", HANDHELD, Mode::Veteran);
+    let j = parse(&h.page("library", "")).unwrap();
+    let tiles: Vec<&str> = j.get("tiles").unwrap().as_array().iter().map(|t| t.str_at("value").unwrap()).collect();
+    assert_eq!(tiles, vec!["6", "0", "1", "1"]);
+    assert!(j.get("primary").unwrap() == &Json::Null);
+    assert!(rows(&parse(&h.page("games", "steam:1091500")).unwrap()).iter().all(|r| r.str_at("arg") != Some("steam:1091500|fsr4")));
+    assert!(parse(&h.act("switch", "steam:1091500|fsr4", "")).unwrap().str_at("toast").unwrap().contains("RX 9000"));
+    assert!(parse(&h.page("home", "")).unwrap().to_text().find("fsr4all").is_none());
+    done("library-h");
+    // The desktop's RX 9070 XT runs it.
+    let mut u = ui("library", Preset::Desktop, Mode::Guided);
     let j = parse(&u.page("library", "")).unwrap();
     let tiles: Vec<&str> = j.get("tiles").unwrap().as_array().iter().map(|t| t.str_at("value").unwrap()).collect();
     assert_eq!(tiles, vec!["5", "1", "1", "1"]);
@@ -224,7 +235,12 @@ fn system_changes_ask_first_and_install_the_helper_once() {
     let mut u = ui("plan", HANDHELD, Mode::Guided);
     let j = parse(&u.act("tuneup", "all", "")).unwrap();
     let d = j.get("dialog").unwrap();
-    assert_eq!((d.str_at("title"), d.str_at("ask"), d.str_at("confirm")), (Some("Turn on the tune-up?"), Some("current"), Some("Turn on")));
+    assert_eq!((d.str_at("title"), d.str_at("ask"), d.str_at("confirm")), (Some("Turn on 5 tune-up items?"), Some("current"), Some("Turn on")));
+    // Only what changes is listed, the restart one says so, and Guided mode shows no keys.
+    let items = d.get("items").unwrap().as_array();
+    assert_eq!(items.len(), 6);
+    assert!(items.iter().any(|i| i.str_at("line").unwrap().ends_with("Takes effect at the next restart.")));
+    assert!(items.iter().all(|i| !i.str_at("title").unwrap().contains("vm.") && !i.str_at("line").unwrap().contains("vm.")));
     let plan = u.confirm().unwrap();
     assert_eq!(plan.steps[0], Step::HelperInstall);
     assert!(plan.helper_jobs() >= 5);
@@ -242,11 +258,16 @@ fn system_changes_ask_first_and_install_the_helper_once() {
     parse(&u.act("tuneup", "swap", "")).unwrap();
     let plan = u.confirm().unwrap();
     assert_eq!(plan.steps.iter().map(|x| match x { Step::Host(c) => c[4..].join(" "), _ => String::new() }).collect::<Vec<_>>(), vec!["undo {\"id\":2}", "undo {\"id\":1}"]);
-    // Without a password on the machine the player is sent to set one.
-    let mut n = ui("plan", HANDHELD, Mode::Guided);
-    n.facts.has_password = Some(false);
-    let j = parse(&n.act("tuneup", "all", "")).unwrap();
-    assert!(j.get("dialog").is_none() && j.str_at("open") == Some("password"));
+    // Without a password on the machine the same dialog sets one first, in either mode, then uses it for the helper.
+    for mode in [Mode::Guided, Mode::Veteran] {
+        let mut n = ui("plan", HANDHELD, mode);
+        n.facts.has_password = Some(false);
+        let j = parse(&n.act("tuneup", "all", "")).unwrap();
+        assert_eq!(j.get("dialog").unwrap().str_at("ask"), Some("new"));
+        assert!(j.get("open").is_none());
+        let plan = n.confirm().unwrap();
+        assert_eq!(plan.steps[..3], [Step::SetPassword, Step::Done { setup: Some("password"), brought: None }, Step::HelperInstall]);
+    }
     done("plan");
 }
 
@@ -418,7 +439,13 @@ fn settings_change_the_file_and_stay_in_range() {
     let secs = page.get("sections").unwrap().as_array();
     let all: Vec<Json> = secs[0].get("rows").unwrap().as_array().to_vec();
     assert_eq!(all.len(), 4);
-    assert_eq!((all[0].str_at("arg"), all[0].str_at("title")), (Some("4"), Some("Battery stops charging at 80%")));
+    assert_eq!((all[0].str_at("arg"), all[0].str_at("title")), (Some("4"), Some("Battery charge limit: 80%")));
+    // Each row says what Undo puts back, from the record.
+    assert!(all[0].str_at("line").unwrap().starts_with("Undo puts back "), "{:?}", all[0].str_at("line"));
+    for r in &all {
+        let t = r.str_at("title").unwrap();
+        assert!(!t.contains('_') && !t.contains("vm.") && !t.contains("current_value"), "{t}");
+    }
     parse(&u.act("undo", "4", "")).unwrap();
     assert!(matches!(&u.confirm().unwrap().steps[1], Step::Host(c) if c.last().unwrap() == "{\"id\":4}"));
     done("settings");
@@ -471,6 +498,106 @@ fn windows_files_reset_keeps_a_backup() {
     let name = reset_windows_files(&pfx, 5).unwrap();
     assert!(!pfx.exists() && d.join("compatdata/1").join(name).join("user.reg").exists());
     let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn windows_files_reset_asks_carefully_and_undoes() {
+    let mut u = ui("reset-undo", HANDHELD, Mode::Guided);
+    let game = super::games::listed(&u).into_iter().find(|l| l.game.prefix.is_some() && !l.locked() && l.verdict.label != crate::library::Label::WontRun).unwrap();
+    let id = format!("steam:{}", game.game.store_id);
+    let pfx = game.game.prefix.clone().unwrap();
+    std::fs::write(pfx.join("saves.dat"), "old").unwrap();
+    let j = parse(&u.act("game", &format!("reset|{id}"), "")).unwrap();
+    let d = j.get("dialog").unwrap();
+    assert_eq!(d.get("danger").and_then(Json::as_bool), Some(true));
+    assert!(d.str_at("text").unwrap().contains("Undo"));
+    let plan = u.confirm().unwrap();
+    let step = plan.steps.last().unwrap().clone();
+    assert!(matches!(&step, Step::ResetPrefix { app_id, .. } if *app_id == game.game.store_id));
+    super::games::reset_step(&step, &u.folder(), 7).unwrap().unwrap();
+    assert!(!pfx.exists());
+    // The game's page now offers Undo, even though its Windows files are gone until its next start.
+    let page = parse(&u.page("games", &id)).unwrap();
+    assert!(rows(&page).iter().any(|r| r.str_at("arg") == Some(format!("reset-undo|{id}").as_str())));
+    // The game made fresh files since: Undo keeps them aside and puts the old ones back, saves and all.
+    std::fs::create_dir_all(&pfx).unwrap();
+    std::fs::write(pfx.join("saves.dat"), "fresh").unwrap();
+    parse(&u.act("game", &format!("reset-undo|{id}"), "")).unwrap();
+    let plan = u.confirm().unwrap();
+    super::games::reset_step(plan.steps.last().unwrap(), &u.folder(), 9).unwrap().unwrap();
+    assert_eq!(std::fs::read_to_string(pfx.join("saves.dat")).unwrap(), "old");
+    assert_eq!(std::fs::read_to_string(pfx.with_file_name("pfx.turbinehub-fresh-9").join("saves.dat")).unwrap(), "fresh");
+    assert!(rows(&parse(&u.page("games", &id)).unwrap()).iter().all(|r| r.str_at("arg") != Some(format!("reset-undo|{id}").as_str())));
+    done("reset-undo");
+}
+
+#[test]
+fn system_dialogs_show_plain_names_and_before_and_after() {
+    let mut g = ui("words", HANDHELD, Mode::Guided);
+    install_helper_in(&g);
+    // The power limit is one line; the boost limits that come down with it say so.
+    let d = parse(&g.act("tdp", "", "20")).unwrap();
+    let items: Vec<(String, String)> = d.get("dialog").unwrap().get("items").unwrap().as_array().iter().map(|i| (i.str_at("title").unwrap().to_string(), i.str_at("line").unwrap().to_string())).collect();
+    assert_eq!(items[0].0, "Power limit: 17 W \u{2192} 20 W");
+    assert_eq!(items[1].0, "Boost limits lowered too: 25 W and 30 W \u{2192} 20 W");
+    assert!(items.iter().all(|(t, l)| !t.contains("current_value") && !l.contains("current_value")));
+    g.cancel();
+    // A value that is set already asks nothing.
+    assert_eq!(parse(&g.act("charge", "", "2")).unwrap().str_at("toast"), Some("That's already set."));
+    let d = parse(&g.act("charge", "", "4")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("title"), Some("Battery charge limit: 80% \u{2192} 100%"));
+    g.cancel();
+    // A built-in controller is never plugged in again: only the next start counts.
+    let d = parse(&g.act("wake", "045e:028e", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().str_at("text"), Some("It takes effect the next time the machine starts."));
+    g.cancel();
+    // Veteran mode adds the exact key and the raw values.
+    let mut v = ui("words-v", HANDHELD, Mode::Veteran);
+    install_helper_in(&v);
+    let d = parse(&v.act("tdp", "", "20")).unwrap();
+    assert!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("line").unwrap().ends_with("ppt_pl1_spl/current_value: 17 \u{2192} 20"));
+    v.cancel();
+    // Graphics card limits in watts.
+    let mut p = ui("words-pc", Preset::Desktop, Mode::Guided);
+    install_helper_in(&p);
+    let d = parse(&p.act("gpu-power", "", "250")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("title"), Some("Graphics card power limit: 304 W \u{2192} 250 W"));
+    p.cancel();
+    // One-press settings ask once, and change only when confirmed.
+    for (act, title) in [("reports", "Send problem reports?"), ("testbuilds", "Get test builds?")] {
+        let d = parse(&g.act(act, "", "")).unwrap();
+        assert_eq!(d.get("dialog").unwrap().str_at("title"), Some(title));
+        assert_eq!(g.confirm().unwrap().steps, vec![Step::Choice { key: if act == "reports" { "reports" } else { "testbuilds" }, on: true }]);
+    }
+    let st = g.settings();
+    assert!(!st.reports && !st.test_builds);
+    // The living room PC is called that everywhere.
+    let tv = ui("words-tv", Preset::TvPc, Mode::Guided);
+    assert_eq!(tv.machine().name(), "Living room PC");
+    done("words");
+    done("words-v");
+    done("words-pc");
+    done("words-tv");
+}
+
+#[test]
+fn tick_all_never_turns_on_ssh() {
+    let mut u = ui("ssh", HANDHELD, Mode::Veteran);
+    u.page("quick", "");
+    u.act("tick-all", "quick", "");
+    let picked = u.picked.get("quick").cloned().unwrap_or_default();
+    assert!(!picked.is_empty() && !picked.contains("ssh"));
+    // Ticked by hand, it stays ticked through Tick all.
+    u.picked.get_mut("quick").unwrap().remove("library");
+    u.act("tick", "quick|ssh", "");
+    u.act("tick-all", "quick", "");
+    assert!(u.picked.get("quick").unwrap().contains("ssh"));
+    done("ssh");
+}
+
+fn install_helper_in(u: &Ui) {
+    std::fs::create_dir_all(u.ctx.root.join("var/lib/turbinehub/bin")).unwrap();
+    std::fs::write(u.ctx.root.join(crate::helper::BIN.trim_start_matches('/')), "").unwrap();
 }
 
 #[test]

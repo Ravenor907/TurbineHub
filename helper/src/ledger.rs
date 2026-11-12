@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(l.find_key("sysctl:vm.swappiness").unwrap().before("value"), Some("60"));
         let back = Ledger::parse(&l.to_text()).unwrap();
         assert_eq!(back, l);
-        assert!(l.to_text().contains("\"words\":\"Kernel setting vm.swappiness set to 150\""));
+        assert!(l.to_text().contains("\"words\":\"Compressed memory use set to 150\""));
         let mut l = back;
         assert_eq!(l.remove(1).unwrap().id, 1);
         assert_eq!(l.record(s(r#"{"kind":"module","name":"ntsync"}"#), vec![], 13, ""), 3);

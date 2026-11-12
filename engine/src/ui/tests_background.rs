@@ -50,6 +50,9 @@ fn the_background_helper_is_a_switch_with_its_exact_steps() {
     // On: the press offers to turn it off, with the commands that do.
     let j = parse(&u.act("agent", "", "")).unwrap();
     assert_eq!(j.get("dialog").unwrap().str_at("title"), Some("Turn the background helper off?"));
+    // Cancel is the highlighted button, and Guided mode shows no file path.
+    assert_eq!(j.get("dialog").unwrap().get("danger").and_then(Json::as_bool), Some(true));
+    assert!(!j.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("line").unwrap().contains('/'));
     let plan = u.confirm().unwrap();
     assert_eq!((plan.ask, plan.steps.clone()), (Ask::None, agent::turn_off(&u.ctx.home)));
     // Off: it turns on by writing its unit into the player's own folder, never with a password.
@@ -60,7 +63,9 @@ fn the_background_helper_is_a_switch_with_its_exact_steps() {
     let j = parse(&u.act("agent", "", "")).unwrap();
     let d = j.get("dialog").unwrap();
     assert_eq!((d.str_at("title"), d.str_at("ask"), d.str_at("confirm")), (Some("Turn the background helper on?"), Some(""), Some("Turn on")));
-    assert!(d.get("items").unwrap().as_array()[0].str_at("line").unwrap().ends_with(".config/systemd/user/turbinehub-agent.service"));
+    // The unit's path only in Veteran mode.
+    let line = d.get("items").unwrap().as_array()[0].str_at("line").unwrap().to_string();
+    assert_eq!(line.ends_with(".config/systemd/user/turbinehub-agent.service"), u.veteran(), "{line}");
     let plan = u.confirm().unwrap();
     assert_eq!(plan.steps, agent::turn_on(&u.ctx.home));
     assert!(matches!(&plan.steps[1], Step::HostWrite { value, .. } if value.contains("--agent")));
@@ -84,7 +89,15 @@ fn the_background_helper_is_a_switch_with_its_exact_steps() {
     u.agent_on = Some(true);
     u.act("remove-app", "", "");
     let plan = u.confirm().unwrap();
-    assert_eq!(plan.steps[..3], agent::turn_off(&u.ctx.home)[..]);
+    let off = agent::turn_off(&u.ctx.home);
+    let at = plan.steps.iter().position(|x| *x == off[0]).unwrap();
+    assert_eq!(plan.steps[at..at + 3], off[..]);
+    // The launch tool goes first (it stops everything while a game still uses it), the recorded changes are undone
+    // (with the helper set up once more when it isn't there) and the app goes last.
+    assert_eq!(plan.steps[..2], [Step::HelperInstall, Step::Tool { install: false }]);
+    assert!(plan.steps.iter().any(|x| matches!(x, Step::Host(c) if c.last().unwrap() == "uninstall")));
+    assert!(matches!(plan.steps.last(), Some(Step::Host(c)) if c.contains(&"--delete-data".to_string())));
+    assert!(plan.danger);
     done("switch");
 }
 
@@ -245,7 +258,17 @@ fn game_boost_says_what_it_still_needs() {
     // No privileged helper yet: turning Game Boost on offers to set it up, with the one password.
     let j = parse(&u.act("boost", "", "")).unwrap();
     assert_eq!(j.get("dialog").unwrap().str_at("ask"), Some("current"));
-    assert_eq!(u.confirm().unwrap().steps, vec![Step::HelperInstall]);
+    // Cancelled: it stays off.
+    u.cancel();
+    assert!(!u.settings().game_boost);
+    parse(&u.act("boost", "", "")).unwrap();
+    let plan = u.confirm().unwrap();
+    assert_eq!(plan.steps, vec![Step::HelperInstall, Step::Choice { key: "boost", on: true }]);
+    // Only once the dialog's steps worked does it turn on (the app does the last step).
+    assert!(!u.settings().game_boost);
+    let mut st = u.settings();
+    super::plan::set_choice(&mut st, "boost", true);
+    u.save(&st);
     assert!(u.settings().game_boost);
     assert_eq!(row_titled(&parse(&u.page("module:power", "")).unwrap(), "Game Boost").str_at("badge"), Some("Not active yet"));
     // Off again needs nothing.

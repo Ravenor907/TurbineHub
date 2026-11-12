@@ -142,24 +142,6 @@ fn agent_row(ui: &Ui) -> Json {
     with(with(with(row("agent", "", "toggle", "Background helper", "Game Boost, moving lights, battery and sleep history and save snapshots while you play"), "on", b(on)), "badge", s(badge)), "tone", s(tone))
 }
 
-/// A recorded change in the words a player uses: the settings Turbine Hub's own controls make are named after the
-/// control, everything else keeps the helper's words.
-pub fn change_words(c: &Change) -> String {
-    if let Change::Set(Setting::Sysfs { path, value }) = c {
-        let file = path.rsplit('/').next().unwrap_or("");
-        if file == "charge_control_end_threshold" {
-            return format!("Battery stops charging at {value}%");
-        }
-        if path.contains("/ppt_pl") {
-            return format!("Power limit set to {value} W");
-        }
-        if file == "power1_cap" {
-            return format!("Graphics power limit set to {} W", value.parse::<u64>().map(|v| (v + 500_000) / 1_000_000).unwrap_or(0));
-        }
-    }
-    c.words()
-}
-
 /// The changes Turbine Hub makes in the player's own folders, without the password: the launch tool, Proton picks,
 /// game switches, library tiles, the background helper's start-up entry and the apps its Store installed. Each row
 /// undoes it, or opens the page where it is undone.
@@ -205,12 +187,22 @@ fn own_changes(ui: &Ui) -> Vec<Json> {
     out
 }
 
-/// Review changes: every system change, newest first, each with Undo; then what Turbine Hub changed in the
+/// Review changes: every system change, newest first, each with what Undo puts back and its Undo button; then what Turbine Hub changed in the
 /// player's own folders, each with its Undo or the page where it is undone.
 pub(crate) fn changes(ui: &mut Ui) -> Json {
     let ledger = ui.ledger();
     let now = crate::now();
-    let rows: Vec<Json> = ledger.entries.iter().rev().map(|e| with(with(row("undo", &e.id.to_string(), "button", &change_words(&e.change), &format!("{} ago, on SteamOS {}", ago(now, e.applied), e.steamos)), "button", s("Undo")), "icon", s("restore"))).collect();
+    let rows: Vec<Json> = ledger
+        .entries
+        .iter()
+        .rev()
+        .map(|e| {
+            let u = super::plan::undone(ui, e);
+            let exact = if u.exact.is_empty() { String::new() } else { format!(" ({})", u.exact) };
+            let line = format!("Undo puts back {}{exact}. {} ago, on SteamOS {}", u.back, ago(now, e.applied), e.steamos);
+            with(with(row("undo", &e.id.to_string(), "button", &format!("{}: {}", u.name, u.now), &line), "button", s("Undo")), "icon", s("restore"))
+        })
+        .collect();
     let any = !rows.is_empty();
     let own = own_changes(ui);
     let mut sections = Vec::new();
@@ -259,24 +251,41 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             state()
         }
         "testbuilds" => {
-            st.test_builds = !st.test_builds;
-            refresh()
+            let on = !st.test_builds;
+            let mut p = if on {
+                Plan::new("Get test builds?", "Updates then include builds before they are released. They get new things first and can have rough edges. Turning this off goes back to released builds with the next update.", "Turn on")
+            } else {
+                Plan::new("Stop test builds?", "Updates offer released builds only again. The build you have now stays until the next released one.", "Turn off")
+            };
+            p.steps.push(Step::Choice { key: "testbuilds", on });
+            p.done = if on { "Test builds on" } else { "Test builds off" }.into();
+            return Some(dialog(ui, p));
         }
         "reports" => {
-            st.reports = !st.reports;
-            refresh()
+            let on = !st.reports;
+            let mut p = if on {
+                Plan::new("Send problem reports?", "When something goes wrong, Turbine Hub may send a short report so it can be fixed: what failed, its version and the kind of machine. Reports never hold names, addresses or keys.", "Turn on")
+            } else {
+                Plan::new("Stop problem reports?", "Turbine Hub sends nothing. Reports you write yourself from a game's page stay on this machine.", "Turn off")
+            };
+            p.steps.push(Step::Choice { key: "reports", on });
+            p.done = if on { "Problem reports on" } else { "Problem reports off" }.into();
+            return Some(dialog(ui, p));
         }
         "agent" => {
             let home = ui.ctx.home.clone();
+            let veteran = ui.veteran();
+            let unit = |words: &str| if veteran { crate::agent::unit_file(&home).to_string_lossy().into_owned() } else { words.to_string() };
             let p = if ui.agent_running() {
                 let mut p = Plan::new("Turn the background helper off?", "Game Boost, moving lights, battery and sleep history and save snapshots stop. What it wrote down so far stays.", "Turn off");
-                p.items.push(("Stop it and remove its start-up entry".into(), crate::agent::unit_file(&home).to_string_lossy().into_owned()));
+                p.danger = true;
+                p.items.push(("Stop it and remove its start-up entry".into(), unit("It no longer starts with this machine. Turn it on here again at any time.")));
                 p.steps = crate::agent::turn_off(&home);
                 p.done = "Background helper off".into();
                 p
             } else {
                 let mut p = Plan::new("Turn the background helper on?", "Turbine Hub keeps running without a window, from the moment this machine starts. It needs no password and changes nothing by itself.", "Turn on");
-                p.items.push(("Add a start-up entry in your own folder".into(), crate::agent::unit_file(&home).to_string_lossy().into_owned()));
+                p.items.push(("Add a start-up entry in your own folder".into(), unit("A small file in your home folder, no password needed.")));
                 p.items.push(("Start it now and with every start".into(), "Turn it off here at any time.".into()));
                 p.steps = crate::agent::turn_on(&home);
                 p.done = "Background helper on".into();
@@ -305,7 +314,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let ledger = ui.ledger();
             let e = ledger.entries.iter().find(|e| e.id == id)?;
             let mut p = Plan::new("Undo this change?", "Turbine Hub puts back what was there before.", "Undo");
-            p.items.push((change_words(&e.change), String::new()));
+            p.items.push(super::plan::undo_item(ui, e));
             p.steps.push(Step::Host(helper::undo(id)));
             p.done = "Change undone".into();
             return Some(with_helper(ui, p));
@@ -317,7 +326,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             }
             let mut p = Plan::new("Undo everything?", "Every system change Turbine Hub made goes back to what was there before, newest first.", "Undo all");
             p.danger = true;
-            p.items = ledger.entries.iter().rev().map(|e| (change_words(&e.change), String::new())).collect();
+            p.items = ledger.entries.iter().rev().map(|e| super::plan::undo_item(ui, e)).collect();
             p.steps.push(Step::Host(helper::job("undo-all", None)));
             p.done = "Everything is back the way it was".into();
             return Some(with_helper(ui, p));
@@ -344,7 +353,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 Ok((settings, apps)) => {
                     let count = settings.len() + apps.len();
                     let mut p = Plan::new("Apply my setup file?", "Turbine Hub saves the current settings first. Every change can be undone in Review changes.", &format!("Apply {count} changes"));
-                    p.items = settings.iter().map(|x| (x.words(), String::new())).chain(apps.iter().map(|a| (a.name.to_string(), "From Flathub".to_string()))).collect();
+                    p.items = settings.iter().map(|x| super::plan::change_item(ui, x)).chain(apps.iter().map(|a| (a.name.to_string(), if ui.veteran() { format!("From Flathub: {}", a.id) } else { "From Flathub".to_string() }))).collect();
                     p.steps = apps.iter().map(|a| super::store::install_step(a.id)).collect();
                     p.done = "Setup applied".into();
                     if settings.is_empty() { dialog(ui, p) } else { helper_plan(ui, p, &settings) }
@@ -352,20 +361,60 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             });
         }
         "remove-app" => {
-            let mut p = Plan::new("Remove Turbine Hub completely?", "Every system change is undone, the helper and its files go, then the app itself. Your games, saves and Store apps stay.", "Remove");
+            let veteran = ui.veteran();
+            let home = ui.ctx.home.clone();
+            let snapshots = crate::snapshots::root(&ui.data);
+            let keep = snapshots.is_dir() && std::fs::read_dir(&snapshots).is_ok_and(|mut d| d.next().is_some());
+            let mut p = Plan::new(
+                "Remove Turbine Hub completely?",
+                if keep {
+                    "Every system change is undone, then Turbine Hub's helper, its launch tool, its library entry and the app with its settings go. Your games, their saves and your Store apps stay. The save snapshots are moved to your home folder first."
+                } else {
+                    "Every system change is undone, then Turbine Hub's helper, its launch tool, its library entry and the app with its settings go. Your games, their saves and your Store apps stay."
+                },
+                "Remove",
+            );
             p.danger = true;
+            // The launch tool first: Steam can't start a game whose tool is gone, so this stops here, before
+            // anything changes, while a game still uses it.
+            let tv = super::launch::tool_view(ui);
+            if tv.state != crate::compat_tool::State::Missing
+                && let Some(r) = &tv.steam_root
+            {
+                p.items.push(("Take out the launch tool".into(), if veteran { crate::compat_tool::tool_dir(r).to_string_lossy().into_owned() } else { "Games set to use it in Steam need another tool first.".into() }));
+                p.steps.push(Step::Tool { install: false });
+            }
+            match super::selftile::state(&home) {
+                super::selftile::State::Added { ours: true, .. } if !ui.steam_running => {
+                    p.items.push(("Take Turbine Hub out of your library".into(), "With its pictures. A backup of Steam's list is kept first.".into()));
+                    p.steps.push(Step::SelfTile { add: false });
+                }
+                super::selftile::State::Added { .. } => p.items.push(("Its library entry stays".into(), "Remove it in Steam: its options, Manage, Remove non-Steam game.".into())),
+                super::selftile::State::Missing => {}
+            }
             if ui.agent_on == Some(true) {
                 p.items.push(("Turn off the background helper".into(), String::new()));
-                p.steps.extend(crate::agent::turn_off(&ui.ctx.home));
+                p.steps.extend(crate::agent::turn_off(&home));
             }
-            if helper::installed(&ui.ctx.root) {
-                p.items.push(("Undo every system change and remove the helper".into(), String::new()));
+            let recorded = !ui.ledger().entries.is_empty();
+            let helper_there = helper::installed(&ui.ctx.root);
+            if helper_there || recorded {
+                p.items.push(("Undo every system change and remove the helper".into(), if veteran { "turbinehub-helper uninstall".into() } else { String::new() }));
                 p.steps.push(Step::Host(helper::job("uninstall", None)));
             }
-            p.items.push(("Remove the app and its settings".into(), String::new()));
+            if keep {
+                let mut to = home.join("Turbine Hub save snapshots");
+                if to.exists() {
+                    to = home.join(format!("Turbine Hub save snapshots {}", crate::now()));
+                }
+                p.items.push(("Move the save snapshots to your home folder".into(), if veteran { to.to_string_lossy().into_owned() } else { format!("Into a folder named \"{}\"", to.file_name().and_then(|n| n.to_str()).unwrap_or("")) }));
+                p.steps.push(Step::Host(host(&["mv", "-T", "--", &snapshots.to_string_lossy(), &to.to_string_lossy()])));
+            }
+            p.items.push(("Remove the app and its settings".into(), if veteran { format!("flatpak uninstall --delete-data {FLATPAK_ID}") } else { "Its settings, its activity list and its saved setup file go with it.".into() }));
             p.steps.push(Step::Host(host(&["flatpak", "uninstall", "-y", "--noninteractive", "--delete-data", FLATPAK_ID])));
             p.done = "Turbine Hub is removed".into();
-            return Some(dialog(ui, p));
+            // Changes recorded without the helper there need it once more to be undone.
+            return Some(if recorded && !helper_there { with_helper(ui, p) } else { dialog(ui, p) });
         }
         "update-app" => {
             let v = ui.update.clone()?;

@@ -100,7 +100,7 @@ fn steam_open_guide(adding: bool) -> Json {
                 ("2", "Quit Steam there: its icon by the clock, Exit Steam."),
                 ("3", "Open Turbine Hub from the app menu, go to Settings and press Add again."),
                 ("4", "Start Steam again, or go back to Game Mode. Turbine Hub is in your library under Non-Steam."),
-                ("Or", "In Steam on the desktop: Games, Add a Non-Steam Game, tick Turbine Hub. Fix art here then adds its pictures."),
+                ("Or", "In Steam on the desktop: Games, Add a Non-Steam Game, tick Turbine Hub. Then press Fix art here to add its pictures."),
             ],
         )
     } else {
@@ -122,7 +122,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             let Some(file) = shortcuts::tile_file(&ui.ctx.home) else { return Some(toast("Steam hasn't been signed in to on this machine yet. Start Steam once and sign in.")) };
             let mut p = Plan::new("Add Turbine Hub to your library?", "Turbine Hub adds itself to Steam's list of non-Steam games, with its own art, so it opens from Game Mode like a game. A backup of the list is kept first.", "Add");
             p.items.push(("Turbine Hub".into(), "Under Non-Steam in your library, after Steam's next start".into()));
-            p.items.push(("Steam's list of non-Steam games".into(), file.to_string_lossy().into_owned()));
+            p.items.push(("Steam's list of non-Steam games".into(), if ui.veteran() { file.to_string_lossy().into_owned() } else { "A backup of it is kept first".into() }));
             p.items.push(("Its pictures".into(), "Cover, banner, background, logo and icon. Pictures you picked yourself are never replaced.".into()));
             p.steps.push(Step::SelfTile { add: true });
             p.done = "Turbine Hub added. It shows after Steam starts again.".into();

@@ -147,6 +147,8 @@ pub struct WakeDevice {
     pub product: String,
     pub name: String,
     pub enabled: bool,
+    /// Wired inside the case (a built-in controller or keyboard): the kernel calls its port fixed.
+    pub built_in: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -432,6 +434,7 @@ impl Machine {
                     product: t.text(&format!("{d}/idProduct")),
                     name: t.text(&format!("{d}/product")),
                     enabled: state == "enabled",
+                    built_in: t.text(&format!("{d}/removable")) == "fixed",
                 })
             })
             .collect();
@@ -470,6 +473,7 @@ impl Machine {
             Kind::Handheld | Kind::Laptop if !self.name.is_empty() => self.name.clone(),
             Kind::Handheld => "Handheld".into(),
             Kind::Laptop => "Laptop".into(),
+            Kind::Desktop if self.on_tv() => "Living room PC".into(),
             Kind::Desktop => "Desktop PC".into(),
         }
     }

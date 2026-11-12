@@ -21,12 +21,15 @@ pub struct Ratings {
     anticheat: Vec<(String, AntiCheat)>,
     fixes: Vec<(String, Fix)>,
     cache: PathBuf,
+    /// The FSR 4 upgrade does something on this machine (see `super::fsr4_works`): a fix that is only that switch
+    /// counts for nothing elsewhere.
+    pub fsr4: bool,
 }
 
 impl Ratings {
     pub fn load(cache: &Path) -> Ratings {
         let text = |f: &str| std::fs::read_to_string(cache.join(f)).unwrap_or_default();
-        Ratings { anticheat: library::parse_anticheat(&text("anticheat.json")), fixes: library::parse_fixes(&text("fixes.json")), cache: cache.to_path_buf() }
+        Ratings { anticheat: library::parse_anticheat(&text("anticheat.json")), fixes: library::parse_fixes(&text("fixes.json")), cache: cache.to_path_buf(), fsr4: true }
     }
     /// Where Valve's report for one Steam game is kept.
     pub fn valve_file(cache: &Path, app_id: &str) -> PathBuf {
@@ -38,7 +41,7 @@ impl Ratings {
         }
         let valve = std::fs::read_to_string(Self::valve_file(&self.cache, &g.store_id)).map(|t| library::parse_valve_report(&t)).unwrap_or(ValveRating::Unknown);
         let ac = self.anticheat.iter().find(|(id, _)| *id == g.store_id).map(|(_, a)| *a);
-        let fix = self.fixes.iter().find(|(id, _)| *id == g.store_id).map(|(_, f)| f);
+        let fix = self.fixes.iter().find(|(id, _)| *id == g.store_id).map(|(_, f)| f).filter(|f| self.fsr4 || !(f.kind == "switch" && f.value == "fsr4"));
         library::verdict(valve, ac, fix, o)
     }
 }
@@ -83,8 +86,9 @@ impl Listed {
 }
 
 pub(crate) fn listed(ui: &Ui) -> Vec<Listed> {
-    let ratings = Ratings::load(&ui.cache);
-    let o = Options { windows_installed: ui.machine().windows_boot.is_some() };
+    let m = ui.machine();
+    let ratings = Ratings { fsr4: super::fsr4_works(&m), ..Ratings::load(&ui.cache) };
+    let o = Options { windows_installed: m.windows_boot.is_some() };
     crate::scan_games(&ui.ctx.home).games.into_iter().map(|g| Listed { verdict: ratings.verdict(&g, o), game: g }).collect()
 }
 
@@ -120,9 +124,13 @@ pub(crate) fn search_box(ui: &Ui, page: &str, hint: &str) -> Json {
     obj! {"arg": s(page), "value": s(query(ui, page)), "hint": s(hint)}
 }
 
+/// Why the FSR 4 upgrade isn't offered on this machine.
+const FSR4_ELSEWHERE: &str = "The FSR 4 upgrade needs a Radeon RX 9000 graphics card. On this one it would change nothing.";
+
 /// The words under a switch, as short as the row allows.
 fn switch_line(ui: &Ui, sw: Switch) -> &'static str {
     match sw {
+        Switch::Fsr4 if !super::fsr4_works(&ui.machine()) => "Needs a Radeon RX 9000 card. It changes nothing on this one",
         Switch::Fsr4 => "Sharper upscaling, costs a few frames",
         Switch::FrameGen if tool::framegen_wrapper(&ui.ctx.home).is_file() => "Lossless Scaling, set the multiplier in Decky",
         Switch::FrameGen => "Needs the Lossless Scaling plugin from Decky's store first",
@@ -188,7 +196,8 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
         } else {
             let sw = Switches::load(&ui.folder());
             let mut rows = vec![launch::game_row(tv, &l.game, uses)];
-            rows.extend(Switch::ALL.iter().map(|k| with(row("switch", &format!("{id}|{}", k.key()), "toggle", k.title(), switch_line(ui, *k)), "on", b(sw.is_on(&id, *k) || (*k == Switch::Fsr4 && sw.fsr4_all)))));
+            let fsr4 = super::fsr4_works(&ui.machine());
+            rows.extend(Switch::ALL.iter().filter(|k| fsr4 || **k != Switch::Fsr4 || sw.is_on(&id, Switch::Fsr4) || sw.fsr4_all).map(|k| with(row("switch", &format!("{id}|{}", k.key()), "toggle", k.title(), switch_line(ui, *k)), "on", b(sw.is_on(&id, *k) || (*k == Switch::Fsr4 && sw.fsr4_all)))));
             out.push(section("Switches", rows));
         }
         let mut help = Vec::new();
@@ -198,6 +207,11 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
         }
         if l.game.prefix.is_some() {
             help.push(with(row("game", &format!("reset|{id}"), "button", "Reset Windows files", "A fresh start, the old ones kept as a backup"), "icon", s("restore")));
+        }
+        if let Some(pfx) = pfx_path(&l.game)
+            && reset_backup(&ui.folder(), &l.game.store_id, &pfx).is_some()
+        {
+            help.push(with(with(row("game", &format!("reset-undo|{id}"), "button", "Undo the reset", "Puts the Windows files from before the reset back"), "icon", s("restore")), "button", s("Undo")));
         }
         help.push(with(row("game", &format!("report|{id}"), "button", "Write a report", "What a helper needs to see, with private details removed"), "icon", s("log")));
         out.push(section("Won't start?", help));
@@ -354,6 +368,66 @@ pub fn reports_dir(ui: &Ui) -> PathBuf {
     ui.folder().join("reports")
 }
 
+/// Where a Steam game's Windows files are, or go once it starts: also while a reset has moved them aside.
+fn pfx_path(g: &Game) -> Option<PathBuf> {
+    if let Some(p) = &g.prefix {
+        return Some(p.clone());
+    }
+    if g.store != Store::Steam {
+        return None;
+    }
+    let steamapps = g.install_dir.parent()?.parent()?;
+    Some(steamapps.join("compatdata").join(&g.store_id).join("pfx"))
+}
+
+/// Where the last reset of a game's Windows files is recorded for Undo: beside its Proton pick's Undo, in Turbine
+/// Hub's launch folder.
+pub fn reset_record(folder: &Path, app_id: &str) -> PathBuf {
+    tool::launch_dir(folder).join(format!("{}.reset", app_id.replace(['/', '.'], "")))
+}
+
+/// The backup the last reset of this game made, when it is still there.
+pub fn reset_backup(folder: &Path, app_id: &str, pfx: &Path) -> Option<PathBuf> {
+    let name = std::fs::read_to_string(reset_record(folder, app_id)).ok()?.trim().to_string();
+    let ok = name.strip_prefix("pfx.turbinehub-backup-").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    let path = pfx.with_file_name(&name);
+    (ok && path.is_dir()).then_some(path)
+}
+
+/// Puts the backup back as the game's Windows files. Fresh ones the game made since are kept beside them under a
+/// name of their own, never deleted. Answers that name, when there were fresh ones.
+pub fn undo_reset(pfx: &Path, backup: &Path, now: u64) -> Result<Option<String>, String> {
+    if !backup.is_dir() {
+        return Err("The backup isn't there any more.".into());
+    }
+    let mut kept = None;
+    if pfx.exists() {
+        let name = format!("pfx.turbinehub-fresh-{now}");
+        std::fs::rename(pfx, pfx.with_file_name(&name)).map_err(|e| format!("Couldn't move the fresh Windows files aside: {e}"))?;
+        kept = Some(name);
+    }
+    std::fs::rename(backup, pfx).map_err(|e| format!("Couldn't put the Windows files back: {e}"))?;
+    Ok(kept)
+}
+
+/// The reset's own steps of a confirmed dialog. None for any other step.
+pub fn reset_step(step: &Step, folder: &Path, now: u64) -> Option<Result<(), String>> {
+    Some(match step {
+        Step::ResetPrefix { pfx, app_id } => reset_windows_files(pfx, now).and_then(|name| {
+            let record = reset_record(folder, app_id);
+            let _ = std::fs::create_dir_all(tool::launch_dir(folder));
+            crate::write_atomic(&record, format!("{name}\n").as_bytes()).map_err(|e| format!("The files were moved, but Undo couldn't be recorded: {e}"))
+        }),
+        Step::ResetUndo { pfx, app_id } => match reset_backup(folder, app_id, pfx) {
+            None => Err("The backup isn't there any more.".into()),
+            Some(backup) => undo_reset(pfx, &backup, now).map(|_| {
+                let _ = std::fs::remove_file(reset_record(folder, app_id));
+            }),
+        },
+        _ => return None,
+    })
+}
+
 /// The report for one game: what Turbine Hub knows about it and the machine, private details removed.
 pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
     let m = ui.machine();
@@ -385,6 +459,9 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         }
         "fsr4all" => {
             let mut sw = Switches::load(&ui.folder());
+            if !sw.fsr4_all && !super::fsr4_works(&ui.machine()) {
+                return Some(toast(FSR4_ELSEWHERE));
+            }
             sw.fsr4_all = !sw.fsr4_all;
             sw.save(&ui.folder());
             Some(refresh())
@@ -400,6 +477,9 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let uses = launch::tool_view(ui).uses(&l.game);
             if uses == Uses::Mods {
                 return Some(toast("This game uses Turbine Mod Manager in Steam. Its switches come with Turbine Mod Manager."));
+            }
+            if k == Switch::Fsr4.key() && !super::fsr4_works(&ui.machine()) && !Switches::load(&ui.folder()).on(id, k) {
+                return Some(toast(FSR4_ELSEWHERE));
             }
             let mut sw = Switches::load(&ui.folder());
             Some(match sw.toggle(id, k, false) {
@@ -424,13 +504,36 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                     dialog(ui, p)
                 }
                 "play" => guide("Start it from Heroic", "Games from Epic, GOG and Amazon start from Heroic, or from their tile in your Steam library.", &[]),
-                "reset" if locked => toast("Its anti-cheat runs online, so Turbine Hub leaves this game alone."),
+                "reset" | "reset-undo" if locked => toast("Its anti-cheat runs online, so Turbine Hub leaves this game alone."),
                 "reset" => {
                     let pfx = l.game.prefix.clone()?;
-                    let mut p = Plan::new("Reset Windows files?", &format!("{name} gets fresh Windows files the next time it starts. The old ones are kept beside them as a backup. Saves kept only inside them are in the backup too."), "Reset");
+                    let backup = "pfx.turbinehub-backup-<time of the reset>";
+                    let veteran = ui.veteran();
+                    let ludusavi = super::store::is_installed(ui, crate::saves::LUDUSAVI);
+                    let mut p = Plan::new("Reset Windows files?", &format!("{name} gets fresh Windows files the next time it starts. The old ones are moved into a backup folder right beside them, nothing is deleted, and Undo on this page puts them back."), "Reset");
+                    p.danger = true;
                     p.items.push(("Close the game first".into(), "It can't be running while this happens.".into()));
-                    p.steps.push(Step::ResetPrefix { pfx });
-                    p.done = "Windows files reset. The backup is beside them.".into();
+                    p.items.push(("Its Windows files move into a backup".into(), if veteran { format!("{} \u{2192} {}", pfx.display(), pfx.with_file_name(backup).display()) } else { "Same folder, under a new name.".into() }));
+                    if ludusavi {
+                        p.items.push(("A snapshot of its saves first".into(), "Saves the game keeps inside its Windows files would otherwise start empty. Its Saves page restores them after its next start.".into()));
+                        p.steps.push(Step::Saves(crate::saves::Job::Backup { game: super::saves::game_ref(&l) }));
+                    } else {
+                        p.items.push(("Saves kept inside them go into the backup too".into(), "The game starts without them until Undo puts the old files back. Most Steam games keep their saves in Steam Cloud as well.".into()));
+                    }
+                    p.steps.push(Step::ResetPrefix { pfx, app_id: l.game.store_id.clone() });
+                    p.done = "Windows files reset. Undo is on this game's page.".into();
+                    dialog(ui, p)
+                }
+                "reset-undo" => {
+                    let pfx = pfx_path(&l.game)?;
+                    let Some(backup) = reset_backup(&ui.folder(), &l.game.store_id, &pfx) else { return Some(with(toast("The backup isn't there any more."), "refresh", b(true))) };
+                    let mut p = Plan::new("Put the old Windows files back?", &format!("The Windows files of {name} from before the reset come back. Fresh ones made since are kept beside them under a new name, nothing is deleted."), "Put back");
+                    p.items.push(("Close the game first".into(), "It can't be running while this happens.".into()));
+                    if ui.veteran() {
+                        p.items.push((format!("{} \u{2192} {}", backup.display(), pfx.display()), String::new()));
+                    }
+                    p.steps.push(Step::ResetUndo { pfx, app_id: l.game.store_id.clone() });
+                    p.done = "The old Windows files are back".into();
                     dialog(ui, p)
                 }
                 "report" => {

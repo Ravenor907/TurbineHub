@@ -143,6 +143,7 @@ fn usb(root: &Path, port: &str, vendor: &str, product: &str, name: &str) {
     w(root, &format!("{d}/idProduct"), &format!("{product}\n"));
     w(root, &format!("{d}/product"), &format!("{name}\n"));
     w(root, &format!("{d}/power/wakeup"), "enabled\n");
+    w(root, &format!("{d}/removable"), "removable\n");
 }
 
 /// Writes the preset's machine under `root`.
@@ -176,6 +177,8 @@ pub fn machine(root: &Path, preset: Preset) {
             drive(root, "mmcblk0", "SD 512GB", 512_000_000_000, true, "179", &[("mmcblk0p1", "ext4", "", "", "")]);
             mounts(root, &[("mmcblk0p1", "/run/media/deck/sdcard")]);
             usb(root, "3-1", "045e", "028e", "Controller");
+            // Wired inside the case: the kernel calls its port fixed.
+            w(root, "/sys/bus/usb/devices/3-1/removable", "fixed\n");
         }
         Preset::Desktop | Preset::TvPc => {
             w(root, "/sys/class/dmi/id/sys_vendor", "Micro-Star International Co., Ltd.\n");

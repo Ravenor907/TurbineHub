@@ -163,6 +163,40 @@ fn a_failed_change_leaves_nothing_behind() {
 }
 
 #[test]
+fn memory_limits_go_back_through_their_share_of_memory() {
+    let mut sys = machine("dirty");
+    // The kernel's defaults: the limits are shares of memory, the byte limits read 0 (and refuse 0 as a value).
+    for (k, v) in [("dirty_bytes", "0"), ("dirty_background_bytes", "0"), ("dirty_ratio", "20"), ("dirty_background_ratio", "10")] {
+        fs::write(sys.p(&format!("/proc/sys/vm/{k}")), format!("{v}\n")).unwrap();
+    }
+    let a = sys.apply(set(r#"{"kind":"sysctl","key":"vm.dirty_bytes","value":268435456}"#)).unwrap();
+    let b = sys.apply(set(r#"{"kind":"sysctl","key":"vm.dirty_background_bytes","value":67108864}"#)).unwrap();
+    // Setting a byte limit makes the kernel zero its share.
+    fs::write(sys.p("/proc/sys/vm/dirty_ratio"), "0\n").unwrap();
+    fs::write(sys.p("/proc/sys/vm/dirty_background_ratio"), "0\n").unwrap();
+    let l = sys.ledger().unwrap();
+    assert_eq!((l.entries[0].before("value"), l.entries[0].before("ratio")), (Some("0"), Some("20")));
+    assert_eq!((l.entries[1].before("value"), l.entries[1].before("ratio")), (Some("0"), Some("10")));
+    sys.undo(b).unwrap();
+    sys.undo(a).unwrap();
+    assert_eq!(read(&sys, "/proc/sys/vm/dirty_ratio"), "20\n");
+    assert_eq!(read(&sys, "/proc/sys/vm/dirty_background_ratio"), "10\n");
+    // 0 is never written to a byte limit: the kernel would refuse it.
+    assert_eq!(read(&sys, "/proc/sys/vm/dirty_bytes"), "268435456\n");
+    assert!(!sys.p(policy::SYSCTL_FILE).exists());
+
+    // A record from before the share was kept gets the kernel's default share.
+    let mut sys = machine("dirty-old");
+    fs::write(sys.p("/proc/sys/vm/dirty_bytes"), "0\n").unwrap();
+    let id = sys.apply(set(r#"{"kind":"sysctl","key":"vm.dirty_bytes","value":268435456}"#)).unwrap();
+    let text = read(&sys, ops::LEDGER).replace(",\"ratio\":\"20\"", "");
+    fs::write(sys.p(ops::LEDGER), text).unwrap();
+    fs::write(sys.p("/proc/sys/vm/dirty_ratio"), "0\n").unwrap();
+    sys.undo(id).unwrap();
+    assert_eq!(read(&sys, "/proc/sys/vm/dirty_ratio"), "20\n");
+}
+
+#[test]
 fn services_go_back_to_how_they_were() {
     let mut sys = machine("svc");
     let id = sys.apply(set(r#"{"kind":"service","unit":"sshd.service","enabled":true}"#)).unwrap();

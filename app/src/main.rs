@@ -60,5 +60,6 @@ fn main() {
         engine.load(&QUrl::from("qrc:/qt/qml/TurbineHub/qml/Main.qml"));
     }
     let code = app.as_mut().map(|a| a.exec()).unwrap_or(1);
+    backend::remove_sample_dir();
     std::process::exit(code);
 }

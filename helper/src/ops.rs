@@ -181,7 +181,9 @@ impl<R: Run> Sys<R> {
         Ok(())
     }
 
-    /// What is there now, for the "before" of a new entry.
+    /// What is there now, for the "before" of a new entry. The kernel keeps each dirty-page limit two ways, as bytes
+    /// or as a share of memory, and only one is in use: the other reads 0, which the kernel won't take back. So for
+    /// the byte limits the share is kept too, and Undo puts that back instead.
     fn before_of(&mut self, s: &Setting) -> Vec<(String, String)> {
         let v = match s {
             Setting::Sysctl { key, .. } => self.read(&Self::proc_path(key)).map(|t| t.trim().to_string()),
@@ -189,7 +191,29 @@ impl<R: Run> Sys<R> {
             Setting::Service { unit, .. } => Some(self.service_enabled(unit).to_string()),
             _ => None,
         };
-        v.map(|v| vec![(if matches!(s, Setting::Service { .. }) { "enabled" } else { "value" }.to_string(), v)]).unwrap_or_default()
+        let mut out: Vec<(String, String)> = v.map(|v| vec![(if matches!(s, Setting::Service { .. }) { "enabled" } else { "value" }.to_string(), v)]).unwrap_or_default();
+        if let Setting::Sysctl { key, .. } = s
+            && let Some((ratio, _)) = ratio_of(key)
+            && let Some(r) = self.read(&Self::proc_path(ratio)).map(|t| t.trim().to_string())
+        {
+            out.push(("ratio".into(), r));
+        }
+        out
+    }
+
+    /// Puts a kernel setting back from its "before". A byte limit that was 0 (not in use) goes back through its
+    /// share of memory instead, which turns the byte limit off again. Records from before the share was kept get the
+    /// kernel's own default share.
+    fn restore_sysctl(&mut self, key: &str, e: &Entry) -> Result<(), String> {
+        let write = |sys: &Self, k: &str, v: &str| fs::write(sys.p(&Self::proc_path(k)), format!("{v}\n")).map_err(|er| io_err(&format!("set {k}"), er));
+        match (e.before("value"), ratio_of(key)) {
+            (Some("0"), Some((ratio, default))) => {
+                let share = e.before("ratio").filter(|v| v.parse::<u64>().is_ok_and(|n| n > 0 && n <= 100)).unwrap_or(default);
+                write(self, ratio, share)
+            }
+            (Some(v), _) => write(self, key, v),
+            (None, _) => Ok(()),
+        }
     }
 
     fn service_enabled(&mut self, unit: &str) -> bool {
@@ -217,10 +241,7 @@ impl<R: Run> Sys<R> {
     /// Puts back what was there before.
     fn restore_live(&mut self, e: &Entry) -> Result<(), String> {
         match &e.change {
-            Change::Set(Setting::Sysctl { key, .. }) => match e.before("value") {
-                Some(v) => fs::write(self.p(&Self::proc_path(key)), format!("{v}\n")).map_err(|er| io_err(&format!("set {key}"), er)),
-                None => Ok(()),
-            },
+            Change::Set(Setting::Sysctl { key, .. }) => self.restore_sysctl(key, e),
             Change::Set(Setting::Sysfs { path, .. }) => match e.before("value") {
                 Some(v) => self.sysfs_target(path).and_then(|t| fs::write(t, v).map_err(|er| io_err(&format!("set {path}"), er))),
                 None => Ok(()),
@@ -520,6 +541,16 @@ impl<R: Run> Sys<R> {
         if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(self.p(LOG)) {
             let _ = writeln!(f, "{} {line}", self.now);
         }
+    }
+}
+
+/// The share-of-memory setting that stands in for a byte limit while that limit is off (reads 0), and the kernel's
+/// own default for it.
+pub fn ratio_of(key: &str) -> Option<(&'static str, &'static str)> {
+    match key {
+        "vm.dirty_bytes" => Some(("vm.dirty_ratio", "20")),
+        "vm.dirty_background_bytes" => Some(("vm.dirty_background_ratio", "10")),
+        _ => None,
     }
 }
 

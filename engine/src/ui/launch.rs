@@ -227,7 +227,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                     }
                     let update = tv.state == State::Outdated;
                     let mut p = Plan::new(if update { "Update the launch tool?" } else { "Set up Turbine Hub in Steam?" }, "Turbine Hub writes its launch tool into Steam's folder for tools. Steam only reads that folder, and none of Steam's own files change.", if update { "Update" } else { "Set up" });
-                    p.items.push(("Three small files".into(), dir.to_string_lossy().into_owned()));
+                    p.items.push(("Three small files".into(), if ui.veteran() { dir.to_string_lossy().into_owned() } else { "In Steam's folder for tools".into() }));
                     if !update {
                         p.items.push(("Restart Steam once afterwards".into(), "Steam finds new tools when it starts: Steam button, Power, Restart Steam.".into()));
                         p.items.push(("Then pick it per game".into(), "In a game's Properties, Compatibility, pick \"Turbine Hub\". Games you don't pick it for start as before.".into()));
@@ -249,7 +249,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                     }
                     let mut p = Plan::new("Remove the launch tool?", "Turbine Hub takes its three files out of Steam's folder for tools. No game uses it. The switches and Proton picks stay saved, in case it comes back.", "Remove");
                     p.danger = true;
-                    p.items.push(("Removed".into(), dir.to_string_lossy().into_owned()));
+                    p.items.push(("Removed".into(), if ui.veteran() { dir.to_string_lossy().into_owned() } else { "Its three files in Steam's folder for tools".into() }));
                     p.steps.push(Step::Tool { install: false });
                     p.done = "Launch tool removed".into();
                     Some(dialog(ui, p))

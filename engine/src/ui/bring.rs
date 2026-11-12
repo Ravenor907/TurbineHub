@@ -275,7 +275,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                     let dg = drive_games(ui, &mount);
                     dg.games.iter().filter(|g| dg.can_copy(g)).map(|g| g.app_id.clone()).collect()
                 }
-                "quick" => super::setup::all_ids(ui),
+                "quick" => super::setup::all_ids(ui, ui.picked.get("quick")),
                 _ => return None,
             };
             let set = ui.picked.entry(arg.to_string()).or_default();

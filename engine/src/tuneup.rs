@@ -63,7 +63,7 @@ fn read(root: &Path, abs: &str) -> String {
 }
 
 /// zram's size as a share of memory, from /proc/swaps and /proc/meminfo (percent, 0 when there is no zram).
-fn zram_percent(root: &Path) -> u64 {
+pub fn zram_percent(root: &Path) -> u64 {
     let swaps = read(root, "/proc/swaps");
     let zram_kb: u64 = swaps.lines().filter(|l| l.starts_with("/dev/zram")).filter_map(|l| l.split_whitespace().nth(2)?.parse::<u64>().ok()).sum();
     let mem_kb: u64 = read(root, "/proc/meminfo").lines().find_map(|l| l.strip_prefix("MemTotal:")?.split_whitespace().next()?.parse().ok()).unwrap_or(0);

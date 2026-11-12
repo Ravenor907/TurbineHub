@@ -112,6 +112,42 @@ pub fn real_ctx() -> Ctx {
     Ctx { root: "/".into(), home: turbinehub_engine::home_dir(), config_home: dir_from("XDG_CONFIG_HOME", ".config"), efibootmgr: String::new(), version: crate::VERSION.into() }
 }
 
+/// The made-up machine's folder of this run, removed again when the window closes.
+static SAMPLE_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// A new folder for this run's made-up machine. Inside the Flatpak every run has the same process id, so the name
+/// also carries the time and a random number, and the folder is only taken when it didn't exist yet: runs side by
+/// side never share one.
+fn sample_dir() -> PathBuf {
+    use std::hash::{BuildHasher, Hasher};
+    let base = std::env::temp_dir();
+    let _ = std::fs::create_dir_all(&base);
+    loop {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(nanos);
+        let dir = base.join(format!("turbinehub-sample-{}-{nanos}-{:016x}", std::process::id(), h.finish()));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => {
+                if let Ok(mut d) = SAMPLE_DIR.lock() {
+                    *d = Some(dir.clone());
+                }
+                return dir;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            // Nowhere to make it: the engine makes the folders it needs itself.
+            Err(_) => return dir,
+        }
+    }
+}
+
+/// Removes the made-up machine's folder of this run, if it made one.
+pub fn remove_sample_dir() {
+    if let Some(dir) = SAMPLE_DIR.lock().ok().and_then(|mut d| d.take()) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 /// The engine for this run: a made-up machine for pictures (`--screenshot`) and trial runs (`--machine`), else the
 /// real one.
 fn make_ui() -> Ui {
@@ -143,7 +179,7 @@ fn make_ui() -> Ui {
         Some("veteran") => Some(Mode::Veteran),
         _ => None,
     };
-    let dir = std::env::temp_dir().join(format!("turbinehub-sample-{}", std::process::id()));
+    let dir = sample_dir();
     let mut ui = Ui::sample(&dir, preset, mode);
     ui.window = option("window").is_some();
     if option("offline").is_some() {
@@ -309,9 +345,9 @@ impl qobject::Hub {
             return answer(&[("error", quote("Something is still running. Give it a moment."))]);
         }
         let Some(plan) = self.as_mut().rust_mut().ui.confirm() else { return answer(&[]) };
+        // Asked the same on a made-up machine: an empty password never goes ahead.
         let problem = match plan.ask {
             Ask::None => None,
-            _ if self.rust().ui.sample => None,
             Ask::Current if password.is_empty() => Some("Type the password first."),
             Ask::New if password.is_empty() => Some("Type a password first."),
             Ask::New if password != again => Some("The two don't match. Type them again."),

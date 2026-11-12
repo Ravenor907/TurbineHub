@@ -21,6 +21,8 @@ Item {
     readonly property string ask: d ? (d.ask || "") : ""
     readonly property string cancelLabel: d ? d.cancel : "Close"
     readonly property bool hasConfirm: d !== null && (d.confirm || "") !== ""
+    // The confirm button only works once the password it needs is typed (twice for a new one).
+    readonly property bool typed: ask === "" || (pw.text !== "" && (ask !== "new" || pw2.text !== ""))
     z: 50
     visible: open
 
@@ -44,7 +46,10 @@ Item {
         Qt.callLater(app.restoreFocus)
     }
     function cancel() { Hub.cancel(); close() }
-    function confirm() { app.confirmDialog(pw.text, pw2.text) }
+    function confirm() {
+        if (!typed) { error = ask === "new" ? "Type the new password in both boxes first." : "Type the password first."; return }
+        app.confirmDialog(pw.text, pw2.text)
+    }
     function press(k) {
         if (k === "b") { cancel(); return true }
         // The tabs, Help and the menu wait until the dialog is answered.
@@ -236,6 +241,7 @@ Item {
                     firstFocus: dlg.ask === "" && dlg.d !== null && dlg.d.danger !== true
                     primary: true
                     label: dlg.d ? (dlg.d.confirm || "") : ""
+                    opacity: dlg.typed ? 1 : 0.45
                     cap: focused ? "a" : ""
                     onActivated: dlg.confirm()
                 }

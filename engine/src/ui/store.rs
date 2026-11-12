@@ -578,17 +578,18 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
         }
         "decky" => {
             let Some(tag) = ui.decky_tag.clone() else { return Some(toast("Couldn't reach GitHub to find Decky Loader's newest release. Try again in a moment.")) };
-            let mut p = Plan::new(if decky_installed(ui) { "Repair Decky Loader?" } else { "Install Decky Loader?" }, "Turbine Hub's helper downloads Decky Loader's official release and installs it only when it matches the checksum GitHub publishes.", "Install");
+            let repair = decky_installed(ui);
+            let mut p = Plan::new(if repair { "Repair Decky Loader?" } else { "Install Decky Loader?" }, "Turbine Hub's helper downloads Decky Loader's official release and installs it only when it matches the checksum GitHub publishes.", if repair { "Repair" } else { "Install" });
             p.items.push((format!("Decky Loader {tag}"), "From github.com/SteamDeckHomebrew/decky-loader".into()));
             p.steps.push(Step::Host(helper::job("decky-install", Some(&format!("{{\"tag\":{}}}", json::quote(&tag))))));
-            p.done = "Decky Loader installed. Its plug icon is in Steam's quick menu.".into();
+            p.done = if repair { "Decky Loader repaired. Its plug icon is in Steam's quick menu." } else { "Decky Loader installed. Its plug icon is in Steam's quick menu." }.into();
             Some(with_helper(ui, p))
         }
         "decky-off" => {
             let turn_on = plugins_off(ui);
             let setting = Setting::Service { unit: DECKY_SERVICE.into(), enabled: turn_on };
             let mut p = Plan::new(if turn_on { "Turn plugins back on?" } else { "Turn all plugins off?" }, if turn_on { "Decky Loader starts again with every plugin." } else { "Decky Loader stops, and every plugin with it, until this is turned back on. Nothing is removed." }, if turn_on { "Turn on" } else { "Turn all off" });
-            p.items.push((setting.words(), String::new()));
+            p.items.push(super::plan::change_item(ui, &setting));
             p.done = if turn_on { "Plugins on".into() } else { "Plugins off".into() };
             Some(helper_plan(ui, p, &[setting]))
         }

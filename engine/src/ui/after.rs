@@ -39,6 +39,11 @@ impl Ui {
                     s.game_boost = s.game_boost || *boost;
                     self.save(&s);
                 }
+                Step::Choice { key, on } => {
+                    let mut s = self.settings();
+                    super::plan::set_choice(&mut s, key, *on);
+                    self.save(&s);
+                }
                 Step::Host(line) => self.took(line),
                 _ => {}
             }

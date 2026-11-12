@@ -92,8 +92,29 @@ fn picks_for(ui: &Ui, guided: bool) -> Vec<Pick> {
     out
 }
 
-pub(crate) fn all_ids(ui: &Ui) -> BTreeSet<String> {
-    picks_for(ui, !ui.veteran()).into_iter().filter(|p| p.locked.is_none()).map(|p| p.id).collect()
+/// Picks that only the player's own tick turns on: SSH lets other computers sign in, so "Tick all" never adds it.
+const OPT_IN: &[&str] = &["ssh"];
+
+/// What "Tick all" ticks: every pick that can be ticked, except the opt-in ones unless they are ticked already.
+pub(crate) fn all_ids(ui: &Ui, ticked: Option<&BTreeSet<String>>) -> BTreeSet<String> {
+    picks_for(ui, !ui.veteran()).into_iter().filter(|p| p.locked.is_none()).filter(|p| !OPT_IN.contains(&p.id.as_str()) || ticked.is_some_and(|t| t.contains(&p.id))).map(|p| p.id).collect()
+}
+
+/// One line of the apply dialog for a pick: what it does, and in Veteran mode exactly what it changes.
+fn pick_item(ui: &Ui, p: &Pick) -> (String, String) {
+    let mut line = if !ui.veteran() {
+        p.note.clone()
+    } else if !p.settings.is_empty() {
+        p.settings.iter().map(|x| super::plan::change_item(ui, x)).map(|(t, l)| if l.is_empty() { t } else { format!("{t} ({l})") }).collect::<Vec<_>>().join("; ")
+    } else if let Some(app) = p.app {
+        format!("From Flathub: {app}")
+    } else {
+        p.note.clone()
+    };
+    if p.settings.iter().any(|x| matches!(x, Setting::Zram { .. })) {
+        line.push_str(" Takes effect at the next restart.");
+    }
+    (p.title.clone(), line)
 }
 
 fn chosen(ui: &mut Ui, guided: bool) -> (Vec<Pick>, BTreeSet<String>) {
@@ -169,7 +190,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let step = SETUP_STEPS.iter().copied().find(|x| *x == arg).or_else(|| SETUP_STEPS.iter().copied().find(|x| !st.setup_done.iter().any(|d| d == x))).unwrap_or("picks");
     let index = SETUP_STEPS.iter().position(|x| *x == step).unwrap_or(0);
     let rail = arr(SETUP_STEPS.iter().enumerate().map(|(i, x)| obj! {"id": s(*x), "title": s(step_title(x)), "done": b(st.setup_done.iter().any(|d| d == x)), "current": b(i == index)}));
-    let found = obj! {"title": s(format!("Found: {}", m.name())), "line": s(format!("{} \u{b7} {}", match super::kind_key(&m) { "tv" => "TV PC", "desktop" => "Desktop PC", "laptop" => "Laptop", _ => "Handheld" }, super::machine::machine_line(&m))), "chip": s("Detected")};
+    let found = obj! {"title": s(format!("Found: {}", m.name())), "line": s(format!("{} \u{b7} {}", match super::kind_key(&m) { "tv" => "Living room PC", "desktop" => "Desktop PC", "laptop" => "Laptop", _ => "Handheld" }, super::machine::machine_line(&m))), "chip": s("Detected")};
     let next = button("Continue", "a", "setup-next", step, true);
     let (title, text, embed, sections, buttons, note): (&str, String, &str, Vec<Json>, Vec<Json>, String) = match step {
         "machine" => ("This is your machine", format!("Turbine Hub shows only what this {} has. Everything it changes is shown first, saved first and can be undone.", kind_word(&m)), "", Vec::new(), vec![next], String::new()),
@@ -253,7 +274,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 return Some(obj! {"state": b(true), "root": s("home"), "toast": s("Setup done")});
             }
             let mut p = Plan::new(&format!("Apply {}?", changes_words(go.len())), "Turbine Hub saves the current settings first. Every change can be undone in Settings, Review changes.", "Apply");
-            p.items = go.iter().map(|x| (x.title.clone(), x.note.clone())).collect();
+            p.items = go.iter().map(|x| pick_item(ui, x)).collect();
             let settings: Vec<Setting> = go.iter().flat_map(|x| x.settings.clone()).collect();
             let mut steps: Vec<Step> = Vec::new();
             if go.iter().any(|x| x.id == "decky")

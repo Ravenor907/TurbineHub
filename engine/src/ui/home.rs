@@ -86,10 +86,15 @@ fn setup_card(st: &Settings) -> Json {
     }
 }
 
-/// The eight quick switches of the dashboard: Game Boost and FSR 4 as real switches, then this machine's cards.
+/// The eight quick switches of the dashboard: Game Boost and (where it works) FSR 4 as real switches, then this
+/// machine's cards.
 fn switches(ui: &Ui, m: &Machine, st: &Settings) -> Vec<Json> {
     let mut out = vec![obj! {"id": s("boost"), "title": s("Game Boost"), "value": s("While a game runs"), "toggle": b(true), "on": b(st.game_boost), "icon": s("bolt")}];
-    out.push(obj! {"id": s("fsr4all"), "title": s("FSR 4, every game"), "value": s("Proton games"), "toggle": b(true), "on": b(super::games::Switches::load(&ui.folder()).fsr4_all), "icon": s("spark")});
+    let fsr4_all = super::games::Switches::load(&ui.folder()).fsr4_all;
+    // Only where FSR 4 runs, or while it is on so it can be turned off.
+    if super::fsr4_works(m) || fsr4_all {
+        out.push(obj! {"id": s("fsr4all"), "title": s("FSR 4, every game"), "value": s("Proton games"), "toggle": b(true), "on": b(fsr4_all), "icon": s("spark")});
+    }
     for c in crate::modules::cards(&ui.ctx.root, m, &ui.ledger(), st.game_boost) {
         if c.id == "cpu" {
             continue;

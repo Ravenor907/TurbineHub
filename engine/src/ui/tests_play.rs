@@ -136,8 +136,12 @@ fn switches_say_how_they_reach_each_game() {
     let first = &sections(&j)[1].1[0];
     assert_eq!((first.str_at("act"), first.str_at("arg"), first.str_at("button")), (Some("tool-how"), Some(CYBERPUNK), Some("How")));
     assert!(first.str_at("line").unwrap().starts_with("In Steam:"));
-    assert_eq!(parse(&u.act("switch", &format!("{CYBERPUNK}|fsr4"), "")).unwrap().str_at("toast"), Some("Saved. It applies once this game uses Turbine Hub in Steam."));
-    assert!(Switches::load(&u.folder()).on(CYBERPUNK, "fsr4"));
+    assert_eq!(parse(&u.act("switch", &format!("{CYBERPUNK}|handheld"), "")).unwrap().str_at("toast"), Some("Saved. It applies once this game uses Turbine Hub in Steam."));
+    assert!(Switches::load(&u.folder()).on(CYBERPUNK, "handheld"));
+    // This handheld's graphics can't run FSR 4: the switch isn't offered, and BG3's (on from before) says so.
+    assert!(parse(&u.act("switch", &format!("{CYBERPUNK}|fsr4"), "")).unwrap().str_at("toast").unwrap().contains("RX 9000"));
+    assert!(!Switches::load(&u.folder()).on(CYBERPUNK, "fsr4"));
+    assert!(sw[1].str_at("line").unwrap().contains("RX 9000"));
     let d = parse(&u.act("tool-how", CYBERPUNK, "")).unwrap();
     let steps = d.get("dialog").unwrap().get("items").unwrap().as_array().to_vec();
     assert_eq!(steps.len(), 4);

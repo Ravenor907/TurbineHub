@@ -315,6 +315,15 @@ pub fn gpu_name(m: &Machine) -> String {
     }
 }
 
+/// AMD's RDNA 4 graphics (Radeon RX 9000), by PCI id: the only cards where Proton's FSR 4 upgrade does anything.
+const RDNA4: &[&str] = &["1002:7550", "1002:7551", "1002:7590", "1002:7591"];
+
+/// Does the FSR 4 upgrade work on this machine? Only an RDNA 4 card runs FSR 4; everywhere else the switch would
+/// change nothing, so it isn't offered.
+pub fn fsr4_works(m: &Machine) -> bool {
+    m.gpus.iter().any(|g| RDNA4.contains(&g.pci_id.to_ascii_lowercase().as_str()))
+}
+
 /// The machine's name in the top bar: a handheld or laptop by its own name, a PC with its main parts.
 pub fn top_name(m: &Machine) -> String {
     if m.kind != Kind::Desktop {

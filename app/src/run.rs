@@ -216,7 +216,7 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             }
             Ok(())
         }
-        Step::ResetPrefix { pfx } => ui::games::reset_windows_files(pfx, turbinehub_engine::now()).map(|_| ()),
+        Step::ResetPrefix { .. } | Step::ResetUndo { .. } => ui::games::reset_step(st, &job.folder, turbinehub_engine::now()).unwrap_or(Ok(())),
         Step::Tool { .. } | Step::ProtonPick { .. } | Step::ProtonUndo { .. } => ui::launch::run_step(st, &job.home, &job.folder).unwrap_or(Ok(())),
         Step::Saves(work) => {
             let mut runner = |line: &[String]| run(line, None).map(|o| turbinehub_engine::saves::Ran { code: o.code, stdout: o.stdout, stderr: o.stderr });
@@ -250,7 +250,7 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             start_nsl(job, tag, *plugin)
         }
         // These need the engine's state: the interface thread does them once the rest worked.
-        Step::Report { .. } | Step::SaveSetup | Step::Done { .. } | Step::SetupFinished { .. } => Ok(()),
+        Step::Report { .. } | Step::SaveSetup | Step::Done { .. } | Step::SetupFinished { .. } | Step::Choice { .. } => Ok(()),
     }
 }
 

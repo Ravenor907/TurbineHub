@@ -1,6 +1,6 @@
 //! My machine: the cards for what this machine has, and one page of controls per card. Every control that changes
 //! the system becomes a dialog with the exact settings the helper will write.
-use super::plan::{Plan, Step, dialog, guide, helper_plan, refresh, toast, with_helper};
+use super::plan::{Plan, Step, change_item, dialog, guide, helper_plan, refresh, toast, with_helper};
 use super::{Ui, arr, b, cpu_short, gpu_name, hint, kind_word, n, obj, row, s, section, size_words, with};
 use crate::hardware::{Display, DriveRole, GpuVendor, Kind, Machine};
 use crate::helper::{self, Setting};
@@ -423,6 +423,51 @@ fn undo_steps(ui: &Ui, settings: &[Setting]) -> Vec<Step> {
     ids.into_iter().map(|id| Step::Host(helper::undo(id))).collect()
 }
 
+/// The power limit dialog's lines: one for the limit itself, and one more when the short boost limits change with
+/// it (they are set to the same value, so lowering the limit lowers them too).
+fn tdp_items(m: &Machine, w: u64, veteran: bool) -> Vec<(String, String)> {
+    let Some(main) = m.power_limits.first() else { return Vec::new() };
+    let to = w.clamp(main.min, main.max);
+    let mut out = vec![(format!("Power limit: {} W \u{2192} {to} W", main.current), if veteran { format!("{}: {} \u{2192} {to}", main.path, main.current) } else { "What the processor may use for as long as it runs.".into() })];
+    let boosts: Vec<(&crate::hardware::PowerLimit, u64)> = m.power_limits.iter().skip(1).map(|p| (p, w.clamp(p.min, p.max))).filter(|(p, v)| p.current != *v).collect();
+    if boosts.is_empty() {
+        return out;
+    }
+    let lower = boosts.iter().any(|(p, v)| *v < p.current);
+    let higher = boosts.iter().any(|(p, v)| *v > p.current);
+    let words = |v: Vec<u64>| {
+        let mut v = v;
+        v.dedup();
+        v.iter().map(|x| format!("{x} W")).collect::<Vec<_>>().join(" and ")
+    };
+    let from = words(boosts.iter().map(|(p, _)| p.current).collect());
+    let new = words(boosts.iter().map(|(_, v)| *v).collect());
+    let title = match (lower, higher) {
+        (true, false) => format!("Boost limits lowered too: {from} \u{2192} {new}"),
+        (false, true) => format!("Boost limits raised too: {from} \u{2192} {new}"),
+        _ => format!("Boost limits changed too: {from} \u{2192} {new}"),
+    };
+    let line = if veteran {
+        boosts.iter().map(|(p, v)| format!("{}: {} \u{2192} {v}", p.path, p.current)).collect::<Vec<_>>().join("; ")
+    } else if lower {
+        "Short bursts above the limit are capped at the new limit as well. Undo puts them back.".into()
+    } else {
+        "Short bursts may use up to the new limit as well. Undo puts them back.".into()
+    };
+    out.push((title, line));
+    out
+}
+
+/// A tune-up item in the "Turn on all" dialog: its name and why, with the exact values in Veteran mode, and when
+/// it waits for the next restart.
+fn tuneup_item(ui: &Ui, i: &tuneup::Item) -> (String, String) {
+    let mut line = if ui.veteran() { i.settings.iter().map(|x| change_item(ui, x).1).collect::<Vec<_>>().join("; ") } else { i.why.to_string() };
+    if i.restart {
+        line.push_str(if line.is_empty() { "Takes effect at the next restart." } else { " Takes effect at the next restart." });
+    }
+    (i.title.to_string(), line)
+}
+
 fn host(args: &[&str]) -> Vec<String> {
     ["flatpak-spawn", "--host"].iter().chain(args).map(|x| x.to_string()).collect()
 }
@@ -433,16 +478,20 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
     match action {
         "boost" => {
             let mut st = ui.settings();
-            st.game_boost = !st.game_boost;
-            ui.save(&st);
+            let on = !st.game_boost;
             // Game Boost is the background helper setting the processor through Turbine Hub's helper: both must be
-            // there, and turning it on says what is missing.
+            // there, and turning it on says what is missing. Without the helper it only turns on once the helper's
+            // setup in the dialog worked; cancelling leaves it off.
+            if on && !helper::installed(&ui.ctx.root) {
+                let mut p = Plan::new("Set up Turbine Hub's helper?", "Game Boost sets the processor to full speed while a game runs. That is a system setting, so it goes through Turbine Hub's helper.", "Set up");
+                p.steps.push(Step::Choice { key: "boost", on: true });
+                p.done = "Game Boost on".into();
+                return Some(with(with_helper(ui, p), "refresh", b(true)));
+            }
+            st.game_boost = on;
+            ui.save(&st);
             Some(if !st.game_boost {
                 refresh()
-            } else if !helper::installed(&ui.ctx.root) {
-                let mut p = Plan::new("Set up Turbine Hub's helper?", "Game Boost sets the processor to full speed while a game runs. That is a system setting, so it goes through Turbine Hub's helper.", "Set up");
-                p.done = "Game Boost on".into();
-                with(with_helper(ui, p), "refresh", b(true))
             } else if !ui.agent_running() {
                 with(with(refresh(), "toast", s("Game Boost starts once the background helper is on. Settings, General.")), "open", s("settings"))
             } else {
@@ -455,16 +504,24 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             if settings.is_empty() {
                 return Some(toast("This machine has no power limit to set."));
             }
-            let mut p = Plan::new(&format!("Set the power limit to {w} W?"), "Turbine Hub saves the current limit first. Undo puts it back.", "Set it");
-            p.items = settings.iter().map(|x| (x.words(), String::new())).collect();
+            if m.power_limits.iter().all(|p| p.current == w.clamp(p.min, p.max)) {
+                return Some(toast("That's already set."));
+            }
+            let mut p = Plan::new(&format!("Set the power limit to {w} W?"), "Turbine Hub saves the current limits first. Undo puts them back.", "Set it");
+            p.items = tdp_items(&m, w, ui.veteran());
             p.done = format!("Power limit set to {w} W");
             Some(helper_plan(ui, p, &settings))
         }
         "gpu-power" => {
             let w = num?;
             let Some(setting) = modules::gpu_power(&m, w) else { return Some(toast("This graphics card has no power limit to set.")) };
+            if let (Some(g), Setting::Sysfs { value, .. }) = (m.main_gpu(), &setting)
+                && g.power_cap.as_ref().is_some_and(|(_, _, _, now)| now.to_string() == *value)
+            {
+                return Some(toast("That's already set."));
+            }
             let mut p = Plan::new(&format!("Limit the graphics card to {w} W?"), "Turbine Hub saves the current limit first. Safe reset puts it back.", "Set it");
-            p.items.push((setting.words(), String::new()));
+            p.items.push(change_item(ui, &setting));
             p.done = format!("Graphics power limit set to {w} W");
             Some(helper_plan(ui, p, &[setting]))
         }
@@ -474,6 +531,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 return Some(toast("The card is at its own limit already."));
             }
             let mut p = Plan::new("Reset the graphics card's power limit?", "The limit goes back to what it was before Turbine Hub changed it.", "Reset");
+            let ledger = ui.ledger();
+            p.items = modules::gpu_power(&m, 0).and_then(|x| ledger.find_key(&x.key()).cloned()).map(|e| super::plan::undo_item(ui, &e)).into_iter().collect();
             p.steps = steps;
             p.done = "Graphics power limit reset".into();
             Some(with_helper(ui, p))
@@ -484,8 +543,11 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             if settings.is_empty() {
                 return Some(toast("This battery has no charge limit."));
             }
+            if m.batteries.iter().filter_map(|b| b.charge_limit).all(|l| l == pct) {
+                return Some(toast("That's already set."));
+            }
             let mut p = Plan::new(&if pct == 100 { "Charge to 100%?".to_string() } else { format!("Stop charging at {pct}%?") }, "It stays this way after restarts and SteamOS updates. Undo puts the old limit back.", "Set it");
-            p.items = settings.iter().map(|x| (x.words(), String::new())).collect();
+            p.items = settings.iter().map(|x| change_item(ui, x)).collect();
             p.done = format!("Charge limit set to {pct}%");
             Some(helper_plan(ui, p, &settings))
         }
@@ -495,9 +557,11 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let blocked = ui.ledger().settings().iter().any(|x| matches!(x, Setting::Wake { vendor: v, product: p, wake: false } if v == vendor && p == product));
             let allow = blocked || !d.enabled;
             let name = if d.name.is_empty() { "this device" } else { &d.name };
-            let mut p = Plan::new(&if allow { format!("Let {name} wake the machine?") } else { format!("Stop {name} from waking the machine?") }, "It takes effect the next time the device is plugged in or the machine starts.", if allow { "Allow" } else { "Stop it" });
+            // A device inside the case is never plugged in again: only the machine's next start counts for it.
+            let when = if d.built_in { "It takes effect the next time the machine starts." } else { "It takes effect the next time the device is plugged in or the machine starts." };
+            let mut p = Plan::new(&if allow { format!("Let {name} wake the machine?") } else { format!("Stop {name} from waking the machine?") }, when, if allow { "Allow" } else { "Stop it" });
             let setting = modules::usb_wake(vendor, product, allow);
-            p.items.push((setting.words(), String::new()));
+            p.items.push(change_item(ui, &setting));
             p.done = if allow { format!("{name} can wake the machine") } else { format!("{name} can't wake the machine") };
             Some(helper_plan(ui, p, &[setting]))
         }
@@ -508,8 +572,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 if off.is_empty() {
                     return Some(toast("Everything in the tune-up is on already."));
                 }
-                let mut p = Plan::new("Turn on the tune-up?", "System settings for smoother games. Turbine Hub saves the current settings first, and Undo puts them back. They stay on after SteamOS updates.", "Turn on");
-                p.items = plan.iter().map(|i| (i.title.to_string(), match i.state { State::Off => i.why.to_string(), State::On => "On already".into(), State::SteamOsDoes => "SteamOS does this already: skipped".into() })).collect();
+                let mut p = Plan::new(&if off.len() == 1 { "Turn on 1 tune-up item?".to_string() } else { format!("Turn on {} tune-up items?", off.len()) }, "System settings for smoother games. Turbine Hub saves the current settings first, and Undo puts them back. They stay on after SteamOS updates. Items that are on already stay as they are.", "Turn on");
+                p.items = off.iter().map(|i| tuneup_item(ui, i)).collect();
                 p.done = "Tune-up on".into();
                 let settings: Vec<Setting> = off.iter().flat_map(|i| i.settings.clone()).collect();
                 return Some(helper_plan(ui, p, &settings));
@@ -519,15 +583,17 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 State::SteamOsDoes => toast("SteamOS does this already."),
                 State::Off => {
                     let mut p = Plan::new(&format!("Turn on {}?", item.title), item.why, "Turn on");
-                    p.items = item.settings.iter().map(|x| (x.words(), String::new())).collect();
+                    p.items = item.settings.iter().map(|x| change_item(ui, x)).collect();
                     if item.restart {
-                        p.items.push(("Takes effect at the next restart".into(), String::new()));
+                        p.items.push(("Takes effect at the next restart".into(), "Until then everything stays as it is.".into()));
                     }
                     p.done = format!("{} on", item.title);
                     helper_plan(ui, p, &item.settings)
                 }
                 State::On => {
                     let mut p = Plan::new(&format!("Turn off {}?", item.title), "The settings go back to what they were before.", "Turn off");
+                    let ledger = ui.ledger();
+                    p.items = item.settings.iter().filter_map(|x| ledger.find_key(&x.key())).map(|e| super::plan::undo_item(ui, e)).collect();
                     p.steps = undo_steps(ui, &item.settings);
                     p.done = format!("{} off", item.title);
                     with_helper(ui, p)
@@ -568,7 +634,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let access = modules::lighting_access();
             let has_access = ui.ledger().find_key(&access.key()).is_some();
             if !has_access {
-                p.items.push((access.words(), "Asked once, so lighting never needs the password again.".into()));
+                p.items.push((access.name(), if ui.veteran() { access.exact() } else { "Asked once, so lighting never needs the password again.".into() }));
                 p.steps.push(Step::Host(helper::apply(&access)));
             }
             p.steps.extend(writes.into_iter().map(|(path, value)| Step::HostWrite { path, value }));

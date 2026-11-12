@@ -137,7 +137,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.items.push(("Close the game first".into(), "It can't be running while its saves change.".into()));
             p.items.push((format!("Snapshot: {}", when_words(now, snap.at)), format!("{} \u{b7} {}", snap.kind.words(), size_words(snap.bytes))));
             p.items.push(("The current saves are kept first".into(), "As a snapshot of their own. Undo the last restore puts them back.".into()));
-            p.items.push(("Files the game added since stay".into(), "Ludusavi puts back what the snapshot holds and leaves other save files in place.".into()));
+            p.items.push(("Save files added since then stay".into(), "Ludusavi puts back what the snapshot holds and leaves other save files in place.".into()));
             p.steps.push(Step::Saves(Job::Restore { game, at: snap.at }));
             p.done = "Save restored. Undo is on this page.".into();
             dialog(ui, p)

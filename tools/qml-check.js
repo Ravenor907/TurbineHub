@@ -3,7 +3,8 @@
 // than deep into the Flatpak build. It reads each file's object tree (objects, ids, properties, signals,
 // functions, inline components) and compiles every JavaScript binding, handler and function with Node's own parser.
 // It doesn't know types or imports: the Flatpak build still finds those. It also holds the house style: no long
-// dashes, text sizes through the window's px helpers, durations and curves from Motion.qml.
+// dashes, text sizes through the window's fpx() (the text floor), colors from Palette.qml, durations and curves from
+// Motion.qml, and nothing that travels or grows when Animations is at Reduced.
 //
 //   node tools/qml-check.js              every .qml under app/qml
 //   node tools/qml-check.js a.qml b.qml  only these files
@@ -269,6 +270,7 @@ function finalNames(file) {
 function motionRule(files) {
   const out = [];
   let n = 0;
+  let travel = 0;
   for (const f of files) {
     if (/(^|\/)Motion\.qml$/.test(f)) continue;
     const lines = fs.readFileSync(f, "utf8").split("\n");
@@ -277,9 +279,45 @@ function motionRule(files) {
       if (/\b(duration|highlightMoveDuration|highlightResizeDuration|velocity)\s*:\s*-?\d/.test(l)) out.push(f + ":" + (k + 1) + ": a duration written as a number (take it from Motion.qml): " + l.trim().slice(0, 80));
       if (/\bEasing\.[A-Z]\w+/.test(l)) out.push(f + ":" + (k + 1) + ": an easing curve named here (take it from Motion.qml): " + l.trim().slice(0, 80));
       if (/\b(duration|easing\.type)\s*:/.test(l)) n++;
+      // Animations at Reduced keep the fades and move nothing: whatever changes a place or a size over time runs
+      // only at Full (enabled by motion.moves, timed by a move... duration, both 0 and off below Full); a fade
+      // (opacity, a color) runs while motion.on.
+      const b = /\bBehavior\s+on\s+(\w+)\s*\{(.*)$/.exec(l);
+      if (b) {
+        travel++;
+        const fade = b[1] === "opacity" || b[1] === "color";
+        const body = b[2] + " " + (lines[k + 1] || "");
+        if (!fade && (!/\bmotion\.moves\b/.test(body) || !/\bmotion\.move[A-Z]\w*/.test(body))) out.push(f + ":" + (k + 1) + ": " + b[1] + " changes over time at Reduced too (enabled: ...motion.moves and a motion.move... duration): " + l.trim().slice(0, 80));
+        if (fade && !/\bmotion\.on\b/.test(body)) out.push(f + ":" + (k + 1) + ": a fade that doesn't follow the Animations setting (enabled: ...motion.on): " + l.trim().slice(0, 80));
+      }
+      if (/\b(PropertyAnimation|NumberAnimation|SmoothedAnimation|SpringAnimation|XAnimator|YAnimator|ScaleAnimator)\s*\{/.test(l) && !b) {
+        const what = /\bpropert(?:y|ies)\s*:\s*"([^"]+)"/.exec(l);
+        if (what && !/^(opacity|color)$/.test(what[1]) && !/\b(mo|motion)\.move[A-Z]/.test(l)) out.push(f + ":" + (k + 1) + ": " + what[1] + " changes over time at Reduced too (a motion.move... duration): " + l.trim().slice(0, 80));
+      }
     }
   }
-  console.log("Motion check: " + n + " durations and curves, " + out.length + " outside Motion.qml");
+  console.log("Motion check: " + n + " durations and curves, " + travel + " that follow a change, " + out.length + " problems");
+  return out;
+}
+
+// Readable at every size: text sizes go through app.fpx() (never under 12 pixels nor nine tenths of the design),
+// so a size made with px(), which shrinks all the way with the interface size, is a problem; and a color written
+// into a file is one the contrast rules of Palette.qml never measured (colors come from app.colors; the pages hold
+// no hex colors of their own, save the picture's own black behind the Veteran portrait).
+function readableRule(files) {
+  const out = [];
+  for (const f of files) {
+    const name = f.split("/").pop();
+    if (name === "Palette.qml" || name === "SelfCheck.qml") continue;
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    for (let k = 0; k < lines.length; k++) {
+      const l = lines[k].replace(/\/\/.*$/, "");
+      if (/\bpixelSize\s*:[^;}]*\b(?:px|tpx|ipx|bpx)\(/.test(l) && !/\bfpx\(/.test(l)) out.push(f + ":" + (k + 1) + ": a text size that shrinks with the interface size (use fpx()): " + l.trim().slice(0, 80));
+      const hex = /\b(?:color|tint|strokeColor|fillColor)\s*:[^;}]*"#[0-9A-Fa-f]{3,8}"/.exec(l);
+      if (hex && !/"#000000"/.test(hex[0])) out.push(f + ":" + (k + 1) + ": a color written here (take it from app.colors, so its contrast is measured): " + l.trim().slice(0, 80));
+    }
+  }
+  console.log("Readable check: " + out.length + " problems");
   return out;
 }
 
@@ -361,7 +399,7 @@ for (const f of files) {
   }
 }
 const readable = files.filter(f => fs.existsSync(f));
-all = all.concat(motionRule(readable)).concat(styleRule(readable)).concat(pointerRule(readable));
+all = all.concat(motionRule(readable)).concat(styleRule(readable)).concat(pointerRule(readable)).concat(readableRule(readable));
 for (const e of all) console.log(e);
 console.log("QML check: " + files.length + " files, " + all.length + " problems");
 process.exit(all.length ? 1 : 0);

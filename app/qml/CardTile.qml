@@ -12,6 +12,8 @@ Focusable {
     required property var m
     fid: "card:" + m.id
     aLabel: m.act === "none" ? "" : (m.button || "Open")
+    sayName: [m.title || "", m.value || "", m.badge || "", m.status || "", m.button || ""].filter(x => x !== "").join(", ")
+    sayMore: m.line || ""
     implicitHeight: body.implicitHeight + app.px(36)
     onActivated: app.doAct(m.act, m.arg, "")
     Rectangle {
@@ -43,7 +45,7 @@ Focusable {
             }
         }
         Label { app: card.app; Layout.fillWidth: true; text: card.m.line; color: card.app.colors.soft; font.pixelSize: card.app.fpx(15) }
-        Chip { app: card.app; text: card.m.badge || ""; tone: "warn"; icon: "" }
+        Chip { app: card.app; text: card.m.badge || ""; tone: "warn" }
         RowLayout {
             visible: (card.m.status || "") !== "" || (card.m.button || "") !== ""
             Layout.fillWidth: true

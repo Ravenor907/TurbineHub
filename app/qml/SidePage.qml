@@ -74,6 +74,8 @@ Item {
                     focusable: visible
                     fid: "search"
                     aLabel: "Type"
+                    sayRole: Accessible.EditableText
+                    sayName: "Search" + (input.text !== "" ? ": " + input.text : (page.search && page.search.hint ? ", " + page.search.hint : ""))
                     x: page.app.px(12)
                     width: parent.width - page.app.px(24)
                     height: visible ? page.app.tpx(46) : 0
@@ -84,6 +86,7 @@ Item {
                     Icon { id: searchIcon; app: page.app; d: page.app.icons.search; size: 18; anchors.verticalCenter: parent.verticalCenter; x: page.app.px(12) }
                     TextInput {
                         id: input
+                        Accessible.ignored: true
                         anchors { left: searchIcon.right; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: page.app.px(8); rightMargin: page.app.px(12) }
                         color: page.app.colors.text
                         font.family: page.app.bodyFont
@@ -106,7 +109,7 @@ Item {
                     clip: true
                     contentHeight: sideList.implicitHeight + page.app.px(10)
                     boundsBehavior: Flickable.StopAtBounds
-                    Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }
+                    Behavior on contentY { enabled: page.app.motion.moves; NumberAnimation { duration: page.app.motion.moveStandard; easing.type: page.app.motion.ease } }
                     Column {
                         id: sideList
                         x: page.app.px(12)
@@ -125,6 +128,9 @@ Item {
                                 fid: "side:" + modelData.id
                                 firstFocus: on
                                 aLabel: "Open"
+                                sayRole: Accessible.ListItem
+                                sayName: [modelData.title || "", on ? "open" : "", modelData.chip || "", modelData.lock === true ? "locked" : "", (index + 1) + " of " + page.side.length].filter(x => x !== "").join(", ")
+                                Accessible.selected: on
                                 width: sideList.width
                                 implicitHeight: Math.max(page.app.tpx(48), entryRow.implicitHeight + page.app.px(16))
                                 height: implicitHeight
@@ -144,7 +150,7 @@ Item {
                                     spacing: page.app.px(8)
                                     Icon { app: page.app; visible: entry.modelData.lock === true; d: page.app.icons.lock; size: 16 }
                                     Label { app: page.app; Layout.fillWidth: true; text: entry.modelData.title; font.weight: entry.on ? Font.DemiBold : Font.Medium; color: entry.on ? page.app.colors.text : page.app.colors.soft }
-                                    Chip { app: page.app; text: entry.modelData.chip || ""; tone: entry.modelData.tone || ""; icon: "" }
+                                    Chip { app: page.app; text: entry.modelData.chip || ""; tone: entry.modelData.tone || "" }
                                 }
                             }
                         }

@@ -89,7 +89,7 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
 | **Games** | Every Steam and Heroic game with how well it runs here, Play, switches, Proton choice, saves and "Won't start?" help, plus a library check |
 | **Store** | Essentials, Apps, Decky plugins, Launchers, TV and streaming, Emulation, Installed. Each item has its own page with Install, Open, Update and Remove |
 | **My machine** | Cards for what this machine has: Power, Display or Monitors, Lighting, Battery, Sleep and wake, Graphics card, Drives, Sound, Dock, Tune-up, Restart to Windows (only when Windows is really there) |
-| **Settings** | Mode, interface size (50 to 150%), themes and accents, the background helper, the save time machine, updates, My setup (save and apply), Help, Review changes, remove completely |
+| **Settings** | Mode, interface size (50 to 150%), themes and accents, colors for red-weak, green-weak and blue-weak eyes (or no color), animations (Full, Reduced, Off), the background helper, the save time machine, updates, My setup (save and apply), Help, Review changes, remove completely |
 
 <details>
 <summary><b>Guided and Veteran</b></summary>

@@ -19,11 +19,16 @@ pub struct Settings {
     /// The player picked the interface size (else it follows the machine: larger on a TV). Only a picked size is
     /// written to the file.
     pub scale_chosen: bool,
-    pub animations: bool,
+    /// How much moves: "full" (fades and glides), "reduced" (fades only, nothing travels or grows) or "off".
+    /// Older files hold true or false here: they read as "full" and "off".
+    pub animations: String,
     /// "dark", "black", "light" or "contrast".
     pub theme: String,
     /// "brass", "iron", "copper" or "jade".
     pub accent: String,
+    /// Which colors say fine, needs a look and stop: "typical", "red" (red-weak), "green" (green-weak), "blue"
+    /// (blue-weak) or "none" (no color: the mark and the word carry it alone).
+    pub vision: String,
     pub game_boost: bool,
     /// The save time machine: the background helper snapshots a game's saves each time it starts.
     pub save_snapshots: bool,
@@ -39,6 +44,8 @@ pub struct Settings {
 
 pub const THEMES: &[&str] = &["dark", "black", "light", "contrast"];
 pub const ACCENTS: &[&str] = &["brass", "iron", "copper", "jade"];
+pub const MOTIONS: &[&str] = &["full", "reduced", "off"];
+pub const VISIONS: &[&str] = &["typical", "red", "green", "blue", "none"];
 pub const SETUP_STEPS: &[&str] = &["machine", "password", "games", "bring", "picks"];
 pub const BRING_STEPS: &[&str] = &["stores", "gamepass", "windows", "apps", "tv"];
 
@@ -48,9 +55,10 @@ impl Default for Settings {
             mode: None,
             ui_scale: 100,
             scale_chosen: false,
-            animations: true,
+            animations: "full".into(),
             theme: "black".into(),
             accent: "jade".into(),
+            vision: "typical".into(),
             game_boost: false,
             save_snapshots: false,
             test_builds: false,
@@ -84,9 +92,15 @@ impl Settings {
             },
             ui_scale: j.get("uiScale").and_then(Json::as_f64).map(|v| (v.round() as i64).clamp(50, 150) as u32).unwrap_or(d.ui_scale),
             scale_chosen: j.get("uiScale").and_then(Json::as_f64).is_some(),
-            animations: b("animations", d.animations),
+            // A settings file from before there were three levels says true or false.
+            animations: match j.get("animations").and_then(Json::as_bool) {
+                Some(true) => "full".into(),
+                Some(false) => "off".into(),
+                None => word(&j, "animations", MOTIONS, &d.animations),
+            },
             theme: word(&j, "theme", THEMES, &d.theme),
             accent: word(&j, "accent", ACCENTS, &d.accent),
+            vision: word(&j, "vision", VISIONS, &d.vision),
             game_boost: b("gameBoost", d.game_boost),
             save_snapshots: b("saveSnapshots", d.save_snapshots),
             test_builds: b("testBuilds", d.test_builds),
@@ -105,10 +119,11 @@ impl Settings {
         };
         let scale = if self.scale_chosen { format!("\n  \"uiScale\": {},", self.ui_scale) } else { String::new() };
         format!(
-            "{{\n  \"mode\": {mode},{scale}\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"saveSnapshots\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
-            self.animations,
+            "{{\n  \"mode\": {mode},{scale}\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"vision\": {},\n  \"gameBoost\": {},\n  \"saveSnapshots\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
+            quote(&self.animations),
             quote(&self.theme),
             quote(&self.accent),
+            quote(&self.vision),
             self.game_boost,
             self.save_snapshots,
             self.test_builds,
@@ -165,9 +180,29 @@ mod tests {
         assert!(!fresh.to_json().contains("uiScale"));
         assert_eq!(Settings::parse(&fresh.to_json()), fresh);
         assert_eq!(Settings::parse("garbage"), Settings::default());
+        // The new choices keep their words, and a word that isn't one of them falls back.
+        let look = Settings { animations: "reduced".into(), vision: "green".into(), ..Settings::default() };
+        assert!(look.to_json().contains("\"animations\": \"reduced\"") && look.to_json().contains("\"vision\": \"green\""));
+        assert_eq!(Settings::parse(&look.to_json()), look);
+        let odd = Settings::parse(r#"{"animations":"wild","vision":"x-ray"}"#);
+        assert_eq!((odd.animations.as_str(), odd.vision.as_str()), ("full", "typical"));
         assert!(!s.setup_finished());
         s.setup_done = SETUP_STEPS.iter().map(|x| x.to_string()).collect();
         assert!(s.setup_finished());
+    }
+
+    #[test]
+    fn older_files_still_read() {
+        // Before there were three levels the file said true or false, and it had no color vision at all.
+        let on = Settings::parse(r#"{"mode":"guided","animations":true,"theme":"dark","accent":"brass"}"#);
+        assert_eq!((on.animations.as_str(), on.vision.as_str(), on.theme.as_str(), on.accent.as_str()), ("full", "typical", "dark", "brass"));
+        let off = Settings::parse(r#"{"mode":"veteran","animations":false}"#);
+        assert_eq!((off.animations.as_str(), off.mode), ("off", Some(Mode::Veteran)));
+        // No word at all: the default.
+        assert_eq!(Settings::parse(r#"{"mode":"guided"}"#).animations, "full");
+        // Saved again, it holds the word.
+        assert!(off.to_json().contains("\"animations\": \"off\""));
+        assert_eq!(Settings::parse(&off.to_json()), off);
     }
 
     #[test]

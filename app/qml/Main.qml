@@ -50,10 +50,21 @@ Window {
     function px(v) { return Math.round(v * unit) }
     // The screen's pixels per point (display scaling).
     readonly property real ratio: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-    // Text never goes below what can be read.
-    function fpx(v) { return Math.max(9, Math.round(v * unit)) }
-    // Touch targets keep a finger's size even at the smallest interface size.
-    function tpx(v) { return Math.max(Math.round(v * unit), Math.round(v * 0.7 * Math.min(width / 1280, height / 800))) }
+    // Text: never under 12 pixels, and never smaller than 90% of its design size, so the smallest interface size
+    // and the smallest window stay readable (body text keeps 14 pixels). Boxes that hold words grow with them.
+    readonly property int textFloor: 12
+    function fpx(v) { return Math.max(textFloor, Math.round(v * Math.max(unit, 0.9))) }
+    // Something to press never shrinks under a finger, whatever the interface size: 44 pixels, or 6 mm on a dense
+    // screen (a 7 inch 1080p handheld has about 12 pixels to the millimetre).
+    // (A picture can ask for a dense screen's floor with --finger=<pixels>, since a picture has no screen to measure.)
+    readonly property int touchFloor: shot.on && parseInt(Hub.option("finger")) > 0 ? parseInt(Hub.option("finger")) : Math.max(44, Math.round(Screen.pixelDensity * 6))
+    function tpx(v) { return Math.max(touchFloor, Math.round(v * unit)) }
+    // An icon: never under three quarters of its design size, so it stays a mark and not a speck beside words that
+    // keep nine tenths of theirs.
+    function ipx(v) { return Math.round(v * Math.max(unit, 0.75)) }
+    // A box that holds one line of words: its design size, or the room its words need at the size they are drawn
+    // (the text floor can make words larger than their box's design).
+    function bpx(v, textSize) { return Math.max(Math.round(v * unit), Math.round(fpx(textSize) * 1.45)) }
 
     FontLoader { id: cinzel; source: "file://" + Hub.share + "/fonts/Cinzel.ttf" }
     FontLoader { id: barlow; source: "file://" + Hub.share + "/fonts/Barlow-Regular.ttf" }
@@ -64,46 +75,13 @@ Window {
     readonly property string bodyFont: barlow.status === FontLoader.Ready ? barlow.font.family : "sans-serif"
 
     // ---------------------------------------------------------------- colors
-    QtObject {
-        id: c
-        readonly property bool hc: app.st.theme === "contrast"
-        readonly property bool light: app.st.theme === "light"
-        readonly property bool black: app.st.theme === "black" || hc
-        readonly property color ground: hc ? "#000000" : light ? "#F1EADB" : black ? "#000000" : "#0B0A08"
-        readonly property color bar: hc ? "#000000" : light ? "#E6DCC6" : black ? "#000000" : "#080706"
-        readonly property color panel: hc ? "#000000" : light ? "#E7DDC8" : black ? "#0C0B0A" : "#141109"
-        readonly property color card: hc ? "#000000" : light ? "#F7F2E7" : black ? "#080707" : "#100E0A"
-        readonly property color raised: hc ? "#1A1A1A" : light ? "#DDD1B8" : black ? "#161412" : "#1E1A10"
-        readonly property color line: hc ? "#FFFFFF" : light ? "#CDBF9F" : black ? "#26221C" : "#2A2418"
-        readonly property color text: hc ? "#FFFFFF" : light ? "#2A2216" : "#EADFC6"
-        readonly property color soft: hc ? "#FFFFFF" : light ? "#4A3E2A" : "#D9C9A6"
-        readonly property color muted: hc ? "#E0E0E0" : light ? "#5E5038" : "#AC9873"
-        readonly property var swatches: ({ brass: "#C99E52", iron: "#A9B4BE", copper: "#B07A5A", jade: "#6FAE8C" })
-        readonly property color accentBase: swatches[app.st.accent] || swatches.jade
-        readonly property color accent: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 1.8) : accentBase
-        readonly property color accentHi: hc ? "#FFE680" : light ? Qt.darker(accentBase, 1.6) : Qt.lighter(accentBase, 1.22)
-        readonly property color accentLo: light ? Qt.darker(accentBase, 2.1) : Qt.darker(accentBase, 1.35)
-        readonly property color onAccent: light ? "#FFFFFF" : "#0B0A08"
-        readonly property color accentText: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 2.2) : Qt.lighter(accentBase, 1.12)
-        readonly property color focusFill: hc ? "#333300" : light ? Qt.lighter(accentBase, 1.55) : Qt.darker(accentBase, 4.2)
-        // The highlight ring: as plain on the light ground as on the dark ones.
-        readonly property color ring: hc ? "#FFE680" : light ? Qt.darker(accentBase, 2.6) : Qt.lighter(accentBase, 1.22)
-        // Status colors; the words beside them always carry the meaning too.
-        readonly property color ok: hc ? "#9FE8B5" : light ? "#2F5A3C" : "#9FD3B5"
-        readonly property color okFill: hc ? "#002A10" : light ? "#D5E6D2" : "#13201A"
-        readonly property color warn: hc ? "#FFD080" : light ? "#7A4A10" : "#E6B36A"
-        readonly property color warnFill: hc ? "#2A1A00" : light ? "#EEDDB8" : "#241B0C"
-        readonly property color stop: hc ? "#FF8A80" : light ? "#8E2A1E" : "#F0907A"
-        readonly property color stopFill: hc ? "#2A0500" : light ? "#F0D2C8" : "#26110D"
-        readonly property color scrim: Qt.rgba(ground.r * 0.5, ground.g * 0.5, ground.b * 0.5, light ? 0.8 : 0.86)
-        // The controller's face buttons, as they are colored on the pad.
-        readonly property var pad: ({ a: "#6FAE8C", b: "#E6A98A", x: "#7FA7D9", y: "#E0C060" })
-        function tone(name) { return name === "ok" ? ok : name === "warn" ? warn : name === "stop" ? stop : muted }
-        function toneFill(name) { return name === "ok" ? okFill : name === "warn" ? warnFill : name === "stop" ? stopFill : raised }
-    }
+    // Every color, for the player's theme, accent and color vision (Palette.qml holds them and the rules they keep).
+    Palette { id: c; themeName: app.st.theme; accentName: app.st.accent; visionName: app.st.vision || "typical" }
     readonly property var colors: c
 
-    Motion { id: mo; level: app.st.animations && !shot.on ? "full" : "off" }
+    // The player's Animations setting: "full", "reduced" or "off" (a picture is taken with them off unless it asks,
+    // see --motion in backend.rs).
+    Motion { id: mo; level: ["full", "reduced", "off"].indexOf(app.st.animations) >= 0 ? app.st.animations : "full" }
     readonly property var motion: mo
 
     // Line icons on a 24 x 24 grid, one per kind of thing or action.
@@ -796,6 +774,10 @@ Window {
         z: 60
         color: c.scrim
         Backdrop { }
+        // A screen reader says what is happening.
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: Hub.busyWords + ". Keep Turbine Hub open until this is done."
+        Accessible.ignored: !Hub.busy
         Column {
             anchors.centerIn: parent
             spacing: app.px(16)

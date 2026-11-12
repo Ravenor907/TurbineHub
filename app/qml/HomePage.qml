@@ -54,6 +54,8 @@ Item {
         app: page.app
         fid: "item:" + modelData.id
         aLabel: modelData.button
+        sayName: [modelData.look ? "Needs a look" : "", modelData.title || "", modelData.button || ""].filter(x => x !== "").join(", ")
+        sayMore: modelData.line || ""
         implicitHeight: findingRow.implicitHeight + page.app.px(compact ? 20 : 30)
         onActivated: page.app.doAct("checkup", modelData.opens, "")
         Rectangle { anchors.fill: parent; radius: page.app.px(10); color: page.app.colors.panel; border.width: Math.max(1, page.app.px(1)); border.color: page.app.colors.line }
@@ -89,7 +91,7 @@ Item {
         clip: true
         contentHeight: (page.guided ? guidedBody.implicitHeight : veteranBody.implicitHeight) + page.app.px(40)
         boundsBehavior: Flickable.StopAtBounds
-        Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }
+        Behavior on contentY { enabled: page.app.motion.moves; NumberAnimation { duration: page.app.motion.moveStandard; easing.type: page.app.motion.ease } }
 
         // ------------------------------------------------------------ Guided
         GridLayout {
@@ -116,6 +118,8 @@ Item {
                     visible: s.show === true
                     fid: "setup"
                     aLabel: "Continue"
+                    sayName: "Finish setting up, " + (s.done || 0) + " of " + (s.total || 0) + " done, Continue"
+                    sayMore: "Next: " + (s.next || []).join(", ")
                     Layout.fillWidth: true
                     implicitHeight: setupRow.implicitHeight + page.app.px(28)
                     onActivated: page.app.open("setup")
@@ -225,6 +229,10 @@ Item {
                         app: page.app
                         fid: "switch:" + modelData.id
                         aLabel: modelData.toggle ? (modelData.on ? "Turn off" : "Turn on") : "Open"
+                        sayRole: modelData.toggle ? Accessible.CheckBox : Accessible.Button
+                        sayName: [modelData.title || "", modelData.toggle ? (modelData.on ? "on" : "off") : "", modelData.value || ""].filter(x => x !== "").join(", ")
+                        Accessible.checkable: modelData.toggle === true
+                        Accessible.checked: modelData.toggle === true && modelData.on === true
                         Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.fillHeight: true
                         implicitHeight: Math.max(page.app.px(76), swRow.implicitHeight + page.app.px(24))
                         onActivated: modelData.toggle ? page.app.doAct(modelData.id, "", "") : page.app.doAct("open", modelData.id, "")

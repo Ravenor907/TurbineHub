@@ -29,6 +29,10 @@ Item {
     readonly property bool typed: ask === "" || (pw.text !== "" && (ask !== "new" || pw2.text !== ""))
     z: 50
     visible: open
+    // A screen reader hears the question when it opens: its title, then what will happen.
+    Accessible.role: d !== null && d.rows ? Accessible.PopupMenu : Accessible.Dialog
+    Accessible.name: d ? (d.title || "") : ""
+    Accessible.description: d ? (d.keep ? (d.text || "").replace("{n}", remaining) : (d.text || "")) : ""
     // The card, for the build's checks.
     readonly property Item cardItem: card
 
@@ -118,9 +122,11 @@ Item {
         width: Math.min(dlg.app.px(dlg.d && dlg.d.rows ? 460 : 680), parent.width - dlg.app.px(48))
         height: Math.min(body.implicitHeight + dlg.app.px(52), parent.height - dlg.app.px(40))
         radius: dlg.app.px(12)
-        // It grows a little into place as it opens.
+        // It fades in as it opens, and at Full it also grows a little into place.
+        opacity: dlg.open ? 1 : dlg.app.motion.swapFrom
+        Behavior on opacity { enabled: dlg.app.motion.on; NumberAnimation { duration: dlg.app.motion.standard; easing.type: dlg.app.motion.ease } }
         scale: dlg.open ? 1 : dlg.app.motion.popScale
-        Behavior on scale { enabled: dlg.app.motion.on; NumberAnimation { duration: dlg.app.motion.standard; easing.type: dlg.app.motion.ease } }
+        Behavior on scale { enabled: dlg.app.motion.moves; NumberAnimation { duration: dlg.app.motion.moveStandard; easing.type: dlg.app.motion.ease } }
         color: dlg.app.colors.panel
         border.width: Math.max(1, dlg.app.px(2))
         border.color: dlg.app.colors.accentLo
@@ -145,6 +151,8 @@ Item {
                 focusable: dlg.open && dlg.scrolls && !(dlg.d && dlg.d.rows)
                 fid: "list"
                 aLabel: ""
+                sayRole: Accessible.StaticText
+                sayName: dlg.d ? [dlg.d.text || ""].concat((dlg.d.items || []).map(x => x.title + (x.line ? ": " + x.line : ""))).filter(x => x !== "").join(". ") : ""
                 tapActivates: false
                 ringGap: dlg.app.px(2)
                 Layout.fillWidth: true
@@ -161,7 +169,7 @@ Item {
                     clip: true
                     contentHeight: listCol.implicitHeight
                     boundsBehavior: Flickable.StopAtBounds
-                    Behavior on contentY { enabled: dlg.app.motion.on; NumberAnimation { duration: dlg.app.motion.standard; easing.type: dlg.app.motion.ease } }
+                    Behavior on contentY { enabled: dlg.app.motion.moves; NumberAnimation { duration: dlg.app.motion.moveStandard; easing.type: dlg.app.motion.ease } }
                     Column {
                         id: listCol
                         width: list.width
@@ -194,6 +202,8 @@ Item {
                                 fid: "menu:" + index
                                 firstFocus: index === 0
                                 aLabel: "Open"
+                                sayRole: Accessible.MenuItem
+                                sayName: (modelData.title || "") + ", " + (index + 1) + " of " + (dlg.d ? (dlg.d.rows || []).length : 0)
                                 width: listCol.width - dlg.app.px(8)
                                 x: dlg.app.px(4)
                                 height: dlg.app.tpx(48)
@@ -226,12 +236,16 @@ Item {
                         fid: "password"
                         firstFocus: true
                         aLabel: "Type"
+                        sayRole: Accessible.EditableText
+                        // (What is typed is never said, only how much: the box says it is a password by its name.)
+                        sayName: (dlg.ask === "new" ? "New password" : "Your SteamOS password") + (pw.text === "" ? ", empty" : ", " + pw.text.length + " typed")
                         Layout.fillWidth: true
                         implicitHeight: dlg.app.tpx(48)
                         onActivated: dlg.app.typeIn(pw)
                         Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.ground; border.width: Math.max(1, dlg.app.px(2)); border.color: pw.activeFocus ? dlg.app.colors.accent : dlg.app.colors.line }
                         TextInput {
                             id: pw
+                            Accessible.ignored: true
                             anchors { fill: parent; leftMargin: dlg.app.px(14); rightMargin: dlg.app.px(14) }
                             verticalAlignment: TextInput.AlignVCenter
                             echoMode: showBox.shown ? TextInput.Normal : TextInput.Password
@@ -252,6 +266,7 @@ Item {
                         focusable: dlg.ask !== ""
                         fid: "show"
                         label: shown ? "Hide" : "Show"
+                        sayName: shown ? "Hide the password" : "Show the password"
                         icon: "eye"
                         onActivated: shown = !shown
                     }
@@ -263,12 +278,15 @@ Item {
                     focusable: dlg.ask === "new"
                     fid: "password2"
                     aLabel: "Type"
+                    sayRole: Accessible.EditableText
+                    sayName: "Type the new password again" + (pw2.text === "" ? ", empty" : ", " + pw2.text.length + " typed")
                     Layout.fillWidth: true
                     implicitHeight: dlg.app.tpx(48)
                     onActivated: dlg.app.typeIn(pw2)
                     Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.ground; border.width: Math.max(1, dlg.app.px(2)); border.color: pw2.activeFocus ? dlg.app.colors.accent : dlg.app.colors.line }
                     TextInput {
                         id: pw2
+                        Accessible.ignored: true
                         anchors { fill: parent; leftMargin: dlg.app.px(14); rightMargin: dlg.app.px(14) }
                         verticalAlignment: TextInput.AlignVCenter
                         echoMode: showBox.shown ? TextInput.Normal : TextInput.Password
@@ -284,7 +302,7 @@ Item {
                 }
                 Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "No keyboard on screen? Steam button and X opens it."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
             }
-            Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.error; color: dlg.app.colors.stop; font.weight: Font.DemiBold }
+            Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.error; color: dlg.app.colors.readable(dlg.app.colors.stop, dlg.app.colors.panel); font.weight: Font.DemiBold; Accessible.role: Accessible.AlertMessage; Accessible.name: text }
 
             // The buttons, always in view.
             RowLayout {

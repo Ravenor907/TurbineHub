@@ -7,6 +7,10 @@ import QtQuick
 // The highlight is always a ring outside the item, never a fill, so it reads the same on a card, a row or a
 // button and can't be mistaken for "selected" (an accent mark) or "primary" (an accent fill).
 //
+// A screen reader (Orca in Desktop Mode) hears each one: what kind of thing it is (sayRole, a button unless said
+// otherwise), its name with its state in words (sayName: "Game Boost, on"), more about it (sayMore), and that the
+// highlight is on it now. The build's checks fail a picture in which one has no name (SelfCheck).
+//
 // app (required): Main.qml's window. fid: a name that survives a reload, so the highlight comes back to the same
 // thing. aLabel: what A does here, for the footer ("" when A does nothing). hints: more footer hints while the
 // highlight is here. firstFocus: where the highlight starts on a page.
@@ -27,6 +31,18 @@ Item {
     property real ringGap: app.px(3)
     readonly property bool focused: app.focusItem === f
     signal activated()
+    property int sayRole: Accessible.Button
+    property string sayName: aLabel
+    property string sayMore: ""
+    Accessible.role: sayRole
+    Accessible.name: sayName
+    Accessible.description: sayMore
+    Accessible.focusable: focusable
+    Accessible.focused: focused
+    // Drawn but not something the highlight lands on (a button inside a row that takes the press): the row speaks.
+    Accessible.ignored: !focusable
+    // A screen reader's own "press" is a press of A here, and obeys what a press obeys.
+    Accessible.onPressAction: if (f.focusable && f.app.gate(f)) { f.app.setFocus(f, true); if (f.aLabel !== "") f.activated() }
     // Rebuilt away while it held the highlight (its list re-flowed): the highlight finds its new self.
     Component.onDestruction: if (app && app.focusItem === f) app.focusLost()
 

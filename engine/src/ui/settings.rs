@@ -3,12 +3,14 @@ use super::plan::{Plan, Step, dialog, helper_plan, refresh, state, toast, with_h
 use super::{Ui, ago, arr, b, checked_at, checked_words, n, obj, row, s, section, with};
 use crate::helper::{self, Change, Setting};
 use crate::json::{self, Json};
-use crate::settings::{ACCENTS, Mode, THEMES};
+use crate::settings::{ACCENTS, MOTIONS, Mode, THEMES, VISIONS};
 use std::path::PathBuf;
 
 const SECTIONS: &[(&str, &str)] = &[("general", "General"), ("look", "Look"), ("updates", "Updates"), ("setup", "My setup"), ("help", "Help and reports"), ("about", "About")];
 const THEME_WORDS: &[&str] = &["Dark", "Black", "Light", "High contrast"];
 const ACCENT_WORDS: &[&str] = &["Brass", "Iron", "Copper", "Jade"];
+const VISION_WORDS: &[&str] = &["Typical", "Red-weak", "Green-weak", "Blue-weak", "No color"];
+const MOTION_WORDS: &[&str] = &["Full", "Reduced", "Off"];
 const ACCENT_HEX: &[&str] = &["#C99E52", "#A9B4BE", "#B07A5A", "#6FAE8C"];
 const FLATPAK_ID: &str = "io.github.ravenor907.TurbineHub";
 /// How long a new interface size waits to be kept before it goes back by itself.
@@ -76,7 +78,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             let mut rows = vec![
                 choice("mode", "Mode", "Guided explains things. Veteran shows every control.", &["Guided", "Veteran"], if st.mode == Some(Mode::Veteran) { 1 } else { 0 }),
                 scale,
-                with(row("animations", "", "toggle", "Animations", "Fades and slides between screens"), "on", b(st.animations)),
                 agent_row(ui),
                 with(with(with(row("snapshots", "", "toggle", "Save time machine", &format!("A snapshot of a game's saves each time it starts. The newest {} are kept.", crate::snapshots::KEEP)), "on", b(st.save_snapshots)), "badge", s(if st.save_snapshots && !ui.agent_running() { "Needs the background helper" } else { "" })), "tone", s("warn")),
                 open_row("bring", "Bring it over", "Run the Windows steps again", "Open"),
@@ -88,6 +89,8 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "look" => vec![
             choice("theme", "Theme", "", THEME_WORDS, THEMES.iter().position(|t| *t == st.theme).unwrap_or(0)),
             with(choice("accent", "Accent", "", ACCENT_WORDS, ACCENTS.iter().position(|a| *a == st.accent).unwrap_or(0)), "swatches", arr(ACCENT_HEX.iter().map(|h| s(*h)))),
+            choice("vision", "Color vision", "The colors that say fine, needs a look and won't work, picked so your eyes tell them apart. Each keeps its own mark and word too.", VISION_WORDS, VISIONS.iter().position(|v| *v == st.vision).unwrap_or(0)),
+            choice("animations", "Animations", "Full fades and glides. Reduced only fades: nothing slides or grows. Off changes everything at once.", MOTION_WORDS, MOTIONS.iter().position(|v| *v == st.animations).unwrap_or(0)),
         ],
         "updates" => {
             let fresh = checked_words(crate::now(), checked_at(&ui.cache), ui.offline);
@@ -272,7 +275,11 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             }
         }
         "animations" => {
-            st.animations = !st.animations;
+            st.animations = MOTIONS.get(idx?)?.to_string();
+            state()
+        }
+        "vision" => {
+            st.vision = VISIONS.get(idx?)?.to_string();
             state()
         }
         "theme" => {

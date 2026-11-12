@@ -40,7 +40,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("module:windows", "Starts Windows once, at the next start only. After that, SteamOS starts again as usual."),
     ("module:monitors", "Your screens: refresh rate, variable refresh (VRR) and HDR. These are for Desktop Mode; in Game Mode, Steam's Settings, Display decides."),
     ("module:power", "How much power the processor may use, and Game Boost. Lower is quieter and the battery lasts longer."),
-    ("settings", "How Turbine Hub looks and works, updates, your setup file, help and reports."),
+    ("settings", "How Turbine Hub looks and works, updates, your setup file, help and reports. Look holds the theme, the colors for your eyes (Color vision) and how much moves (Animations)."),
     ("changes", "Everything Turbine Hub changed on this machine, with Undo, or a button to the page where it is undone."),
     ("bring", "What to bring over from Windows: other stores, your Windows drive, your Windows apps, TV and streaming."),
     ("windrive", "Games and saves on your Windows drive, copied to this machine. The drive is only read, never changed."),

@@ -7,6 +7,11 @@
 # it. 1600x900 is a Desktop Mode window (--window). Fails when a picture is missing or a check fails. The pictures
 # named check-... are taken after the page was worked with real keys, a real mouse and a finger: taps never go
 # through a dialog, a held key acts once, a resting mouse never takes the highlight (app/qml/SelfCheck.qml).
+# The pictures named motion-... are taken with animations on, after presses made while things move: each must come
+# to rest, and on the same picture its presses give with animations off (<name>-still.png, taken beside it).
+# Every picture also measures what it shows: words at 4.5 to 1 on what they are drawn on, nothing under the text
+# floor, nothing to press smaller than a finger, a name for a screen reader on every control, and all 80
+# combinations of theme, accent and color vision (see the head of SelfCheck.qml).
 # In CI the bundle the build made (TurbineHub.flatpak in the working folder) is installed first; on a development
 # PC tools/dev-build.sh has installed it.
 set -u
@@ -53,6 +58,8 @@ failed=0
 passed=0
 hung=0
 inputs=0
+motions=0
+tools=$(cd "$(dirname "$0")" && pwd)
 for size in $sizes; do
   mkdir -p "$out/$size"
   extra=""
@@ -102,6 +109,32 @@ for size in $sizes; do
           bad=1
         fi ;;
     esac
+    # A picture taken with animations (motion-...: --motion=full or reduced), after presses made while things moved:
+    # the run must say that everything came to rest, and the picture must be the one the same presses give with
+    # animations off (taken here, right beside it). Up to 200 pixels may differ by more than 3%: the edge of a
+    # large letter isn't always drawn the same way twice; anything more is a page that ended somewhere else.
+    case "$name" in
+      motion-*)
+        if grep -q '^MOTIONCHECK ok' "$log"; then
+          still="$out/$size/$name-still.png"
+          rm -f "$still"
+          # (The first --motion counts, so this one overrides the list's.)
+          # shellcheck disable=SC2086
+          app 60 --screenshot="$still" --size="$size" $extra --motion=off $args > "$out/$size/$name-still.log" 2>&1
+          d=$(python3 -c 'import runpy, sys; m = runpy.run_path(sys.argv[3]); c, box, _ = m["compare"](m["read_png"](sys.argv[1]), m["read_png"](sys.argv[2]), 3); print(c, box)' "$still" "$png" "$tools/shot-diff.py" 2> /dev/null || echo "999999 unreadable")
+          if [ "${d%% *}" -le 200 ]; then
+            motions=$((motions + 1))
+          else
+            echo "::error title=Animations end somewhere else::$size $name differs from $name-still: $d (pixels, box)"
+            failed=$((failed + 1))
+            bad=1
+          fi
+        else
+          echo "::error title=Motion check failed::$size $name never came to rest, or something traveled at Reduced"
+          failed=$((failed + 1))
+          bad=1
+        fi ;;
+    esac
     # A script error in the page is a failure even when the picture came out.
     if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "$log"; then
       echo "::error title=QML problem::$size $name"
@@ -114,6 +147,6 @@ for size in $sizes; do
     if [ $hung -ge 3 ]; then echo "::error title=Turbine Hub hangs::three pictures timed out"; exit 1; fi
   done < "$list"
 done
-echo "Pictures: $total taken in $out ($sizes), $missing missing, checks: $passed ok, $failed failed, input checks: $inputs ok"
+echo "Pictures: $total taken in $out ($sizes), $missing missing, checks: $passed ok, $failed failed, input checks: $inputs ok, motion checks: $motions ok"
 if [ $missing -gt 0 ] || [ $failed -gt 0 ] || [ $total -eq 0 ]; then exit 1; fi
 exit 0

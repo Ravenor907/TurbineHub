@@ -43,7 +43,7 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         // Pinned headings cover the top of the list: Main.qml's reveal keeps the highlight below them.
         readonly property real topInset: rv.sideBySide ? rv.app.fpx(14) * 2 : 0
-        Behavior on contentY { enabled: rv.app.motion.on; NumberAnimation { duration: rv.app.motion.standard; easing.type: rv.app.motion.ease } }
+        Behavior on contentY { enabled: rv.app.motion.moves; NumberAnimation { duration: rv.app.motion.moveStandard; easing.type: rv.app.motion.ease } }
     }
 
     // One section: its heading, a line when it is empty, and its rows.

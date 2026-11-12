@@ -52,11 +52,11 @@ Item {
                     Layout.bottomMargin: page.app.px(10)
                     spacing: page.app.px(12)
                     Rectangle {
-                        Layout.preferredWidth: page.app.px(28); Layout.preferredHeight: page.app.px(28); radius: width / 2
+                        Layout.preferredWidth: page.app.bpx(28, 14); Layout.preferredHeight: page.app.bpx(28, 14); radius: width / 2
                         color: stepRow.modelData.done || stepRow.modelData.current ? page.app.colors.accent : page.app.colors.raised
                         border.width: stepRow.modelData.done || stepRow.modelData.current ? 0 : Math.max(1, page.app.px(1)); border.color: page.app.colors.muted
-                        Icon { app: page.app; visible: stepRow.modelData.done && !stepRow.modelData.current; anchors.centerIn: parent; d: page.app.icons.check; size: 16; tint: page.app.colors.onAccent }
-                        Text { visible: !stepRow.modelData.done || stepRow.modelData.current; anchors.centerIn: parent; text: stepRow.index + 1; color: stepRow.modelData.current ? page.app.colors.onAccent : page.app.colors.muted; font.family: page.app.bodyFont; font.pixelSize: page.app.fpx(14); font.bold: true }
+                        Icon { app: page.app; visible: stepRow.modelData.done && !stepRow.modelData.current; anchors.centerIn: parent; d: page.app.icons.check; size: 16; tint: page.app.colors.accentInk }
+                        Text { visible: !stepRow.modelData.done || stepRow.modelData.current; anchors.centerIn: parent; text: stepRow.index + 1; color: stepRow.modelData.current ? page.app.colors.accentInk : page.app.colors.muted; font.family: page.app.bodyFont; font.pixelSize: page.app.fpx(14); font.bold: true }
                     }
                     Label { app: page.app; Layout.fillWidth: true; text: stepRow.modelData.title; font.pixelSize: page.app.fpx(17); font.weight: stepRow.modelData.current ? Font.Bold : Font.Medium; color: stepRow.modelData.current ? page.app.colors.accentText : stepRow.modelData.done ? page.app.colors.text : page.app.colors.muted }
                 }

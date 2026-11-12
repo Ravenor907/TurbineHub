@@ -36,20 +36,30 @@ Item {
                 Rectangle {
                     id: tile
                     required property var modelData
-                    width: tileRow.implicitWidth + page.app.px(28); height: page.app.px(52); radius: page.app.px(10)
-                    color: page.app.colors.toneFill(modelData.tone)
-                    border.width: page.app.colors.hc ? 1 : 0; border.color: page.app.colors.tone(modelData.tone)
+                    // A count in its state's color, with the state's own mark and its word: never the color alone.
+                    readonly property bool stateChip: true
+                    readonly property string tone: modelData.tone || ""
+                    readonly property string text: modelData.label || ""
+                    readonly property string markName: tone === "ok" ? "check" : tone === "stop" ? "close" : tone === "warn" ? "warn" : ""
+                    readonly property bool marked: tileMark.visible
+                    readonly property color ink: page.app.colors.readable(page.app.colors.tone(tone), color)
+                    width: tileRow.implicitWidth + page.app.px(28); height: Math.max(page.app.px(52), tileRow.implicitHeight + page.app.px(10)); radius: page.app.px(10)
+                    color: page.app.colors.toneFill(tone)
+                    border.width: page.app.colors.hc || page.app.colors.noColor ? 1 : 0; border.color: ink
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: modelData.value + " " + modelData.label
                     Row {
                         id: tileRow
                         anchors.centerIn: parent
                         spacing: page.app.px(8)
-                        Text { text: tile.modelData.value; color: page.app.colors.tone(tile.modelData.tone); font.family: page.app.bodyFont; font.pixelSize: page.app.fpx(24); font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
+                        Icon { id: tileMark; app: page.app; visible: tile.markName !== ""; d: tile.markName !== "" ? page.app.icons[tile.markName] : ""; size: 18; tint: tile.ink; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: tile.modelData.value; color: tile.ink; font.family: page.app.bodyFont; font.pixelSize: page.app.fpx(24); font.weight: Font.Bold; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: tile.modelData.label; color: page.app.colors.text; font.family: page.app.bodyFont; font.pixelSize: page.app.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
             }
             Column {
-                height: page.app.px(52)
+                height: Math.max(page.app.px(52), page.app.fpx(15) * 3)
                 Label { app: page.app; text: page.model.note || ""; font.pixelSize: page.app.fpx(15); height: parent.height / 2 }
                 Row {
                     spacing: page.app.px(6)
@@ -67,6 +77,8 @@ Item {
             visible: page.model.search === true
             fid: "search"
             aLabel: "Type"
+            sayRole: Accessible.EditableText
+            sayName: "Search" + (input.text !== "" ? ": " + input.text : "")
             Layout.fillWidth: true
             Layout.maximumWidth: page.app.px(560)
             implicitHeight: page.app.tpx(48)
@@ -75,6 +87,7 @@ Item {
             Icon { id: searchIcon; app: page.app; d: page.app.icons.search; size: 20; anchors.verticalCenter: parent.verticalCenter; x: page.app.px(14) }
             TextInput {
                 id: input
+                Accessible.ignored: true
                 anchors { left: searchIcon.right; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: page.app.px(10); rightMargin: page.app.px(14) }
                 color: page.app.colors.text
                 font.family: page.app.bodyFont

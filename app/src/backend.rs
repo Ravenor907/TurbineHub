@@ -83,6 +83,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "testTouch"]
         fn test_touch(self: &Self, kind: i32, x: f64, y: f64);
+
+        /// For the build's checks (screenshot runs only): what a screen reader is told about the window, counted
+        /// from Qt's accessibility tree. `what`: 0 the controls it finds, 1 those of them with no name, 2 those
+        /// that say the highlight is on them, 3 the plain texts, 4 as 0 with every control printed. -1 outside a
+        /// screenshot run.
+        #[qinvokable]
+        #[cxx_name = "testSpoken"]
+        fn test_spoken(self: &Self, what: i32) -> i32;
     }
 }
 
@@ -91,6 +99,7 @@ unsafe extern "C" {
     fn turbinehub_test_key(key: i32, mods: i32, pressed: i32, repeat: i32) -> i32;
     fn turbinehub_test_mouse(kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) -> i32;
     fn turbinehub_test_touch(kind: i32, x: f64, y: f64) -> i32;
+    fn turbinehub_test_spoken(what: i32) -> i32;
 }
 
 use crate::pad::Pads;
@@ -273,8 +282,17 @@ fn make_ui() -> Ui {
     if let Some(t) = option("theme").filter(|t| turbinehub_engine::settings::THEMES.contains(&t.as_str())) {
         st.theme = t;
     }
-    // Pictures never race an animation.
-    st.animations = option("screenshot").is_none();
+    if let Some(a) = option("accent").filter(|a| turbinehub_engine::settings::ACCENTS.contains(&a.as_str())) {
+        st.accent = a;
+    }
+    if let Some(v) = option("vision").filter(|v| turbinehub_engine::settings::VISIONS.contains(&v.as_str())) {
+        st.vision = v;
+    }
+    // Pictures never race an animation: they are taken with animations off, unless the picture is there to see
+    // that a page worked while things move comes to rest where it would without them ("--motion=full").
+    if option("screenshot").is_some() {
+        st.animations = option("motion").filter(|m| turbinehub_engine::settings::MOTIONS.contains(&m.as_str())).unwrap_or_else(|| "off".into());
+    }
     if option("arg").is_some() && option("page").as_deref() == Some("setup") {
         st.setup_done.clear();
     }
@@ -446,6 +464,14 @@ impl qobject::Hub {
             // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to this window.
             unsafe { turbinehub_test_key(key, mods, i32::from(pressed), i32::from(repeat)) };
         }
+    }
+
+    pub fn test_spoken(&self, what: i32) -> i32 {
+        if option("screenshot").is_none() {
+            return -1;
+        }
+        // SAFETY: a plain call into qtglue.cpp on the interface thread; it only reads the window's accessibility tree.
+        unsafe { turbinehub_test_spoken(what) }
     }
 
     pub fn test_mouse(&self, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) {

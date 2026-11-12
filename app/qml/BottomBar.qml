@@ -11,7 +11,8 @@ Rectangle {
     // The hints left out for room: the page's own extras first (from the last), then Help and Menu; never A or B.
     property var hidden: []
     readonly property var shownKeys: hints.filter((h, i) => hidden.indexOf(i) < 0).map(h => h.k)
-    height: app.px(58)
+    // Tall enough for its words and for a finger at every interface size.
+    height: Math.max(app.px(58), app.touchFloor + app.px(6))
     color: app.colors.bar
     Rectangle { anchors.top: parent.top; width: parent.width; height: Math.max(1, bar.app.px(1)); color: bar.app.colors.line }
 
@@ -21,7 +22,7 @@ Rectangle {
         const out = []
         function total() {
             let w = 0
-            for (let i = 0; i < hints.length && i < measure.count; i++) if (out.indexOf(i) < 0 && measure.itemAt(i)) w += measure.itemAt(i).implicitWidth + gap
+            for (let i = 0; i < hints.length && i < measure.count; i++) if (out.indexOf(i) < 0 && measure.itemAt(i)) w += Math.max(measure.itemAt(i).implicitWidth, app.touchFloor) + gap
             return w
         }
         // Who gives way first: the page's extras from the last one back, then Help, then Menu.
@@ -54,6 +55,13 @@ Rectangle {
                 visible: bar.hidden.indexOf(index) < 0
                 spacing: bar.app.px(9)
                 height: bar.height
+                // Never narrower than a finger (a short hint on a dense screen).
+                width: Math.max(implicitWidth, bar.app.touchFloor)
+                // Something to tap, and for a screen reader a button: "A: Turn on".
+                readonly property bool tapTarget: true
+                Accessible.role: Accessible.Button
+                Accessible.name: bar.app.glyph(modelData.k) + ": " + modelData.label
+                Accessible.onPressAction: if (bar.app.gate(hint, hint.modelData.k)) { if (bar.app.typing) bar.app.typingDone(); else bar.app.press(hint.modelData.k) }
                 KeyCap { app: bar.app; k: hint.modelData.k; anchors.verticalCenter: parent.verticalCenter }
                 Text { text: hint.modelData.label; color: bar.app.colors.text; font.family: bar.app.bodyFont; font.pixelSize: bar.app.fpx(16); anchors.verticalCenter: parent.verticalCenter }
                 TapHandler { onTapped: if (bar.app.gate(hint, hint.modelData.k)) { if (bar.app.typing) bar.app.typingDone(); else bar.app.press(hint.modelData.k) } }

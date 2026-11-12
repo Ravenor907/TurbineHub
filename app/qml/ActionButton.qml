@@ -34,7 +34,7 @@ Focusable {
         Text {
             id: words
             text: ab.label
-            color: ab.primary ? ab.app.colors.onAccent : ab.app.colors.text
+            color: ab.primary ? ab.app.colors.accentInk : ab.app.colors.text
             font.family: ab.app.bodyFont
             font.pixelSize: ab.app.fpx(16)
             font.weight: Font.DemiBold

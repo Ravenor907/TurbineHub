@@ -5,16 +5,31 @@ Everything in `app/qml` draws what the engine says. A page is one JSON object fr
 anything about the machine: filtering, sorting, counts, wording and what a button does all come from
 `engine/src/ui`.
 
-Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes (`app.px`, `app.fpx`, `app.tpx`),
-fonts, icons (`app.icons`) and motion (`app.motion`).
+Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes (`app.px`, `app.fpx`, `app.tpx`,
+`app.ipx`, `app.bpx`), fonts, icons (`app.icons`) and motion (`app.motion`).
 
 ## The window (Main.qml)
 
 - **Sizes.** Drawn from a 1280 x 800 design, scaled to the window and by the interface size (50 to 150%).
-  `px` for lengths, `fpx` for text (never below what can be read), `tpx` for touch targets (a finger's size even at
-  50%). Font sizes are never bare numbers (tools/qml-check.js).
-- **Colors.** Four themes (dark, black, light, high contrast) and four accents. Status colors come with a tinted
-  fill and are never the only carrier of meaning: a chip has words and an icon too.
+  `px` for lengths; `fpx` for text (never under 12 pixels nor under nine tenths of its design size, so 50% and a
+  small window stay readable and boxes re-flow around their words); `tpx` for anything to press (never under
+  `touchFloor`: 44 pixels, or 6 mm on a dense screen); `ipx` for icons (never under three quarters); `bpx(v, text)`
+  for a box that holds one line of words (its design size or the room the words need). The two bars keep a
+  finger's height. Font sizes always go through `fpx` (tools/qml-check.js).
+- **Colors.** Palette.qml holds every color for a theme (dark, black, light, high contrast), an accent (brass,
+  iron, copper, jade) and a kind of color vision (typical, red-weak, green-weak, blue-weak, no color); Main.qml's
+  is `app.colors`. Words read at 4.5 to 1 on every surface in all 80 combinations, and the three states (ok, warn,
+  stop) stay apart for the eyes the mode is for (red-weak and green-weak: blue, yellow and a darker red; no color:
+  none at all). A state is never color alone: a chip has its mark and its word. `app.colors.readable(color, on)`
+  moves a color until it reads on a ground. No other file writes a color (tools/qml-check.js); a property is never
+  named `on...` (QML takes that for a signal handler and the value is lost: the text on an accent fill was black on
+  the light theme for that reason, and is `accentInk` now).
+- **Animations.** `app.motion.level` is the player's: full, reduced (fades only: nothing travels, slides or grows)
+  or off. A fade runs while `motion.on` and takes `quick`, `standard` or `gentle`; anything that changes a place or
+  a size runs while `motion.moves` and takes `moveQuick` or `moveStandard` (tools/qml-check.js holds both).
+- **For a screen reader.** Everything the highlight lands on says its kind, its name with its state in words, more
+  about it, and that the highlight is on it (`sayRole`, `sayName`, `sayMore` on Focusable); tabs, footer hints,
+  the dialog, the toast and the busy cover speak too; icons are skipped. Orca in Desktop Mode reads them.
 - **Pages.** Five tabs, and a stack of pages opened on top. `fileFor` picks the component for a page name.
   The first-run pages (pick, setup, quick) hide the tabs, and no tab opens before a mode is picked. A page opened
   on top keeps what it showed (the game, the section, the highlight) for when Back comes to it; the top bar lights
@@ -54,18 +69,19 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 | A ring outside the item | The highlight is here | Focusable |
 | An accent fill | The main action of a screen or dialog ("primary") | ActionButton |
 | An accent bar or a filled option with a check | The entry or option in effect ("selected") | SidePage, RowItem |
-| A tinted chip with an icon | A state (works, needs a fix, installed) | Chip |
+| A tinted chip with a mark (tick, warning sign, cross) and a word | A state (works, needs a fix, won't run) | Chip, the library check's counts |
 
 ## Components
 
 | File | What it is |
 |---|---|
-| Focusable | Anything the highlight can land on: the ring, `press`, `activated`, mouse and touch. |
+| Focusable | Anything the highlight can land on: the ring, `press`, `activated`, mouse and touch, and what a screen reader says (`sayRole`, `sayName`, `sayMore`). |
+| Palette | Every color for a theme, an accent and a kind of color vision, with `contrast` and `readable`. |
 | ActionButton | The one button look, with the pressing button's cap inside. |
 | KeyCap | A button's cap: the pad's colored face buttons, outlined caps for the rest and for keys. |
 | Label | Plain words that wrap instead of being cut. |
-| Icon | A line icon from path data on a 24 x 24 grid. |
-| Chip | A small state label. |
+| Icon | A line icon from path data on a 24 x 24 grid (skipped by a screen reader). |
+| Chip | A small state label: the tone's color on its fill, its mark and its word. |
 | Toggle | A switch as drawn (the row around it takes the press). |
 | RowItem | One engine row: toggle, check, slider, choice (as chips, or as cards with a color strip), button, info, or a live preview of the lights. |
 | RowsView | Sections of rows as a scrolling list, in columns where they fit. |
@@ -76,9 +92,9 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 | BottomBar | The footer's hints; when narrow drops the page's extras first, then Help and Menu, never A or B. |
 | Toast | A short note above the footer, or at the top when the highlight is down there. |
 | DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu. |
-| Motion | Every duration and curve. No other file names one. |
+| Motion | Every duration and curve, at the player's level (full, reduced, off). No other file names one. |
 | Backdrop | What takes the mouse and the finger away from everything under it: the dialog's backdrop and card, the busy cover. The only MouseArea. |
-| SelfCheck | The picture run's checks, and with `--check=taps`, `hold`, `hover`, `typing` or `mouse` the same page worked with real keys, a real mouse and a finger first. Loaded only with `--screenshot`. |
+| SelfCheck | The picture run's checks: layout, text size, contrast of the words as drawn, finger sizes, state chips, names for a screen reader (also asked from Qt's accessibility tree), all 80 palettes, and with `--motion=full` or `reduced` that everything comes to rest. With `--check=taps`, `hold`, `hover`, `typing` or `mouse` the same page is worked with real keys, a real mouse and a finger first. Loaded only with `--screenshot`. |
 
 ## Pages
 
@@ -95,4 +111,7 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 
 `turbinehub --shots` lists the pictures; `turbinehub --screenshot=<png> --size=<W>x<H> <args>` takes one on a made-up
 machine and runs SelfCheck. `tools/ci-shots.sh` takes them all at 1280x800, 1920x1080 and a 1600x900 Desktop Mode
-window.
+window. `--theme=`, `--accent=`, `--vision=` and `--scale=` pick the look; `--finger=<pixels>` stands in for a dense
+screen's finger size; `--motion=full` or `reduced` leaves
+animations on (pictures are otherwise taken with them off); `--spoken` prints what a screen reader is told. A
+picture named `motion-...` must end on the very picture the same presses give with animations off.

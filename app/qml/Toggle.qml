@@ -17,9 +17,11 @@ Rectangle {
     Rectangle {
         width: t.height - t.app.px(8); height: width; radius: width / 2
         y: t.app.px(4)
+        // For the build's checks: this is the part of a switch that slides.
+        readonly property bool switchKnob: true
         x: t.on ? t.width - width - t.app.px(4) : t.app.px(4)
-        color: t.on ? t.app.colors.onAccent : t.app.colors.muted
-        Behavior on x { enabled: t.app.motion.on; NumberAnimation { duration: t.app.motion.quick; easing.type: t.app.motion.ease } }
+        color: t.on ? t.app.colors.accentInk : t.app.colors.muted
+        Behavior on x { enabled: t.app.motion.moves; NumberAnimation { duration: t.app.motion.moveQuick; easing.type: t.app.motion.ease } }
         Icon { app: t.app; visible: t.on; anchors.centerIn: parent; d: t.app.icons.check; size: 13; tint: t.app.colors.accent }
     }
 }

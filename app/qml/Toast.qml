@@ -14,6 +14,10 @@ Rectangle {
     z: 60
     // Drawn over the page on purpose (SelfCheck leaves it out of the overlap check).
     readonly property bool cover: true
+    // A screen reader says it as it appears.
+    Accessible.role: Accessible.AlertMessage
+    Accessible.name: text
+    Accessible.ignored: !up
     width: Math.min(words.implicitWidth + app.px(44), parent.width - app.px(64))
     height: words.height + app.px(22)
     radius: app.px(10)

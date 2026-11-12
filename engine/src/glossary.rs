@@ -47,6 +47,10 @@ pub const TERMS: &[Term] = &[
     Term { term: "HDR", means: "Brighter highlights and deeper colors, in games made for it, on screens that have it.", windows: "Use HDR in Display settings" },
     Term { term: "TDP", means: "How much power the processor may use, in watts. Turbine Hub calls it the power limit.", windows: "Armoury Crate operating modes" },
     Term { term: "Refresh rate", means: "How many times a second the screen shows a new picture, in Hz. Higher looks smoother.", windows: "Display settings, Refresh rate" },
+    Term { term: "Interface size", means: "How big Turbine Hub draws everything, 50 to 150%. Words stay readable and buttons stay big enough for a finger at every size.", windows: "Scale in Display settings" },
+    Term { term: "Color vision", means: "Which colors say fine, needs a look and won't work. Red-weak, Green-weak and Blue-weak pick colors those eyes tell apart; No color uses none. Each state keeps its own mark and word. In Settings, Look.", windows: "Color filters in Accessibility settings" },
+    Term { term: "Animations", means: "How screens change. Full fades and glides, Reduced only fades (nothing slides or grows), Off changes everything at once. In Settings, Look.", windows: "Animation effects in Accessibility settings" },
+    Term { term: "Screen reader", means: "A program that reads the screen out loud, such as Orca in Desktop Mode. Turbine Hub tells it the name, the kind and the state of whatever the highlight is on.", windows: "Narrator" },
     Term { term: "Bazzite", means: "Another gaming system based on Linux, like SteamOS. Some tune-up settings come from it.", windows: "" },
     Term { term: "CachyOS", means: "A Linux system tuned for speed. Some tune-up settings come from it.", windows: "" },
 ];

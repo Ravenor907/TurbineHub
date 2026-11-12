@@ -5,7 +5,15 @@ import TurbineHub
 // it walks everything on screen and fails the run when:
 //   words are cut off (elided, or wider or taller than the box that clips them);
 //   words or a control stick out of the window, or sideways out of the list they scroll in;
-//   words are smaller than the smallest size the design allows;
+//   words are smaller than 12 pixels (the text floor, app.fpx), or taller or wider than the box drawn around them;
+//   words don't read on what they are drawn on (under 4.5 to 1, measured from the colors really drawn);
+//   something to press is smaller than a finger (44 pixels or 6 mm, app.touchFloor);
+//   a state chip (ok, warn, stop) lacks its mark or its word, so only its color would tell;
+//   something the highlight lands on has no name for a screen reader, or the screen reader's own view of the
+//   window (Qt's accessibility tree, Hub.testSpoken) finds a control with no name, or more than one thing that
+//   says it has the highlight;
+//   any theme, accent and color vision mode (all 80, whatever this picture is drawn in) has words under 4.5 to 1
+//   on a surface, or states that the eyes the mode is for can't tell apart (Palette.qml, checked by `palettes`);
 //   words are squeezed into a column so narrow that each line holds about one word;
 //   words are drawn over other words (except what is drawn over the page on purpose: `cover: true`);
 //   the footer lacks B, lacks A where the highlighted thing takes A, offers A where it doesn't, or shows a hint
@@ -15,6 +23,12 @@ import TurbineHub
 //   highlights what lies under it (tried on every picture of a dialog, after the picture is taken).
 // Then it saves the picture, prints one line per finding ("SELFCHECK FAIL: ...") or "SELFCHECK ok", and ends the
 // run with 0 or 1.
+//
+// A picture taken with animations (--motion=full or reduced) first waits until nothing moves any more: two looks
+// in a row find every item where it was, as big and as clear. It prints "MOTIONCHECK ok: ..." then, and fails when
+// things still move after four seconds. tools/ci-shots.sh holds the picture against the one the same presses give
+// with animations off: they must be the same picture. At Reduced it also fails when anything changed its place or
+// its size over time (only fades are left there).
 //
 // With --check=<name> it first works the page with real keys, a real mouse and a finger, sent to the window the
 // way the system sends them (Hub.testKey, Hub.testMouse, Hub.testTouch), so the handlers a hand reaches are the
@@ -47,7 +61,71 @@ Item {
         todo = steps
         next()
     }
-    Timer { id: settle; interval: check.app.motion.settle; onTriggered: check.run() }
+    Timer { id: settle; interval: check.app.motion.settle; onTriggered: { if (check.app.motion.on) check.watch(); else check.run() } }
+
+    // ---------------------------------------------------------------- animations come to rest
+    // Where everything is, how big and how clear: two looks that agree mean nothing moves.
+    function pose() {
+        const out = []
+        function walk(it) {
+            if (!it || it.visible === false) return
+            out.push([it.x, it.y, it.width, it.height, it.opacity, it.scale, it.rotation, it.contentY === undefined ? 0 : it.contentY].map(v => Math.round(v * 1000) / 1000).join(","))
+            const kids = it.children
+            for (let i = 0; i < kids.length; i++) walk(kids[i])
+        }
+        walk(app.contentItem)
+        return out.join(";")
+    }
+    property string lastPose: ""
+    property int watched: 0
+    property int stillFor: 0
+    function watch() { lastPose = pose(); watched = 0; stillFor = 0; looker.start() }
+    Timer {
+        id: looker
+        interval: check.app.motion.settleLook; repeat: true
+        onTriggered: {
+            check.watched += interval
+            const now = check.pose()
+            check.stillFor = now === check.lastPose && check.app.ready ? check.stillFor + 1 : 0
+            check.lastPose = now
+            if (check.stillFor >= 3) {
+                stop()
+                if (check.traveled !== "" && !check.app.motion.moves) check.fail("animations are at Reduced and something still traveled or grew: " + check.traveled)
+                else Hub.say("MOTIONCHECK ok: at rest after " + check.watched + " ms (animations " + check.app.motion.level + (check.traveled !== "" ? ", seen moving: " + check.traveled : "") + ")")
+                check.run()
+            } else if (check.watched >= check.app.motion.settleLimit) {
+                stop()
+                check.fail("still moving after " + check.watched + " ms with animations " + check.app.motion.level)
+                check.run()
+            }
+        }
+    }
+    // While a picture with animations is worked: did anything change its place or its size over time (a list
+    // gliding, a knob sliding, a dialog growing)? At Full some of it does; at Reduced nothing may. Looked at every
+    // frame from the first press on. What moves in one step (a press scrolling a list at once) isn't travel: travel
+    // is the same thing found at three or more places in a row.
+    property string traveled: ""
+    property var trail: ({})
+    FrameAnimation {
+        running: check.app.motion.on && check.traveled === ""
+        onTriggered: {
+            function walk(it, path) {
+                if (!it || it.visible === false || check.traveled !== "") return
+                const key = path
+                const now = [it.scale, it.contentY === undefined ? 0 : it.contentY, it.switchKnob === true ? it.x : 0]
+                const was = check.trail[key]
+                if (was) {
+                    const moved = Math.abs(now[0] - was.v[0]) > 0.0005 || Math.abs(now[1] - was.v[1]) > 0.5 || Math.abs(now[2] - was.v[2]) > 0.5
+                    was.run = moved ? was.run + 1 : 0
+                    was.v = now
+                    if (was.run >= 3) check.traveled = (it.fid || it.objectName || path) + (Math.abs(now[0] - 1) > 0.0005 ? " (scale)" : it.switchKnob === true ? " (a switch's knob)" : " (scrolling)")
+                } else check.trail[key] = { v: now, run: 0 }
+                const kids = it.children
+                for (let i = 0; i < kids.length; i++) walk(kids[i], path + "/" + i)
+            }
+            walk(check.app.contentItem, "")
+        }
+    }
 
     // ---------------------------------------------------------------- real keys and a real mouse
     // The steps still to take: [milliseconds to wait after it, what to do].
@@ -91,6 +169,13 @@ Item {
         }
         walk(root)
         return out
+    }
+    // Whether the row named `id` is on, read from the page as the engine gave it (null when it isn't there).
+    function switchOn(j, id) {
+        if (!j || typeof j !== "object") return null
+        if (j.id === id && j.on !== undefined) return j.on === true
+        for (const k in j) { const r = switchOn(j[k], id); if (r !== null) return r }
+        return null
     }
     function byFid(fid) { return every(app.parts.view.item).find(x => x.fid === fid) || null }
     // The entries of a two-sided page's list that aren't the open one.
@@ -173,9 +258,9 @@ Item {
                     if (!t) { fail("hold: nothing is named " + Hub.option("focus")); return }
                     app.setFocus(t, false)
                     v.toggle = t.kind === "toggle"; v.on = v.toggle ? t.m.on === true : false; v.fid = t.fid
-                    // How often the settings changed and how often the dialog came or went while Enter was down.
-                    v.changes = 0; v.dialogs = 0
-                    Hub.stateChanged.connect(() => { v.changes++ })
+                    // How often the switch flipped and how often the dialog came or went while Enter was down.
+                    v.changes = 0; v.dialogs = 0; v.last = v.on
+                    app.modelChanged.connect(() => { const now = check.switchOn(app.model, v.fid); if (now !== null && now !== v.last) { v.last = now; v.changes++ } })
                     dialog.openChanged.connect(() => { v.dialogs++ })
                 }],
                 // Enter goes down and the keyboard repeats it seven times, for longer than a new dialog leaves A out.
@@ -314,7 +399,22 @@ Item {
             const w = Math.min(it.width, it.contentWidth > 0 ? it.contentWidth : it.width)
             if (it.truncated) fail("cut off: " + words(it))
             if (it.wrapMode === Text.NoWrap && it.contentWidth > it.width + 1 && it.width > 0 && it.elide === Text.ElideNone && it.fontSizeMode === Text.FixedSize) fail("wider than its box: " + words(it))
-            if (it.font.pixelSize < Math.floor(13 * app.unit) && it.font.pixelSize < 13) fail("too small (" + it.font.pixelSize + " px): " + words(it))
+            if (it.font.pixelSize < app.textFloor) fail("too small (" + it.font.pixelSize + " px, the floor is " + app.textFloor + "): " + words(it))
+            // Words taller or wider than the box drawn around them (a box that didn't grow with the text floor).
+            const frame = boxAround(it)
+            if (frame) {
+                const fw = Math.min(it.width, it.contentWidth), fh = it.contentHeight
+                if (fh > frame.height + 1.5) fail("taller than its box (" + Math.round(fh) + " in " + Math.round(frame.height) + " px): " + words(it))
+                if (fw > frame.width + 1.5) fail("wider than its box (" + Math.round(fw) + " in " + Math.round(frame.width) + " px): " + words(it))
+            }
+            // Words read on what they are drawn on.
+            const ink = inkOf(it)
+            if (ink !== null) {
+                const ground = groundOf(it)
+                const ratio = app.colors.contrast(ink, ground)
+                counts.contrast = Math.min(counts.contrast, ratio)
+                if (ratio < app.colors.enough - 0.005) fail("hard to read (" + ratio.toFixed(2) + " to 1, " + ink + " on " + ground + "): " + words(it))
+            }
             // Words squeezed into a column so narrow that each line holds about one word.
             const count = String(it.text).trim().split(/\s+/).length
             if (it.wrapMode !== Text.NoWrap && it.lineCount >= 3 && count >= 3 && it.lineCount >= count * 0.8) fail("squeezed to a word a line: " + words(it))
@@ -343,6 +443,17 @@ Item {
             const at = it.mapToItem(null, 0, 0)
             if (at.x < -1 || at.x + it.width > app.width + 1) fail("a control sticks out of the window (" + (it.fid || "?") + ")")
             if (it.width < 8 || it.height < 8) fail("a control has no size (" + (it.fid || "?") + ")")
+            // A finger fits on it (things that take no tap themselves are words to read: their row takes it).
+            else if ((it.aLabel !== "" || it.tapActivates === false) && it.fid !== "list" && (it.height < app.touchFloor - 0.5 || it.width < app.touchFloor - 0.5)) fail("too small for a finger (" + Math.round(it.width) + " x " + Math.round(it.height) + ", the floor is " + app.touchFloor + "): " + (it.fid || "?"))
+            if (String(it.sayName || "").trim() === "") fail("nothing for a screen reader to say (" + (it.fid || "?") + ")")
+            else counts.named++
+        }
+        if (it.tapTarget === true && (it.height < app.touchFloor - 0.5 || it.width < app.touchFloor - 0.5)) fail("too small for a finger (" + Math.round(it.width) + " x " + Math.round(it.height) + ", the floor is " + app.touchFloor + "): " + (it.Accessible.name || "a tab or a hint"))
+        // A state never rests on color alone: its chip has its mark and its word.
+        if (it.stateChip === true && ["ok", "warn", "stop"].indexOf(it.tone) >= 0) {
+            counts.chips++
+            if (!it.marked) fail("a " + it.tone + " chip has no mark, only its color tells (" + it.text + ")")
+            if (String(it.text).trim() === "") fail("a " + it.tone + " chip has no word")
         }
         // Things drawn over the page on purpose (a toast, a pinned heading) aren't overlaps.
         const was = counts.covered
@@ -351,6 +462,118 @@ Item {
         for (let i = 0; i < kids.length; i++) look(kids[i], counts)
         counts.covered = was
     }
+    // ---------------------------------------------------------------- what words are drawn on
+    function isBox(it) { return it.color !== undefined && it.radius !== undefined && it.border !== undefined && it.text === undefined }
+    // The filled or outlined box right around some words (their parent, or its parent when the words sit in a row).
+    function boxAround(it) {
+        let p = it.parent
+        for (let hops = 0; p && hops < 2; hops++, p = p.parent) {
+            if (isBox(p) && (p.color.a > 0 || p.border.width > 0) && p.height > 0) return p
+            // Only a plain row or the box itself may sit between: a layout that wraps decides its own height.
+            if (p.spacing === undefined || p.columns !== undefined) return null
+        }
+        return null
+    }
+    // The color of some words as they reach the eye: null for words that are faded on purpose (a button that can't
+    // be pressed yet) or drawn in no color at all.
+    function inkOf(it) {
+        let strength = 1
+        for (let p = it; p; p = p.parent) strength *= p.opacity === undefined ? 1 : p.opacity
+        if (strength < 0.6 || it.color.a < 0.6) return null
+        return it.color
+    }
+    // What lies under the middle of some words: every filled box below them, nearest first, down to the first one
+    // that lets nothing through, laid over each other the way they are drawn.
+    function groundOf(it) {
+        const at = it.mapToItem(null, it.width / 2, it.height / 2)
+        const layers = []
+        const covers = (b) => {
+            if (!isBox(b) || b.visible === false || b.color.a <= 0 || b.opacity <= 0) return false
+            const o = b.mapToItem(null, 0, 0)
+            return at.x >= o.x && at.x <= o.x + b.width && at.y >= o.y && at.y <= o.y + b.height
+        }
+        let solid = false
+        let child = it
+        for (let p = it.parent; p && !solid; child = p, p = p.parent) {
+            const kids = p.children
+            let mine = -1
+            for (let i = 0; i < kids.length; i++) if (kids[i] === child) { mine = i; break }
+            // What is drawn before it among its siblings lies under it.
+            for (let i = kids.length - 1; i >= 0 && !solid; i--) {
+                const k = kids[i]
+                if (k === child) continue
+                const below = k.z < child.z || (k.z === child.z && i < mine)
+                if (below && covers(k)) { layers.push(Qt.rgba(k.color.r, k.color.g, k.color.b, k.color.a * k.opacity)); solid = k.color.a * k.opacity >= 0.999 }
+            }
+            if (!solid && covers(p)) { layers.push(Qt.rgba(p.color.r, p.color.g, p.color.b, p.color.a * p.opacity)); solid = p.color.a * p.opacity >= 0.999 }
+        }
+        let ground = app.colors.ground
+        for (let i = layers.length - 1; i >= 0; i--) ground = app.colors.over(layers[i], ground)
+        return ground
+    }
+
+    // ---------------------------------------------------------------- every theme, accent and color vision
+    // How a color reaches red-weak, green-weak or blue-weak eyes (Machado, Oliveira and Fernandes 2009, full
+    // strength), as [r, g, b] in the screen's own values.
+    readonly property var eyes: ({
+        red: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+        green: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]],
+        blue: [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]] })
+    function seen(col, vision) {
+        const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const l = [lin(col.r), lin(col.g), lin(col.b)]
+        const m = eyes[vision]
+        return m ? m.map(r => Math.max(0, Math.min(1, r[0] * l[0] + r[1] * l[1] + r[2] * l[2]))) : l
+    }
+    // How far apart two colors look (CIE76 in Lab): about 2 is the least an eye notices side by side; states have
+    // to be told apart at a glance and far from each other, so they keep 15 or more.
+    function apart(a, b, vision) {
+        const lab = l => {
+            const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116
+            const x = f((0.4124 * l[0] + 0.3576 * l[1] + 0.1805 * l[2]) / 0.95047), y = f(0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]), z = f((0.0193 * l[0] + 0.1192 * l[1] + 0.9505 * l[2]) / 1.08883)
+            return [116 * y - 16, 500 * (x - y), 200 * (y - z)]
+        }
+        const p = lab(seen(a, vision)), q = lab(seen(b, vision))
+        return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
+    }
+    readonly property real statesApart: 15
+    Component { id: paletteMaker; Palette { } }
+    // Returns how many combinations were measured.
+    function palettes() {
+        let n = 0
+        const p = paletteMaker.createObject(check)
+        if (!p) { fail("the colors couldn't be made for checking"); return 0 }
+        for (const theme of ["dark", "black", "light", "contrast"]) for (const accent of ["brass", "iron", "copper", "jade"]) for (const vision of ["typical", "red", "green", "blue", "none"]) {
+            p.themeName = theme; p.accentName = accent; p.visionName = vision
+            n++
+            const where = theme + ", " + accent + ", color vision " + vision + ": "
+            const need = (name, ink, on, ground) => { const r = p.contrast(ink, ground); if (r < p.enough - 0.005) fail(where + name + " on " + on + " is " + r.toFixed(2) + " to 1 (" + ink + " on " + ground + ")") }
+            const surfaces = { ground: p.ground, bar: p.bar, panel: p.panel, card: p.card, raised: p.raised }
+            const inks = { text: p.text, soft: p.soft, muted: p.muted, accentText: p.accentText, ok: p.ok, warn: p.warn, stop: p.stop }
+            for (const i in inks) for (const s in surfaces) need(i, inks[i], s, surfaces[s])
+            need("accentInk", p.accentInk, "accent", p.accent)
+            for (const t of ["ok", "warn", "stop", ""]) need("a " + (t || "plain") + " chip's words", p.readable(p.tone(t), p.toneFill(t)), "its fill", p.toneFill(t))
+            for (const t of ["ok", "warn", "stop"]) need("text", p.text, t + "Fill", p.toneFill(t))
+            for (const k in p.pad) need("a face button's letter", p.padInk, "the " + k.toUpperCase() + " button", p.padOf(k))
+            // The ring of the highlight and a picked option's outline are seen, not read: 3 to 1 is the rule for those.
+            for (const s in surfaces) if (p.contrast(p.ring, surfaces[s]) < 3) fail(where + "the highlight ring on " + s + " is " + p.contrast(p.ring, surfaces[s]).toFixed(2) + " to 1")
+            if (vision === "none") {
+                // No color: the states are drawn in the words' own colors, and the accent is a grey.
+                if (!Qt.colorEqual(p.ok, p.soft) || !Qt.colorEqual(p.warn, p.text) || !Qt.colorEqual(p.stop, p.text)) fail(where + "a state has a color of its own")
+                const grey = (col) => Math.abs(col.r - col.g) < 0.02 && Math.abs(col.g - col.b) < 0.02
+                if (!grey(p.accent) || !grey(p.ring) || !grey(p.padOf("a"))) fail(where + "the accent, the ring or a face button still has a color")
+            } else {
+                const pairs = [["ok", "warn"], ["warn", "stop"], ["ok", "stop"]]
+                for (const pair of pairs) {
+                    const d = apart(p[pair[0]], p[pair[1]], vision === "typical" ? "" : vision)
+                    if (d < statesApart) fail(where + pair[0] + " and " + pair[1] + " look alike to these eyes (" + d.toFixed(1) + " apart, " + statesApart + " is the least)")
+                }
+            }
+        }
+        p.destroy()
+        return n
+    }
+
     // Words drawn over other words.
     function overlaps(boxes) {
         for (let i = 0; i < boxes.length; i++) {
@@ -366,16 +589,29 @@ Item {
     // the picture shows.
     function run() {
         const ok = app.contentItem.grabToImage(function (result) {
-            const counts = check.measure()
+            // A check that breaks is a failed check, never a run that waits for ever.
+            let counts = { texts: 0, controls: 0 }
+            try { counts = check.measure() } catch (e) { check.fail("the checks broke: " + e + (e.lineNumber ? " (line " + e.lineNumber + ")" : "")) }
             if (!result.saveToFile(check.target)) check.fail("the picture couldn't be saved to " + check.target)
-            check.probe(counts)
+            try { check.probe(counts) } catch (e) { check.fail("the checks broke: " + e); check.finish(counts) }
         })
         if (!ok) { fail("the picture couldn't be taken"); finish({ texts: 0, controls: 0 }) }
     }
 
     function measure() {
-        const counts = { texts: 0, controls: 0, boxes: [], covered: false }
+        const counts = { texts: 0, controls: 0, boxes: [], covered: false, contrast: 21, chips: 0, named: 0, palettes: 0 }
         look(app.contentItem, counts)
+        counts.palettes = palettes()
+        // What a screen reader finds, asked the way it asks.
+        counts.spoken = Hub.testSpoken(Hub.option("spoken") !== "" ? 4 : 0)
+        const nameless = Hub.testSpoken(1), lit = Hub.testSpoken(2)
+        if (counts.spoken < 0) fail("the screen reader's view of the window can't be read")
+        else {
+            if (nameless > 0) fail("a screen reader finds " + nameless + " controls with no name")
+            if (counts.controls > 0 && counts.spoken === 0) fail("a screen reader finds no controls at all")
+            if (lit > 1) fail("a screen reader finds " + lit + " things that say they have the highlight")
+            if (counts.controls > 0 && app.focusItem && lit < 1) fail("a screen reader isn't told where the highlight is")
+        }
         // With a dialog open, the page behind it is under the backdrop: only the dialog's own words count.
         overlaps(app.parts.dialog.open ? counts.boxes.filter(b => { for (let p = b.it; p; p = p.parent) if (p === app.parts.dialog) return true; return false }) : counts.boxes)
         const keys = app.parts.bottomBar.shownKeys
@@ -422,7 +658,7 @@ Item {
 
     function finish(counts) {
         for (const p of problems) Hub.say("SELFCHECK FAIL: " + p)
-        if (problems.length === 0) Hub.say("SELFCHECK ok: " + counts.texts + " texts, " + counts.controls + " controls")
+        if (problems.length === 0) Hub.say("SELFCHECK ok: " + counts.texts + " texts, " + counts.controls + " controls, " + (counts.spoken || 0) + " spoken, least contrast " + (counts.contrast === undefined ? 0 : counts.contrast).toFixed(2) + ", " + (counts.chips || 0) + " state chips, " + (counts.palettes || 0) + " palettes")
         Qt.exit(problems.length === 0 ? 0 : 1)
     }
 }

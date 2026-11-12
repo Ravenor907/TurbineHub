@@ -59,7 +59,7 @@ Capability modules, shown only when the hardware has them:
 - TDP is shown only where the kernel exposes power limits, and hidden while Steam's own slider or a TDP plugin manages it.
 
 ### Settings
-Mode, interface size (50 to 150%, re-flows), animations, the background helper (on or off) and the save time machine, theme and accent (Turbine's design system), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
+Mode, interface size (50 to 150%, re-flows), the background helper (on or off) and the save time machine, Look (theme and accent from Turbine's design system, color vision: typical, red-weak, green-weak, blue-weak or no color, and animations: full, reduced or off), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
 
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.
@@ -77,8 +77,11 @@ Phone remote and Wake-on-LAN web page: after the core is solid.
 - Input that can't surprise: the controller only counts while Turbine Hub is in front (not behind a game, and not for a moment after coming back); a tap or click obeys what a press obeys and never reaches what lies under a dialog or the busy cover; a held key or button acts once (only directions repeat); the mouse moves the highlight only when it really moves; the left stick gives one direction per push; one window at a time (a second start brings the open one forward). The build tries these with real keys, a real mouse and a finger (the check-... pictures).
 - Distinct focus, selected and primary styles. Every action has its own icon.
 - Scroll fades, the focused item always fully in view, toasts inside the content area, top insets, dark scrims behind overlays.
-- Body text at least 14 px at 1280x800. Interface size 50 to 150% re-flows instead of truncating.
-- One motion system with an Animations on/off setting.
+- Body text at least 14 px at 1280x800. Interface size 50 to 150% re-flows instead of truncating: text is never under 12 px nor under 90% of its design size, and anything to press is never under 44 px or 6 mm, at any interface size and in any window.
+- Words read at 4.5 to 1 or better on what they are drawn on, in every theme, accent and color vision mode. A state (fine, needs a look, won't work) always has its own mark and word beside its color; the Color vision setting picks colors that red-weak, green-weak or blue-weak eyes tell apart, or none at all.
+- One motion system with an Animations setting: Full, Reduced (fades only, nothing travels or grows) or Off. An older settings file's true or false reads as Full or Off.
+- A screen reader (Orca in Desktop Mode) is told the kind, the name and the state of whatever the highlight is on, the tabs, the footer's hints, the dialog and the notes.
+- The build holds all of it: every picture measures its own words, sizes, chips and names (and all 80 combinations of theme, accent and color vision), and pages shot with animations on must come to rest on the picture they give with animations off.
 - In Game Mode everything opens inside the app, never in a new window.
 - Screens are checked at 1280x800, 1920x1080 and a 1600x900 Desktop Mode window.
 
@@ -123,7 +126,7 @@ Every decision (filtering, sorting, what to warn about, what a check means) is R
 ### app
 One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and takes presses (`Hub.act`, `Hub.confirm`). The steps of a confirmed dialog and the questions to the host and the internet run on their own threads and come back through `Hub.poll`, together with the controller (SDL). `app/qml/COMPONENTS.md` lists the parts.
 
-`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--arg=<the page's own>] [--act=<action>:<argument> [--value=<typed text>]] [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a] [--installed=<app id>] [--no-tool]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
+`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--arg=<the page's own>] [--act=<action>:<argument> [--value=<typed text>]] [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a] [--installed=<app id>] [--no-tool] [--theme=...] [--accent=...] [--vision=...] [--scale=50..150] [--motion=full|reduced]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, contrast, finger sizes, what a screen reader is told, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
 
 ### Background agent
 The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit, `~/.config/systemd/user/turbinehub-agent.service` (user-level, no password, survives SteamOS updates). Settings, Background helper writes the unit through `flatpak-spawn --host` and enables it; turning it off disables and removes it. Players see it as "the background helper".

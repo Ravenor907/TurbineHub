@@ -2,11 +2,13 @@
 // Turbine Hub's name and icon instead of a generic one, the keys, mouse and finger of the build's checks, and Qt's
 // message handler (see the end of this file).
 
+#include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QSize>
 #include <QtCore/QString>
+#include <QtGui/QAccessible>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
 #include <QtGui/QKeyEvent>
@@ -15,6 +17,7 @@
 #include <QtGui/QPointingDevice>
 #include <QtGui/QWindow>
 #include <QtGui/qtestsupport_gui.h>
+#include <cstdio>
 
 // With the desktop file's name the taskbar finds Turbine Hub's menu entry; the window icon itself comes from the
 // icons the bundle installs, for every place that asks the window and not the entry.
@@ -54,6 +57,87 @@ quint64 stamp()
         clock.start();
     return static_cast<quint64>(clock.elapsed());
 }
+}
+
+// What a screen reader is told about the window, asked the way a screen reader asks (Qt's accessibility tree, the
+// one AT-SPI hands to Orca), so the checks measure what is really said and not what the QML meant to say.
+namespace {
+struct Spoken {
+    int controls = 0;   // things with a control's role (button, check box, slider, list item, tab, ...)
+    int nameless = 0;   // of those, how many have no name
+    int focused = 0;    // how many say the highlight is on them
+    int texts = 0;      // plain words
+};
+
+bool controlRole(QAccessible::Role r)
+{
+    switch (r) {
+    case QAccessible::Button:
+    case QAccessible::CheckBox:
+    case QAccessible::RadioButton:
+    case QAccessible::Slider:
+    case QAccessible::ComboBox:
+    case QAccessible::EditableText:
+    case QAccessible::ListItem:
+    case QAccessible::MenuItem:
+    case QAccessible::PageTab:
+        return true;
+    default:
+        return false;
+    }
+}
+
+void listen(QAccessibleInterface *at, int depth, Spoken &out, bool print)
+{
+    if (!at || !at->isValid() || depth > 64)
+        return;
+    const QAccessible::State st = at->state();
+    if (st.invisible)
+        return;
+    const QAccessible::Role role = at->role();
+    const QString name = at->text(QAccessible::Name);
+    // The highlight also lands on words to read (so a long page scrolls): those count as having it too.
+    if (st.focused)
+        out.focused++;
+    if (controlRole(role)) {
+        out.controls++;
+        if (name.trimmed().isEmpty())
+            out.nameless++;
+    } else if (role == QAccessible::StaticText && !name.isEmpty()) {
+        out.texts++;
+    }
+    if (print && (controlRole(role) || st.focused || role == QAccessible::Dialog || role == QAccessible::PopupMenu || role == QAccessible::AlertMessage)) {
+        const QByteArray line = QStringLiteral("SPOKEN role %1%2%3: %4 | %5\n")
+                                    .arg(int(role))
+                                    .arg(st.focused ? QStringLiteral(" focused") : QString())
+                                    .arg(st.checkable ? (st.checked ? QStringLiteral(" checked") : QStringLiteral(" unchecked")) : QString())
+                                    .arg(name, at->text(QAccessible::Description))
+                                    .toUtf8();
+        fputs(line.constData(), stdout);
+    }
+    const int n = at->childCount();
+    for (int i = 0; i < n; i++)
+        listen(at->child(i), depth + 1, out, print);
+}
+}
+
+// what: 0 the number of controls a screen reader finds in the window, 1 how many of them have no name, 2 how many
+// say the highlight is on them, 3 the number of plain texts, 4 the same as 0 with every control printed
+// ("SPOKEN role ...: name | description"). Returns -1 when the window isn't there or has nothing to say.
+extern "C" int turbinehub_test_spoken(int what)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    QAccessible::setActive(true);
+    QAccessibleInterface *root = QAccessible::queryAccessibleInterface(win);
+    if (!root)
+        return -1;
+    Spoken heard;
+    listen(root, 0, heard, what == 4);
+    if (what == 4)
+        fflush(stdout);
+    return what == 1 ? heard.nameless : what == 2 ? heard.focused : what == 3 ? heard.texts : heard.controls;
 }
 
 // key: Qt's key code. mods: Qt's keyboard modifiers. repeat: the keyboard repeating a key that is held down.

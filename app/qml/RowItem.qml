@@ -9,7 +9,7 @@ import QtQuick.Layouts
 // moves when the row says `live`), choice (Left and Right move among the options, A picks), button (A presses it),
 // info (words only; it still takes the highlight so a long page scrolls with the D-pad), preview (a live picture of
 // the lights: `frames` of one color per part, `step` milliseconds apart, drawn as `rings` rings at `level`; it
-// takes no highlight). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up and Down
+// takes no highlight, and it plays only with Animations at Full: at Reduced and Off it shows its first frame). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up and Down
 // move between the lines of cards.
 //
 // app (required): Main.qml's window. m (required): the row.
@@ -20,8 +20,19 @@ Focusable {
     fid: m.id
     focusable: kind !== "preview"
     aLabel: kind === "toggle" ? (m.on ? "Turn off" : "Turn on") : kind === "check" ? (m.on ? "Untick" : "Tick") : kind === "slider" ? (m.live ? "" : "Apply") : kind === "choice" ? "Choose" : kind === "button" ? (m.button || "Open") : ""
-    implicitHeight: body.implicitHeight + app.px(26)
+    // As tall as its words need, and where it takes a press never shorter than a finger.
+    implicitHeight: Math.max(body.implicitHeight + app.px(26), aLabel !== "" || kind === "slider" ? app.touchFloor : 0)
     tapActivates: kind !== "choice" && kind !== "slider"
+    // For a screen reader: the kind of control, then its title with its state in words, then the line under it.
+    sayRole: kind === "toggle" || kind === "check" ? Accessible.CheckBox : kind === "slider" ? Accessible.Slider : kind === "choice" ? Accessible.ComboBox : kind === "button" ? Accessible.Button : kind === "preview" ? Accessible.Graphic : Accessible.StaticText
+    readonly property string sayState: kind === "toggle" ? (m.on ? "on" : "off") : kind === "check" ? (m.on ? "ticked" : "not ticked")
+        : kind === "slider" ? val + (m.unit || "")
+        : kind === "choice" ? (options.length > 0 ? String(options[Math.max(0, Math.min(options.length - 1, m.index))]) + (cur !== m.index && cur < options.length ? ", highlight on " + options[cur] : "") : "")
+        : (m.value !== undefined && kind !== "input" ? String(m.value) : "")
+    sayName: [m.title || "", sayState, m.badge || "", kind === "button" ? (m.button || "") : ""].filter(x => x !== "").join(", ")
+    sayMore: m.line || ""
+    Accessible.checkable: kind === "toggle" || kind === "check"
+    Accessible.checked: (kind === "toggle" || kind === "check") && m.on === true
 
     // A slider's value while it moves, and the option the highlight is on inside a choice.
     property real val: m.value !== undefined && kind === "slider" ? m.value : 0
@@ -86,7 +97,7 @@ Focusable {
                 color: r.m.on ? r.app.colors.accent : "transparent"
                 border.width: Math.max(1, r.app.px(2))
                 border.color: r.m.on ? r.app.colors.accent : r.app.colors.muted
-                Icon { app: r.app; visible: r.m.on === true; anchors.centerIn: parent; d: r.app.icons.check; size: 18; tint: r.app.colors.onAccent }
+                Icon { app: r.app; visible: r.m.on === true; anchors.centerIn: parent; d: r.app.icons.check; size: 18; tint: r.app.colors.accentInk }
             }
             Icon { app: r.app; visible: r.m.icon !== undefined && r.m.icon !== ""; d: r.m.icon ? (r.app.icons[r.m.icon] || "") : ""; size: 24; tint: r.app.colors.accentText }
             ColumnLayout {
@@ -126,6 +137,8 @@ Focusable {
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: Math.max(height, parent.width * track.part); height: r.app.px(8); radius: height / 2; color: r.app.colors.accent }
                 Rectangle { x: (parent.width - width) * track.part; anchors.verticalCenter: parent.verticalCenter; width: r.app.px(22); height: width; radius: width / 2; color: r.app.colors.accentHi; border.width: Math.max(1, r.app.px(2)); border.color: r.app.colors.ground }
                 TapHandler {
+                    // The track is thin; a finger a little above or below it still lands on it.
+                    margin: Math.max(0, (r.app.touchFloor - track.height) / 2)
                     onTapped: (p) => {
                         if (!r.app.gate(r)) return
                         const steps = Math.round((r.m.min + (r.m.max - r.m.min) * Math.max(0, Math.min(1, p.position.x / track.width)) - r.m.min) / (r.m.step || 1))
@@ -149,7 +162,7 @@ Focusable {
             Timer {
                 interval: Math.max(40, r.m.step || 100)
                 repeat: true
-                running: lights.visible && lights.frames.length > 1 && r.app.motion.on
+                running: lights.visible && lights.frames.length > 1 && r.app.motion.moves
                 onTriggered: lights.frame = (lights.frame + 1) % lights.frames.length
             }
             Row {
@@ -205,7 +218,14 @@ Focusable {
                     readonly property bool at: r.focused && index === r.cur
                     readonly property string swatch: r.m.swatches && !r.m.cards ? r.m.swatches[index] : ""
                     readonly property var palette: r.m.cards && r.m.palettes ? r.m.palettes[index] : []
-                    width: r.m.cards ? r.cardWidth : optRow.implicitWidth + r.app.px(28)
+                    Accessible.role: Accessible.RadioButton
+                    Accessible.name: opt.modelData + (picked ? ", chosen" : "") + ", " + (index + 1) + " of " + r.options.length
+                    Accessible.checkable: true
+                    Accessible.checked: picked
+                    Accessible.onPressAction: if (r.app.gate(r)) { r.cur = opt.index; r.send(opt.index) }
+                    // Something to tap: never smaller than a finger.
+                    readonly property bool tapTarget: true
+                    width: r.m.cards ? Math.max(r.cardWidth, r.app.touchFloor) : Math.max(optRow.implicitWidth + r.app.px(28), r.app.touchFloor)
                     height: r.m.cards ? r.app.tpx(82) : r.app.tpx(40)
                     radius: r.app.px(8)
                     color: picked ? r.app.colors.accent : r.app.colors.raised
@@ -235,9 +255,9 @@ Focusable {
                         anchors.bottom: r.m.cards ? parent.bottom : undefined
                         anchors.bottomMargin: r.app.px(10)
                         spacing: r.app.px(8)
-                        Rectangle { visible: opt.swatch !== ""; width: r.app.px(18); height: width; radius: width / 2; color: opt.swatch !== "" ? opt.swatch : "transparent"; border.width: opt.picked ? Math.max(2, r.app.px(2)) : 1; border.color: opt.picked ? r.app.colors.onAccent : r.app.colors.ground; anchors.verticalCenter: parent.verticalCenter }
-                        Icon { app: r.app; visible: opt.picked; d: r.app.icons.check; size: 16; tint: r.app.colors.onAccent; anchors.verticalCenter: parent.verticalCenter }
-                        Text { text: opt.modelData; color: opt.picked ? r.app.colors.onAccent : r.app.colors.text; font.family: r.app.bodyFont; font.pixelSize: r.app.fpx(16); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                        Rectangle { visible: opt.swatch !== ""; width: r.app.px(18); height: width; radius: width / 2; color: opt.swatch !== "" ? opt.swatch : "transparent"; border.width: opt.picked ? Math.max(2, r.app.px(2)) : 1; border.color: opt.picked ? r.app.colors.accentInk : r.app.colors.ground; anchors.verticalCenter: parent.verticalCenter }
+                        Icon { app: r.app; visible: opt.picked; d: r.app.icons.check; size: 16; tint: r.app.colors.accentInk; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: opt.modelData; color: opt.picked ? r.app.colors.accentInk : r.app.colors.text; font.family: r.app.bodyFont; font.pixelSize: r.app.fpx(16); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                     }
                     TapHandler { onTapped: if (r.app.gate(r)) { r.cur = opt.index; r.send(opt.index) } }
                 }

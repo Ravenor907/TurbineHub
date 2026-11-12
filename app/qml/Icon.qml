@@ -7,6 +7,9 @@ import QtQuick.Shapes
 // Under Qt Quick's software drawing (pictures, machines without a GPU) a line drawing isn't clipped by a scrolling
 // list, so there the icon is painted into a picture instead, which clips like any other.
 //
+// It is never drawn under three quarters of its design size (app.ipx), so a state's mark stays plain to see at the
+// smallest interface size. A screen reader skips it: the words beside it say what it stands for.
+//
 // app (required): Main.qml's window. d: the path data (app.icons). size: design pixels. tint: its color.
 Item {
     id: icon
@@ -14,8 +17,9 @@ Item {
     property string d: ""
     property real size: 22
     property color tint: app.colors.muted
-    implicitWidth: app.px(size)
-    implicitHeight: app.px(size)
+    implicitWidth: app.ipx(size)
+    implicitHeight: app.ipx(size)
+    Accessible.ignored: true
     Loader {
         anchors.centerIn: parent
         width: icon.implicitWidth; height: icon.implicitHeight

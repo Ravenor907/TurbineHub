@@ -8,7 +8,8 @@ import QtQuick
 Rectangle {
     id: bar
     required property var app
-    height: app.px(64)
+    // Tall enough for its words and for a finger at every interface size.
+    height: Math.max(app.px(64), app.touchFloor + app.px(8))
     color: app.colors.bar
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: Math.max(1, bar.app.px(1)); color: bar.app.colors.line }
 
@@ -27,8 +28,14 @@ Rectangle {
                 readonly property bool on: bar.app.shownTab === index
                 // Narrow windows keep the icons and drop the other tabs' names.
                 readonly property bool named: on || bar.width >= bar.app.px(1080)
-                width: tabContent.implicitWidth + bar.app.px(24)
+                // Something to tap: never narrower than a finger.
+                readonly property bool tapTarget: true
+                width: Math.max(tabContent.implicitWidth + bar.app.px(24), bar.app.touchFloor)
                 height: bar.height
+                Accessible.role: Accessible.PageTab
+                Accessible.name: modelData.title + (on ? ", selected" : "") + ", tab " + (index + 1) + " of " + bar.app.tabs.length
+                Accessible.selected: on
+                Accessible.onPressAction: if (bar.app.gate(tabItem, "lb")) bar.app.goTab(tabItem.index)
                 Row {
                     id: tabContent
                     anchors.centerIn: parent
@@ -56,7 +63,7 @@ Rectangle {
         spacing: bar.app.px(12)
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            width: modeText.implicitWidth + bar.app.px(18); height: bar.app.px(26); radius: bar.app.px(6)
+            width: modeText.implicitWidth + bar.app.px(18); height: bar.app.bpx(26, 13); radius: bar.app.px(6)
             color: "transparent"
             border.width: Math.max(1, bar.app.px(2)); border.color: bar.app.colors.accentLo
             Text {

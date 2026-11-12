@@ -455,9 +455,10 @@ fn settings_change_the_file_and_stay_in_range() {
     u.act("theme", "", "2");
     u.act("accent", "", "3");
     u.act("mode", "", "1");
-    u.act("animations", "", "");
+    u.act("animations", "", "1");
+    u.act("vision", "", "2");
     let st = u.settings();
-    assert_eq!((st.ui_scale, st.theme.as_str(), st.accent.as_str(), st.mode, st.animations), (150, "light", "jade", Some(Mode::Veteran), false));
+    assert_eq!((st.ui_scale, st.theme.as_str(), st.accent.as_str(), st.mode, st.animations.as_str(), st.vision.as_str()), (150, "light", "jade", Some(Mode::Veteran), "reduced", "green"));
     assert!(parse(&u.act("theme", "", "9")).unwrap().entries().is_empty());
     // Review changes lists the record newest first, and each row undoes its own entry.
     let page = parse(&u.page("changes", "")).unwrap();
@@ -618,6 +619,86 @@ fn tick_all_never_turns_on_ssh() {
     u.act("tick-all", "quick", "");
     assert!(u.picked.get("quick").unwrap().contains("ssh"));
     done("ssh");
+}
+
+#[test]
+fn look_has_color_vision_and_three_levels_of_animations() {
+    let mut u = ui("look", HANDHELD, Mode::Guided);
+    // A new install: typical colors, full animations, and the window is told both.
+    let st = parse(&u.state()).unwrap();
+    assert_eq!((st.str_at("vision"), st.str_at("animations"), st.str_at("theme"), st.str_at("accent")), (Some("typical"), Some("full"), Some("black"), Some("jade")));
+    let look = rows(&parse(&u.page("settings", "look")).unwrap());
+    let by = |id: &str| look.iter().find(|r| r.str_at("id") == Some(id)).cloned().unwrap_or_else(|| panic!("no {id} row in Look"));
+    let options = |r: &Json| r.get("options").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect::<Vec<_>>();
+    assert_eq!((by("vision").str_at("kind"), by("vision").str_at("title"), by("vision").get("index").and_then(Json::as_f64)), (Some("choice"), Some("Color vision"), Some(0.0)));
+    assert_eq!(options(&by("vision")), vec!["Typical", "Red-weak", "Green-weak", "Blue-weak", "No color"]);
+    assert_eq!((by("animations").str_at("kind"), by("animations").get("index").and_then(Json::as_f64)), (Some("choice"), Some(0.0)));
+    assert_eq!(options(&by("animations")), vec!["Full", "Reduced", "Off"]);
+    // Each row says in plain words what its choices do.
+    assert!(by("vision").str_at("line").unwrap().contains("mark and word") && by("animations").str_at("line").unwrap().contains("Reduced only fades"));
+    // Animations moved to Look: General no longer has a switch for it.
+    assert!(rows(&parse(&u.page("settings", "")).unwrap()).iter().all(|r| r.str_at("id") != Some("animations")));
+    // Every choice is kept, shows as picked, and reaches the window at once.
+    for (i, v) in crate::settings::VISIONS.iter().enumerate() {
+        let r = parse(&u.act("vision", "", &i.to_string())).unwrap();
+        assert_eq!(r.get("state").and_then(Json::as_bool), Some(true), "{v}");
+        assert_eq!((u.settings().vision.as_str(), parse(&u.state()).unwrap().str_at("vision")), (*v, Some(*v)));
+        let look = rows(&parse(&u.page("settings", "look")).unwrap());
+        assert_eq!(look.iter().find(|r| r.str_at("id") == Some("vision")).unwrap().get("index").and_then(Json::as_f64), Some(i as f64));
+    }
+    for (i, v) in crate::settings::MOTIONS.iter().enumerate() {
+        assert_eq!(parse(&u.act("animations", "", &i.to_string())).unwrap().get("state").and_then(Json::as_bool), Some(true), "{v}");
+        assert_eq!((u.settings().animations.as_str(), parse(&u.state()).unwrap().str_at("animations")), (*v, Some(*v)));
+    }
+    // A choice that isn't there, or no choice at all (the old switch's press), changes nothing.
+    assert!(parse(&u.act("vision", "", "9")).unwrap().entries().is_empty());
+    assert!(parse(&u.act("animations", "", "3")).unwrap().entries().is_empty());
+    assert!(parse(&u.act("animations", "", "")).unwrap().entries().is_empty());
+    assert_eq!((u.settings().vision.as_str(), u.settings().animations.as_str()), ("none", "off"));
+    // A settings file from an older Turbine Hub (animations as a switch, no color vision) still opens.
+    std::fs::write(Settings::file(&u.ctx.config_home), r#"{"mode":"guided","animations":false,"theme":"light","accent":"copper"}"#).unwrap();
+    let st = parse(&u.state()).unwrap();
+    assert_eq!((st.str_at("animations"), st.str_at("vision"), st.str_at("theme"), st.str_at("accent")), (Some("off"), Some("typical"), Some("light"), Some("copper")));
+    std::fs::write(Settings::file(&u.ctx.config_home), r#"{"mode":"guided","animations":true}"#).unwrap();
+    assert_eq!(parse(&u.state()).unwrap().str_at("animations"), Some("full"));
+    // Help explains the new words.
+    for word in ["color vision", "animations", "screen reader", "interface size"] {
+        let found = rows(&parse(&u.page("wheres", word)).unwrap());
+        assert!(found.iter().any(|r| r.str_at("title").unwrap_or("").to_lowercase().contains(word)), "{word}");
+    }
+    assert!(parse(&u.page("help", "settings@look")).unwrap().str_at("intro").unwrap().contains("colors for your eyes"));
+    done("look");
+}
+
+#[test]
+fn the_pictures_cover_every_look() {
+    let shots = Ui::shots();
+    let has = |want: &[&str]| shots.iter().any(|(_, args)| want.iter().all(|w| args.split(' ').any(|a| a == *w)));
+    // Each color vision mode on a page with all three states, each theme, each accent.
+    for v in crate::settings::VISIONS.iter().filter(|v| **v != "typical") {
+        assert!(has(&[&format!("--vision={v}"), "--page=library"]), "no picture of the library check with color vision {v}");
+        assert!(has(&[&format!("--vision={v}"), "--page=settings", "--arg=look"]), "no picture of Look with color vision {v}");
+    }
+    for t in crate::settings::THEMES {
+        assert!(*t == "black" || has(&[&format!("--theme={t}")]), "no picture in the {t} theme");
+    }
+    for a in crate::settings::ACCENTS {
+        assert!(*a == "jade" || has(&[&format!("--accent={a}")]), "no picture with the {a} accent");
+    }
+    // Pages at the smallest interface size, and pages shot with animations that must end as the still ones do.
+    assert!(shots.iter().filter(|(_, a)| a.contains("--scale=50")).count() >= 6);
+    assert!(shots.iter().filter(|(_, a)| a.contains("--finger=")).count() >= 3, "no pictures with a dense screen's finger size");
+    for level in ["full", "reduced"] {
+        assert!(has(&[&format!("--motion={level}")]), "no picture with animations {level}");
+    }
+    for (name, args) in shots.iter().filter(|(n, _)| n.starts_with("motion-")) {
+        assert!(args.contains("--motion=full") || args.contains("--motion=reduced"), "{name} asks for no animations");
+    }
+    // Names are one of a kind: each picture has its own file.
+    let mut names: Vec<&str> = shots.iter().map(|(n, _)| *n).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), shots.len());
 }
 
 fn install_helper_in(u: &Ui) {

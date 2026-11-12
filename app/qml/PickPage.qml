@@ -51,6 +51,8 @@ Item {
                         fid: "pick:" + modelData.id
                         firstFocus: index === 0
                         aLabel: "Choose"
+                        sayName: [modelData.kicker || "", modelData.title || "", "Choose"].filter(x => x !== "").join(", ")
+                        sayMore: modelData.line || ""
                         Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredWidth: 1
                         // The words always fit; the picture takes what is left, and the page scrolls when even that
                         // runs out (a large interface size in a small window).

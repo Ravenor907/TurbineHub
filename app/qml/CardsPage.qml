@@ -36,7 +36,7 @@ Item {
             clip: true
             contentHeight: grid.implicitHeight + page.app.px(12)
             boundsBehavior: Flickable.StopAtBounds
-            Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }
+            Behavior on contentY { enabled: page.app.motion.moves; NumberAnimation { duration: page.app.motion.moveStandard; easing.type: page.app.motion.ease } }
             GridLayout {
                 id: grid
                 // Room for the highlight's ring at the edges.

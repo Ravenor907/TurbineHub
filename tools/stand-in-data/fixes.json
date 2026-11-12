@@ -1,5 +1,5 @@
 {
-  "1245620": {"kind": "switch", "value": "deck", "words": "Runs best with Steam Deck mode on."},
+  "1245620": {"kind": "switch", "value": "deck", "words": "Runs best with Handheld mode on."},
   "1086940": {"kind": "proton", "value": "proton-experimental", "words": "Needs Proton Experimental."},
   "632470": {"kind": "note", "value": "", "words": "Pick the Vulkan launch choice."}
 }

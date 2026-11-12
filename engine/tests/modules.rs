@@ -26,11 +26,11 @@ fn helper_accepts(s: &Setting) {
 
 #[test]
 fn a_handheld_and_a_desktop_get_their_own_cards() {
-    let (root, ally) = machine(Preset::AllyX, "ally");
-    assert_eq!(ids(&root, &ally), ["power", "display", "lighting", "battery", "sleep", "tuneup", "dock", "windows"]);
-    let cards = modules::cards(&root, &ally, &Ledger::default(), false);
+    let (root, handheld) = machine(Preset::Handheld, "handheld");
+    assert_eq!(ids(&root, &handheld), ["power", "display", "lighting", "battery", "sleep", "tuneup", "dock", "windows"]);
+    let cards = modules::cards(&root, &handheld, &Ledger::default(), false);
     assert_eq!(cards[0].value, "17 W");
-    assert!(cards[1].experimental);
+    assert_eq!((cards[1].value.as_str(), cards[2].value.as_str()), ("48 to 120 Hz", "1 light"));
     assert_eq!(cards[3].value, "Charges to 100%");
     let (root2, pc) = machine(Preset::Desktop, "pc");
     assert_eq!(ids(&root2, &pc), ["gpu", "cpu", "monitors", "drives", "sound", "sleep", "tuneup", "windows"]);
@@ -48,14 +48,14 @@ fn a_handheld_and_a_desktop_get_their_own_cards() {
 
 #[test]
 fn controls_turn_into_checked_settings() {
-    let (root, ally) = machine(Preset::AllyX, "ctl");
-    let c = modules::charge_limit(&ally, 80);
+    let (root, handheld) = machine(Preset::Handheld, "ctl");
+    let c = modules::charge_limit(&handheld, 80);
     assert_eq!(c, vec![Setting::Sysfs { path: "/sys/class/power_supply/BAT0/charge_control_end_threshold".into(), value: "80".into() }]);
-    let t = modules::tdp(&ally, 50);
+    let t = modules::tdp(&handheld, 50);
     assert_eq!(t.iter().map(|s| match s { Setting::Sysfs { value, .. } => value.as_str(), _ => "" }).collect::<Vec<_>>(), ["35", "37", "40"]);
     let (_, pc) = machine(Preset::Desktop, "ctl2");
     assert_eq!(modules::gpu_power(&pc, 100), Some(Setting::Sysfs { path: "/sys/class/drm/card1/device/hwmon/hwmon6/power1_cap".into(), value: "150000000".into() }));
-    assert!(modules::gpu_power(&ally, 20).is_none());
+    assert!(modules::gpu_power(&handheld, 20).is_none());
     for s in c.iter().chain(&t).chain(modules::gpu_power(&pc, 250).iter()).chain([modules::usb_wake("3554", "fa09", false), modules::lighting_access()].iter()) {
         helper_accepts(s);
     }

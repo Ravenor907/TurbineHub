@@ -209,7 +209,7 @@ mod tests {
         let r = ProblemReport {
             version: "0.58".into(),
             when: "2026-11-09 10:00".into(),
-            device: vec!["Device: ROG Xbox Ally X".into()],
+            device: vec!["Device: Handheld".into()],
             screen: "1920 x 1080, scale 2.10".into(),
             settings: vec!["Interface size: 100%".into(), "nexusKey: secretsecret".into()],
             games: vec!["ELDEN RING (steam:1245620): me3, offline with mods".into()],

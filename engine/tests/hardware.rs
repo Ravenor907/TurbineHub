@@ -28,15 +28,16 @@ fn reads_a_real_monitors_edid() {
 }
 
 #[test]
-fn knows_the_ally_x() {
-    let m = read(Preset::AllyX, "");
+fn knows_a_handheld_by_what_it_has() {
+    let m = read(Preset::Handheld, "");
     assert_eq!(m.kind, Kind::Handheld);
-    assert_eq!(m.name(), "ROG Xbox Ally X");
-    assert_eq!(m.model.unwrap().hz_experimental, Some(144));
+    assert_eq!(m.name(), "Handheld One");
+    let p = m.panel.unwrap();
+    assert_eq!((p.inches, p.range_hz, p.mode), (6.9, Some((48, 120)), (1920, 1080)));
     assert_eq!(m.battery().unwrap().charge_limit, Some(100));
     assert_eq!(m.power_limits.len(), 3);
     assert_eq!((m.power_limits[0].name.as_str(), m.power_limits[0].min, m.power_limits[0].max), ("ppt_pl1_spl", 7, 35));
-    assert_eq!(m.rgb_leds, vec!["ally:rgb:joystick_rings"]);
+    assert_eq!(m.rgb_leds, vec!["multicolor:rgb:joystick"]);
     assert_eq!(m.memory_gb, 23);
     assert!(!m.on_tv());
     assert_eq!(m.steamos, "3.9.5");
@@ -77,4 +78,15 @@ fn a_desktop_on_a_tv_is_a_tv_pc() {
 fn only_windows_boot_manager_counts() {
     assert_eq!(hardware::windows_boot_entry("Boot0000* SteamOS\nBoot000A* Windows Boot Manager\tHD()"), Some("000A".into()));
     assert_eq!(hardware::windows_boot_entry("Boot0000* SteamOS\nBoot0001* UEFI OS\n"), None);
+}
+
+#[test]
+fn names_come_from_the_firmware_without_part_codes() {
+    use hardware::firmware_name as n;
+    assert_eq!(n("ASUSTeK COMPUTER INC.", "ROG Xbox Ally X RC73XA_RC73XA", "1.0"), "ROG Xbox Ally X");
+    assert_eq!(n("LENOVO", "83L3", "Legion Go S 8APU1"), "Legion Go S");
+    assert_eq!(n("Valve", "Jupiter", "1"), "Valve Jupiter");
+    assert_eq!(n("Micro-Star International Co., Ltd.", "MS-7E07", "4.0"), "");
+    assert_eq!(n("System manufacturer", "System Product Name", "System Version"), "");
+    assert_eq!(n("To Be Filled By O.E.M.", "To Be Filled By O.E.M.", "Default string"), "");
 }

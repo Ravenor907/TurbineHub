@@ -27,8 +27,8 @@ pub enum Setting {
 /// The fixed device-access rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
-    /// The joystick ring lights: the kernel's LED files and ASUS's lighting chip, so the background agent can
-    /// animate them many times a second.
+    /// The device's RGB lights (the kernel's LED files), so the background agent can animate them many times a
+    /// second.
     Lighting,
     /// /dev/ntsync for Proton's NTSync.
     Ntsync,
@@ -53,10 +53,7 @@ impl Access {
     /// The rule text. Fixed: nothing in it comes from the caller.
     pub fn rule(self) -> &'static str {
         match self {
-            Access::Lighting => concat!(
-                "SUBSYSTEM==\"leds\", KERNEL==\"*:rgb:*\", RUN+=\"/usr/bin/chmod 0666 /sys%p/brightness /sys%p/multi_intensity\"\n",
-                "SUBSYSTEM==\"hidraw\", ATTRS{idVendor}==\"0b05\", TAG+=\"uaccess\"\n",
-            ),
+            Access::Lighting => "SUBSYSTEM==\"leds\", KERNEL==\"*:rgb:*\", RUN+=\"/usr/bin/chmod 0666 /sys%p/brightness /sys%p/multi_intensity\"\n",
             Access::Ntsync => "KERNEL==\"ntsync\", MODE=\"0666\"\n",
         }
     }

@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn the_panel_job_has_what_the_quick_panel_shows() {
-        let c = ctx("panel", Preset::AllyX);
+        let c = ctx("panel", Preset::Handheld);
         Settings { game_boost: true, ..Settings::default() }.save(&c.config_home).unwrap();
         let (text, code) = run("panel", &c);
         let j = parse(&text).unwrap();
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn the_game_job_lists_the_switches_and_locks_online_anti_cheat() {
-        let c = ctx("game", Preset::AllyX);
+        let c = ctx("game", Preset::Handheld);
         steam_game(&c.home, "1245620", "ELDEN RING");
         steam_game(&c.home, "1145360", "Hades II");
         let mut on = GameSwitches::default();
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn the_open_job_leaves_a_note_the_app_reads_once() {
-        let c = ctx("open", Preset::AllyX);
+        let c = ctx("open", Preset::Handheld);
         assert_eq!(take_open_request(&c.config_home, crate::now()), None);
         let j = parse(&run("open=lighting", &c).0).unwrap();
         assert_eq!((j.str_at("page"), j.get("noted").and_then(Json::as_bool), j.str_at("hubUrl")), (Some("lighting"), Some(true), Some("")));

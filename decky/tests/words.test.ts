@@ -70,7 +70,7 @@ test("a library page gives its app id", () => {
 });
 
 test("the line under the game", () => {
-  const sw = (on: boolean) => ({ id: "deck", title: "Steam Deck mode", line: "x", on });
+  const sw = (on: boolean) => ({ id: "deck", title: "Handheld mode", line: "x", on });
   assert.equal(gameLine(null), "Asking Turbine Hub...");
   assert.equal(gameLine({ ok: false, words: "Turbine Hub took too long to answer." }), "Turbine Hub took too long to answer.");
   assert.equal(gameLine({ ok: true, found: false }), "Not a game Turbine Hub sees.");

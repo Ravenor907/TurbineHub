@@ -32,7 +32,7 @@ impl Switch {
         match self {
             Switch::Fsr4 => "FSR 4 upgrade",
             Switch::FrameGen => "Frame generation",
-            Switch::DeckMode => "Steam Deck mode",
+            Switch::DeckMode => "Handheld mode",
             Switch::ProtonLog => "Proton log",
         }
     }

@@ -6,8 +6,9 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Preset {
-    /// ROG Xbox Ally X on SteamOS.
-    AllyX,
+    /// A handheld: AMD APU, 7-inch 1080p built-in screen (48 to 120 Hz), battery with a charge limit, firmware
+    /// power limits and RGB lights. No particular maker's device.
+    Handheld,
     /// A desktop: Intel CPU, AMD RX 9070 XT, a 1440p monitor, an empty second drive, a Windows drive.
     Desktop,
     /// A living-room PC on a 55-inch TV over HDMI.
@@ -36,6 +37,18 @@ fn link(root: &Path, target: &str, at: &str) {
         let _ = fs::create_dir_all(d);
     }
     let _ = std::os::unix::fs::symlink(target, f);
+}
+
+/// A 128-byte EDID for a built-in handheld screen: 1920x1080, 7 inches, 48 to 120 Hz.
+pub fn panel_edid() -> Vec<u8> {
+    let mut b = tv_edid("Panel", 15, 9);
+    // 1920x1080 at 120 Hz: 297 MHz, 2200 x 1125 total.
+    let dtd = [0x04, 0x74, 0x80, 0x18, 0x71, 0x38, 0x2d, 0x40, 0x58, 0x2c, 0x45, 0x00, 0x96, 0x58, 0x00, 0x00, 0x00, 0x1e];
+    b[54..72].copy_from_slice(&dtd);
+    b[95] = 48;
+    b[96] = 120;
+    b[127] = (0u8).wrapping_sub(b[..127].iter().fold(0u8, |a, x| a.wrapping_add(*x)));
+    b
 }
 
 /// A 128-byte EDID for a TV: given maker, name, size and one 3840x2160 60 Hz timing.
@@ -134,32 +147,32 @@ pub fn machine(root: &Path, preset: Preset) {
     let _ = fs::remove_dir_all(root);
     common(root);
     match preset {
-        Preset::AllyX => {
-            w(root, "/sys/class/dmi/id/sys_vendor", "ASUSTeK COMPUTER INC.\n");
-            w(root, "/sys/class/dmi/id/product_name", "ROG Xbox Ally X RC73XA_RC73XA\n");
+        Preset::Handheld => {
+            w(root, "/sys/class/dmi/id/sys_vendor", "Example Devices\n");
+            w(root, "/sys/class/dmi/id/product_name", "Handheld One HH1A_HH1A\n");
             w(root, "/sys/class/dmi/id/chassis_type", "31\n");
-            w(root, "/proc/cpuinfo", "model name\t: AMD Ryzen AI Z2 Extreme\n");
+            w(root, "/proc/cpuinfo", "model name\t: AMD Ryzen Z2 Extreme\n");
             w(root, "/proc/meminfo", "MemTotal:       24300000 kB\n");
             amd_gpu(root, "card1", "150e", None);
-            connector(root, "card1-eDP-1", true, None);
+            connector(root, "card1-eDP-1", true, Some(&panel_edid()));
             connector(root, "card1-DP-1", false, None);
             let bat = "/sys/class/power_supply/BAT0";
             w(root, &format!("{bat}/type"), "Battery\n");
             w(root, &format!("{bat}/capacity"), "78\n");
             w(root, &format!("{bat}/charge_control_end_threshold"), "100\n");
-            let fw = "/sys/class/firmware-attributes/asus-armoury/attributes";
+            let fw = "/sys/class/firmware-attributes/platform-attributes/attributes";
             for (a, min, max, now) in [("ppt_pl1_spl", 7, 35, 17), ("ppt_pl2_sppt", 7, 37, 25), ("ppt_pl3_fppt", 7, 40, 30)] {
                 w(root, &format!("{fw}/{a}/min_value"), &format!("{min}\n"));
                 w(root, &format!("{fw}/{a}/max_value"), &format!("{max}\n"));
                 w(root, &format!("{fw}/{a}/current_value"), &format!("{now}\n"));
             }
             w(root, "/sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences", "default performance balance_performance balance_power power\n");
-            w(root, "/sys/class/leds/ally:rgb:joystick_rings/brightness", "128\n");
-            w(root, "/sys/class/leds/ally:rgb:joystick_rings/multi_intensity", "255 0 0\n");
-            drive(root, "nvme0n1", "WD PC SN5000S 1TB", 1_000_204_886_016, false, "259", &[("nvme0n1p1", "vfat", "esp", "esp", ""), ("nvme0n1p4", "btrfs", "rootfs", "rootfs-A", ""), ("nvme0n1p8", "ext4", "home", "home", "")]);
+            w(root, "/sys/class/leds/multicolor:rgb:joystick/brightness", "128\n");
+            w(root, "/sys/class/leds/multicolor:rgb:joystick/multi_intensity", "255 0 0\n");
+            drive(root, "nvme0n1", "NVMe SSD 1TB", 1_000_204_886_016, false, "259", &[("nvme0n1p1", "vfat", "esp", "esp", ""), ("nvme0n1p4", "btrfs", "rootfs", "rootfs-A", ""), ("nvme0n1p8", "ext4", "home", "home", "")]);
             drive(root, "mmcblk0", "SD 512GB", 512_000_000_000, true, "179", &[("mmcblk0p1", "ext4", "", "", "")]);
             mounts(root, &[("mmcblk0p1", "/run/media/deck/sdcard")]);
-            usb(root, "3-1", "0b05", "1b4c", "ROG Xbox Ally X Controller");
+            usb(root, "3-1", "045e", "028e", "Controller");
         }
         Preset::Desktop | Preset::TvPc => {
             w(root, "/sys/class/dmi/id/sys_vendor", "Micro-Star International Co., Ltd.\n");

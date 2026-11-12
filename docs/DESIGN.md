@@ -13,7 +13,7 @@ Turbine Mod Manager (github.com/Ravenor907/Turbine-Mod-Manager) is the reference
 - Both modes have the same features. The first-run screen asks which one; Settings switches any time without losing anything.
 
 Machines, all first-class:
-- Handhelds (Ally X tested; Ally, Ally Z1E, Steam Deck, Legion Go S expected).
+- Handhelds of any make, detected by what they have (battery, built-in screen, case type), never from a list of devices.
 - Desktop PCs in Game Mode and in Desktop Mode with mouse and keyboard.
 - TV PCs in Game Mode with a controller only.
 
@@ -44,16 +44,16 @@ Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pas
 - "Where's my...?": Windows things and where they are on SteamOS.
 
 ### Games
-Per-game switches (FSR 4 upgrade, frame generation, Steam Deck mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, send a report), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
+Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, send a report), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
 
 ### Store
 Essentials, Apps (Flathub), Decky plugins (with turn-off and "Turn all off" for troubleshooting), Launchers, TV and streaming, Emulation (EmuDeck), Installed. Update all. Everything installed keeps itself current.
 
 ### My machine
 Capability modules, shown only when the hardware has them:
-- Handheld: Power (TDP, Game Boost), Display (refresh, guided experimental refresh test with automatic revert), Lighting (Ally rings first), Battery (charge limit, history), Sleep (drain per sleep, wake sources), Dock, Tune-up, Restart to Windows.
+- Handheld: Power (TDP, Game Boost), Display (the built-in screen's refresh range, from its own EDID), Lighting (any RGB lights the kernel exposes), Battery (charge limit, history), Sleep (drain per sleep, wake sources), Dock, Tune-up, Restart to Windows.
 - PC: Graphics card (fan curve, power limit, safe reset), Processor (Game Boost), Monitors (refresh, VRR, HDR, which screen Game Mode uses), Drives (set up a drive as a game library, Windows drives read only), Sound (output), Sleep and wake (Wake on LAN, controller wake, USB wake), Tune-up, Restart to Windows.
-- TDP is shown only where the kernel exposes power limits, and hidden while Steam's own slider, SimpleDeckyTDP or Ally Center manages it.
+- TDP is shown only where the kernel exposes power limits, and hidden while Steam's own slider or a TDP plugin manages it.
 
 ### Settings
 Mode, interface size (50 to 150%, re-flows), animations, theme and accent (Turbine's design system), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
@@ -182,7 +182,7 @@ Settings:
 | `sysctl` | Listed keys (swappiness, page-cluster, dirty bytes, max_map_count, split-lock...) with ranges | `/etc/sysctl.d/99-zz-turbinehub.conf` + applied now |
 | `sysfs` | Listed /sys patterns (charge limit, EPP, governor, CPU boost, THP, wake flags, GPU power cap, firmware TDP) with value checks; the path must exist and stay inside /sys with links followed; limits read from the kernel's own min/max files where they exist | runtime, re-applied at boot |
 | `wake` | One USB device (vendor:product hex) may or may not wake the machine | `/etc/udev/rules.d/71-turbinehub-wake.rules` |
-| `access` | Fixed rules: `lighting` (LED files and the ASUS lighting chip for the agent's animations), `ntsync` | `/etc/udev/rules.d/70-turbinehub-access.rules` |
+| `access` | Fixed rules: `lighting` (the kernel's RGB LED files, for the agent's animations), `ntsync` | `/etc/udev/rules.d/70-turbinehub-access.rules` |
 | `zram` | 25 to 200% of memory; zstd, lz4 or lzo-rle | `/etc/systemd/zram-generator.conf.d/turbinehub.conf` (next boot) |
 | `module` | `ntsync` | `/etc/modules-load.d/turbinehub.conf` + loaded now |
 | `service` | `sshd`, `plugin_loader` (Decky), `tailscaled`: on or off | systemd |

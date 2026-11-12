@@ -41,11 +41,16 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
         } else if !m.cpu_epp.is_empty() {
             out.push(card("power", "Power", "gauge", if boost_on { "Game Boost on" } else { "Game Boost off" }.into(), "Full CPU speed while a game runs, quiet otherwise."));
         }
-        if let Some(model) = m.model {
-            out.push(Card { experimental: model.hz_experimental.is_some(), ..card("display", "Display", "display", format!("{} to {} Hz", model.hz.0, model.hz.1), "Refresh range, plus a guided test for a higher one.") });
+        if let Some(p) = m.panel {
+            let v = match p.range_hz {
+                Some((lo, hi)) if hi > lo => format!("{lo} to {hi} Hz"),
+                _ => format!("{} x {}", p.mode.0, p.mode.1),
+            };
+            out.push(card("display", "Display", "display", v, "Refresh range for the built-in screen."));
         }
-        if m.model.is_some_and(|x| x.ally_lighting) || !m.rgb_leds.is_empty() {
-            out.push(card("lighting", "Lighting", "light", "Rings".into(), "Joystick ring effects, colors per game, battery rings."));
+        if !m.rgb_leds.is_empty() {
+            let n = m.rgb_leds.len();
+            out.push(card("lighting", "Lighting", "light", if n == 1 { "1 light".into() } else { format!("{n} lights") }, "Effects, colors per game and battery level on the device's lights."));
         }
         if let Some(b) = m.battery() {
             let v = match b.charge_limit {

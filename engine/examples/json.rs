@@ -15,7 +15,7 @@ fn main() {
         ["--self-test", home] => {
             let home = std::path::Path::new(home);
             let mut problems = 0;
-            for (name, preset) in [("ally-x", Preset::AllyX), ("desktop", Preset::Desktop), ("tv-pc", Preset::TvPc)] {
+            for (name, preset) in [("handheld", Preset::Handheld), ("desktop", Preset::Desktop), ("tv-pc", Preset::TvPc)] {
                 let root = std::env::temp_dir().join(format!("turbinehub-json-{name}-{}", std::process::id()));
                 fake::machine(&root, preset);
                 let c = ctx(&root, home);

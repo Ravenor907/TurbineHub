@@ -23,30 +23,15 @@ impl Kind {
     }
 }
 
-/// A handheld Turbine Hub knows by name, with what it knows about its screen and power.
+/// The built-in screen, from its own EDID.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Model {
-    pub name: &'static str,
-    /// The built-in screen's normal refresh range.
-    pub hz: (u32, u32),
-    /// The highest refresh the guided experimental test may try, if any.
-    pub hz_experimental: Option<u32>,
-    /// Joystick ring lighting through ASUS's chip.
-    pub ally_lighting: bool,
+pub struct Panel {
+    /// Diagonal in inches (0 when the screen doesn't say).
+    pub inches: f64,
+    /// The refresh range the screen reports, when it reports one.
+    pub range_hz: Option<(u32, u32)>,
+    pub mode: (u32, u32),
 }
-
-/// DMI text (product name, then product version) that names a known handheld.
-const MODELS: &[(&str, Model)] = &[
-    ("RC73XA", Model { name: "ROG Xbox Ally X", hz: (48, 120), hz_experimental: Some(144), ally_lighting: true }),
-    ("RC73YA", Model { name: "ROG Xbox Ally", hz: (48, 120), hz_experimental: Some(144), ally_lighting: true }),
-    ("RC72LA", Model { name: "ROG Ally X", hz: (48, 120), hz_experimental: None, ally_lighting: true }),
-    ("RC71L", Model { name: "ROG Ally", hz: (48, 120), hz_experimental: None, ally_lighting: true }),
-    ("Galileo", Model { name: "Steam Deck OLED", hz: (45, 90), hz_experimental: None, ally_lighting: false }),
-    ("Jupiter", Model { name: "Steam Deck", hz: (40, 60), hz_experimental: None, ally_lighting: false }),
-    ("Legion Go S", Model { name: "Legion Go S", hz: (48, 120), hz_experimental: None, ally_lighting: false }),
-    ("Legion Go", Model { name: "Legion Go", hz: (60, 144), hz_experimental: None, ally_lighting: false }),
-    ("Claw", Model { name: "MSI Claw", hz: (48, 120), hz_experimental: None, ally_lighting: false }),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GpuVendor {
@@ -144,7 +129,7 @@ pub struct Drive {
     pub role: DriveRole,
 }
 
-/// A firmware power limit (TDP), e.g. ASUS's ppt_pl1_spl.
+/// A firmware power limit (TDP), e.g. ppt_pl1_spl.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PowerLimit {
     pub name: String,
@@ -167,7 +152,10 @@ pub struct WakeDevice {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Machine {
     pub kind: Kind,
-    pub model: Option<Model>,
+    /// The built-in screen, when there is one.
+    pub panel: Option<Panel>,
+    /// The maker's own name for it, from the firmware (empty when the firmware has only a code or a placeholder).
+    pub name: String,
     pub vendor: String,
     pub product: String,
     pub cpu: String,
@@ -257,6 +245,24 @@ pub fn parse_edid(b: &[u8]) -> Option<Edid> {
     Some(e)
 }
 
+/// A readable name from the firmware's product fields: the version field when it holds a name (some makers put the
+/// name there and a code in the product field), else the product field. Part codes ("RC73XA_RC73XA", "8APU1") and
+/// placeholders ("Default string", "1.0") are dropped; a one-word name gets the maker in front.
+pub fn firmware_name(vendor: &str, product: &str, version: &str) -> String {
+    let placeholder = |s: &str| {
+        let l = s.to_ascii_lowercase();
+        l.is_empty() || l.contains("default") || l.contains("to be filled") || l.contains("not specified") || l.contains("system product") || l.contains("system version") || s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+    };
+    let code = |w: &str| w.contains('_') || (w.len() >= 4 && w.bytes().any(|b| b.is_ascii_digit()) && w.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-'));
+    let clean = |s: &str| s.split_whitespace().filter(|w| !code(w)).collect::<Vec<_>>().join(" ");
+    let pick = [version, product].into_iter().map(clean).find(|c| !placeholder(c) && c.chars().any(|ch| ch.is_alphabetic())).unwrap_or_default();
+    if pick.is_empty() || pick.contains(' ') {
+        return pick;
+    }
+    let maker = vendor.split_whitespace().next().unwrap_or("").trim_end_matches([',', '.']);
+    if maker.is_empty() || placeholder(maker) || pick.starts_with(maker) { pick } else { format!("{maker} {pick}") }
+}
+
 /// The Windows Boot Manager entry in efibootmgr's list.
 pub fn windows_boot_entry(efibootmgr: &str) -> Option<String> {
     efibootmgr.lines().find_map(|l| {
@@ -331,7 +337,6 @@ impl Machine {
         let t = Tree(root);
         let dmi = |f: &str| t.text(&format!("/sys/class/dmi/id/{f}"));
         let (vendor, product, version) = (dmi("sys_vendor"), dmi("product_name"), dmi("product_version"));
-        let model = MODELS.iter().find(|(k, _)| product.contains(k) || version.contains(k)).map(|(_, m)| *m);
 
         let mut gpus = Vec::new();
         let mut displays = Vec::new();
@@ -389,8 +394,16 @@ impl Machine {
         }
 
         let has_internal = displays.iter().any(|d| d.internal);
+        let panel = displays.iter().find(|d| d.internal).and_then(|d| d.edid.as_ref()).map(|e| Panel {
+            inches: (((e.size_cm.0 * e.size_cm.0 + e.size_cm.1 * e.size_cm.1) as f64).sqrt() / 2.54 * 10.0).round() / 10.0,
+            range_hz: e.range_hz,
+            mode: e.best_mode,
+        });
         let chassis: u32 = dmi("chassis_type").parse().unwrap_or(0);
-        let kind = if model.is_some() || (!batteries.is_empty() && has_internal && matches!(chassis, 30..=32)) {
+        // A handheld, whoever makes it: a battery and a built-in screen, in a tablet-style case (DMI chassis 30 to
+        // 32) or with a screen of 10 inches or less.
+        let small_screen = panel.is_some_and(|p| p.inches > 0.0 && p.inches <= 10.0);
+        let kind = if !batteries.is_empty() && has_internal && (matches!(chassis, 30..=32) || small_screen) {
             Kind::Handheld
         } else if !batteries.is_empty() && has_internal {
             Kind::Laptop
@@ -424,7 +437,8 @@ impl Machine {
 
         Machine {
             kind,
-            model,
+            panel,
+            name: firmware_name(&vendor, &product, &version),
             vendor,
             product,
             cpu,
@@ -442,13 +456,14 @@ impl Machine {
         }
     }
 
-    /// The name to show: a known model's, else a plain description.
+    /// The name to show: the firmware's name for handhelds and laptops (desktop boards only carry codes), else a
+    /// plain description.
     pub fn name(&self) -> String {
-        match (self.model, self.kind) {
-            (Some(m), _) => m.name.into(),
-            (None, Kind::Handheld) => "Handheld".into(),
-            (None, Kind::Laptop) => "Laptop".into(),
-            (None, Kind::Desktop) => "Desktop PC".into(),
+        match self.kind {
+            Kind::Handheld | Kind::Laptop if !self.name.is_empty() => self.name.clone(),
+            Kind::Handheld => "Handheld".into(),
+            Kind::Laptop => "Laptop".into(),
+            Kind::Desktop => "Desktop PC".into(),
         }
     }
 

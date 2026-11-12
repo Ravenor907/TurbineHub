@@ -52,7 +52,7 @@ pub fn read(root: &Path) -> Readings {
                 r.gpu_w = r.gpu_w.or(num(&d.join("power1_average")).or_else(|| num(&d.join("power1_input"))).map(|v| v / 1_000_000.0));
                 r.fan_rpm = r.fan_rpm.or(num(&d.join("fan1_input")).map(|v| v as u32));
             }
-            Some(n) if n.ends_with("_fan") || n == "asus" || n == "steamdeck_hwmon" => r.fan_rpm = r.fan_rpm.or(num(&d.join("fan1_input")).map(|v| v as u32)),
+            _ if d.join("fan1_input").exists() => r.fan_rpm = r.fan_rpm.or(num(&d.join("fan1_input")).map(|v| v as u32)),
             _ => {}
         }
     }

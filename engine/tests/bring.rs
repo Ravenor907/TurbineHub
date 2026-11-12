@@ -68,9 +68,9 @@ fn the_checkup_lists_problems_first_with_their_fix() {
     let ids: Vec<&str> = checkup::items(&tv, &Facts::default()).iter().map(|i| i.id).collect();
     assert!(ids.contains(&"hdmi") && ids.contains(&"wake"), "{ids:?}");
 
-    let ally = read(Preset::AllyX, "ally");
+    let handheld = read(Preset::Handheld, "handheld");
     let f = Facts { last_sleep: Some((6.0, vec!["A USB dongle".into()])), has_password: Some(false), ..Facts::default() };
-    let items = checkup::items(&ally, &f);
+    let items = checkup::items(&handheld, &f);
     assert_eq!(items.iter().map(|i| i.id).collect::<Vec<_>>(), ["password", "sleep", "charge"]);
     assert_eq!(items[1].line, "A USB dongle woke the machine. Stop it from waking it?");
     assert_eq!(items[2].level, Level::Tip);

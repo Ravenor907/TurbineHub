@@ -20,7 +20,7 @@ for kind in handheld desktop; do
     fi
   }
   if [ $code -ne 0 ]; then echo "::error title=Background helper on a made-up $kind::it ended with code $code"; fail=1; fi
-  need "Game Boost through the helper" 'turbinehub-helper set-now {"path":"/sys/devices/system/cpu/cpufreq/policy0/energy_performance_preference","value":"performance"}'
+  need "Game Boost through the helper" 'turbinehub-helper set-now {"values":[{"path":"/sys/devices/system/cpu/cpufreq/policy0/energy_performance_preference","value":"performance"}'
   need "the save snapshot" 'would do: Snapshot { game: "steam:1145360"'
   need "the running game in its status" '"game":{"id":"steam:1145360","name":"Hades II"'
   if [ $kind = handheld ]; then

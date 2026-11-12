@@ -13,6 +13,8 @@ pub struct Readings {
     pub battery_pct: Option<u32>,
     /// Battery draw while discharging, in watts.
     pub battery_w: Option<f64>,
+    /// Energy left in the battery, in watt-hours, where the battery reports it.
+    pub battery_wh: Option<f64>,
     pub charging: bool,
     pub fan_rpm: Option<u32>,
 }
@@ -65,6 +67,7 @@ pub fn read(root: &Path) -> Readings {
         r.charging = status == "Charging" || status == "Full";
         let watts = num(&b.join("power_now")).or_else(|| Some(num(&b.join("current_now"))? * num(&b.join("voltage_now"))? / 1_000_000.0)).map(|v| v / 1_000_000.0);
         r.battery_w = if r.charging { None } else { watts };
+        r.battery_wh = num(&b.join("energy_now")).or_else(|| Some(num(&b.join("charge_now"))? * num(&b.join("voltage_now"))? / 1_000_000.0)).map(|v| v / 1_000_000.0);
     }
     r
 }
@@ -97,8 +100,10 @@ mod tests {
         w(&root, "sys/class/power_supply/BAT0/capacity", "78\n");
         w(&root, "sys/class/power_supply/BAT0/status", "Discharging\n");
         w(&root, "sys/class/power_supply/BAT0/power_now", "14200000\n");
+        w(&root, "sys/class/power_supply/BAT0/charge_now", "4000000\n");
+        w(&root, "sys/class/power_supply/BAT0/voltage_now", "15500000\n");
         let r = read(&root);
-        assert_eq!(r, Readings { cpu_c: Some(41.0), gpu_c: Some(38.0), gpu_w: Some(34.0), battery_pct: Some(78), battery_w: Some(14.2), charging: false, fan_rpm: Some(0) });
+        assert_eq!(r, Readings { cpu_c: Some(41.0), gpu_c: Some(38.0), gpu_w: Some(34.0), battery_pct: Some(78), battery_w: Some(14.2), battery_wh: Some(62.0), charging: false, fan_rpm: Some(0) });
         w(&root, "sys/class/power_supply/BAT0/status", "Charging\n");
         assert_eq!(read(&root).battery_w, None);
         let _ = fs::remove_dir_all(&root);

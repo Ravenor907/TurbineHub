@@ -4,12 +4,16 @@
 use crate::hardware::{DriveRole, Kind, Machine};
 
 /// Facts the app gathers that aren't in `Machine`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Facts {
     /// The main screen's refresh rate now, when the app could read it.
     pub current_hz: Option<u32>,
     /// Updates ready for things Turbine Hub installed.
     pub updates: Vec<String>,
+    /// Decky plugins with a newer version in the plugin store.
+    pub plugin_updates: Vec<String>,
+    /// A newer Turbine Hub.
+    pub app_update: Option<String>,
     /// Battery used per hour during the last sleep, and the devices that woke the machine.
     pub last_sleep: Option<(f64, Vec<String>)>,
     /// What the helper's drift check found (after a SteamOS update).
@@ -80,6 +84,13 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     if !f.updates.is_empty() {
         let n = f.updates.len();
         out.push(item("updates", Level::Look, "download", if n == 1 { "1 update ready".into() } else { format!("{n} updates ready") }, f.updates.join(", "), ("Update all", "update-all")));
+    }
+    if !f.plugin_updates.is_empty() {
+        let n = f.plugin_updates.len();
+        out.push(item("plugins", Level::Look, "download", if n == 1 { "1 plugin update ready".into() } else { format!("{n} plugin updates ready") }, f.plugin_updates.join(", "), ("How", "help:plugins")));
+    }
+    if let Some(v) = &f.app_update {
+        out.push(item("app", Level::Tip, "download", format!("Turbine Hub {v} is ready"), "It installs when you say so, and starts the next time Turbine Hub opens.", ("Update", "update-app")));
     }
     if f.windows_not_brought {
         out.push(item("windows", Level::Tip, "bring", "Games on your Windows drive can be copied".into(), "Copy them over instead of downloading them again.", ("Bring it over", "bring")));

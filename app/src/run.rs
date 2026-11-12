@@ -6,11 +6,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
-use turbinehub_engine::helper;
-use turbinehub_engine::json::{self, Json};
+use turbinehub_engine::agent::{self, Found};
+use turbinehub_engine::json::Json;
 use turbinehub_engine::net::Client;
 use turbinehub_engine::selfupdate::{self, Check};
+use turbinehub_engine::sources::{self, Origin};
 use turbinehub_engine::ui::{self, Step};
+use turbinehub_engine::{Store, helper};
 
 /// What a worker sends back to the interface thread.
 pub enum Event {
@@ -34,12 +36,17 @@ pub struct Facts {
     pub sound_now: String,
     pub free_bytes: Option<u64>,
     pub efibootmgr: Option<String>,
-    pub drift: Vec<String>,
+    /// What the helper's check found, when the helper is there and answered.
+    pub drift: Option<Vec<String>>,
+    /// Whether the background helper is set to start with the session, when the host could say.
+    pub agent_on: Option<bool>,
     /// Some(true) when the internet answered, Some(false) when it didn't, None when it wasn't asked.
     pub online: Option<bool>,
     pub decky_tag: Option<String>,
     /// Some(version) when a newer Turbine Hub is out, Some("") when this one is the newest.
     pub update: Option<String>,
+    /// Decky plugins with a newer version, when the plugin store's list could be read.
+    pub plugins: Option<Vec<String>>,
 }
 
 pub fn in_flatpak() -> bool {
@@ -61,14 +68,14 @@ fn command(line: &[String]) -> Option<Command> {
     Some(c)
 }
 
-struct Output {
-    code: i32,
-    stdout: String,
-    stderr: String,
+pub struct Output {
+    pub code: i32,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 /// Runs one command line to its end, with `stdin` typed into it when given.
-fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
+pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
     let mut c = command(line).ok_or("Nothing to run")?;
     c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = c.spawn().map_err(|e| format!("Couldn't start {}: {e}", line.first().map(String::as_str).unwrap_or("")))?;
@@ -84,7 +91,7 @@ fn host(args: &[&str]) -> Vec<String> {
 }
 
 /// A host command's output when it ran and ended well.
-fn host_text(args: &[&str]) -> Option<String> {
+pub fn host_text(args: &[&str]) -> Option<String> {
     run(&host(args), None).ok().filter(|o| o.code == 0).map(|o| o.stdout)
 }
 
@@ -95,7 +102,7 @@ fn reason(o: &Output) -> String {
 }
 
 /// A helper job's result: its own answer, or what sudo or pkexec said when it never ran.
-fn helper_result(o: &Output) -> Result<(), String> {
+pub fn helper_result(o: &Output) -> Result<(), String> {
     if let Some(problem) = helper::launch_problem(&o.stderr, o.code) {
         return Err(problem);
     }
@@ -203,17 +210,35 @@ fn lines(text: Option<String>) -> Option<Vec<String>> {
     text.map(|t| t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
 }
 
-/// The sound outputs from pactl's list: each sink's name and what a person calls it.
-pub fn sinks(text: &str) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    for l in text.lines().map(str::trim) {
-        if let Some(name) = l.strip_prefix("Name: ") {
-            out.push((name.to_string(), name.to_string()));
-        } else if let (Some(words), Some(last)) = (l.strip_prefix("Description: "), out.last_mut()) {
-            last.1 = words.to_string();
+/// What the helper's `verify` says differs between its record and the machine. None when it couldn't be asked.
+pub fn verify() -> Option<Vec<String>> {
+    let o = run(&helper::job("verify", None), None).ok()?;
+    let j = helper::answer(&o.stdout).ok()?;
+    Some(j.get("drift").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect())
+}
+
+/// Looks for updates: a newer Turbine Hub, Flathub apps, Decky plugins. Each part that couldn't be checked stays
+/// None. Also answers whether the internet was reached (Some(false): tried and nothing answered).
+pub fn look_for_updates(home: &Path, cache: &Path, version: &str, test_builds: bool) -> (Found, Option<bool>) {
+    let client = Client::new(version, cache);
+    let mut found = Found { apps: lines(host_text(&["flatpak", "remote-ls", "--updates", "--app", "--columns=application"])), ..Found::default() };
+    let (mut worked, mut failed) = (false, false);
+    match selfupdate::check(&client, version, test_builds) {
+        Ok(Check::Available(r)) => found.update = Some(r.version.clone()),
+        Ok(Check::UpToDate) => found.update = Some(String::new()),
+        Err(_) => failed = true,
+    }
+    worked |= found.update.is_some();
+    // Only with Decky there: the plugin store is asked for nothing otherwise.
+    if home.join("homebrew/plugins").is_dir() {
+        let got = sources::get(&sources::DECKY_PLUGINS, cache, turbinehub_engine::now(), &mut |u| client.get_text(u, &[]).map_err(|e| e.to_string()));
+        worked |= got.origin == Origin::Live;
+        failed |= got.offline;
+        if got.origin != Origin::Missing {
+            found.plugins = Some(agent::plugin_updates(home, &got.text));
         }
     }
-    out
+    (found, if worked { Some(true) } else if failed { Some(false) } else { None })
 }
 
 /// What the host can say without the internet. Quick, so screens fill in at once.
@@ -221,65 +246,52 @@ fn local_facts(home: &Path, helper_there: bool) -> Facts {
     let mut f = Facts { local: true, installed: lines(host_text(&["flatpak", "list", "--app", "--columns=application"])), ..Facts::default() };
     f.has_password = host_text(&["passwd", "-S"]).and_then(|t| t.split_whitespace().nth(1).map(|w| w != "NP"));
     f.steam_running = run(&host(&["pgrep", "-x", "steam"]), None).is_ok_and(|o| o.code == 0);
-    f.sound = host_text(&["pactl", "list", "sinks"]).map(|t| sinks(&t)).unwrap_or_default();
+    f.sound = host_text(&["pactl", "list", "sinks"]).map(|t| agent::sinks(&t)).unwrap_or_default();
     f.sound_now = host_text(&["pactl", "get-default-sink"]).map(|t| t.trim().to_string()).unwrap_or_default();
     f.efibootmgr = host_text(&["efibootmgr"]);
     let steam = home.join(".local/share/Steam");
     f.free_bytes = Command::new("df").args(["-B1", "--output=avail"]).arg(if steam.is_dir() { &steam } else { home }).output().ok().and_then(|o| String::from_utf8_lossy(&o.stdout).lines().nth(1).and_then(|l| l.trim().parse().ok()));
-    if helper_there
-        && let Ok(o) = run(&helper::job("verify", None), None)
-        && let Ok(j) = helper::answer(&o.stdout)
-    {
-        f.drift = j.get("drift").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect();
-    }
+    // Without the helper there is no record, so nothing can have drifted.
+    f.drift = if helper_there { verify() } else { Some(Vec::new()) };
+    // systemctl says "disabled", or nothing at all for a unit that isn't there, with a failing exit code: only its
+    // word counts.
+    f.agent_on = run(&agent::unit_question(), None).ok().map(|o| agent::unit_enabled(&o.stdout));
     f
 }
 
-/// Gathers the facts on a new thread: the host's first, then what needs the internet. `downloads` are the rating
-/// files to fetch (address, where to keep it). A file that can't be fetched keeps its last copy.
-pub fn gather(home: PathBuf, cache: PathBuf, version: String, test_builds: bool, helper_there: bool, downloads: Vec<(String, PathBuf)>, tx: Sender<Event>) {
+/// Where a gathering reads and writes.
+pub struct Gather {
+    pub home: PathBuf,
+    pub config_home: PathBuf,
+    pub cache: PathBuf,
+    pub version: String,
+    pub test_builds: bool,
+    pub helper_there: bool,
+}
+
+/// Gathers the facts on a new thread: the host's first, then what needs the internet. Everything online goes
+/// through the engine's sources, which keep the last good copy of each list with its age, so a screen never waits
+/// for the internet and never loses what it showed.
+pub fn gather(g: Gather, tx: Sender<Event>) {
     std::thread::spawn(move || {
-        let _ = tx.send(Event::Facts(Box::new(local_facts(&home, helper_there))));
-        let client = Client::new(&version, &cache);
-        let mut f = Facts { updates: lines(host_text(&["flatpak", "remote-ls", "--updates", "--app", "--columns=application"])), ..Facts::default() };
-        let mut reached = false;
-        // At most 40 new files a run: the lists, then Valve's report for games that have none yet.
-        for (url, file) in downloads.into_iter().take(40) {
-            match client.get_text(&url, &[]) {
-                Ok(text) if json::parse(&text).is_ok() => {
-                    reached = true;
-                    if let Some(d) = file.parent() {
-                        let _ = std::fs::create_dir_all(d);
-                    }
-                    let _ = std::fs::write(&file, text);
-                }
-                Ok(_) => reached = true,
-                Err(_) => {}
-            }
-        }
-        let tag_file = cache.join("decky-tag");
-        if let Ok(text) = client.get_text("https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/latest", &[]) {
-            reached = true;
-            if let Some(tag) = json::parse(&text).ok().and_then(|j| j.str_at("tag_name").map(String::from)) {
-                let _ = std::fs::write(&tag_file, &tag);
-            }
-        }
-        f.decky_tag = std::fs::read_to_string(&tag_file).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        match selfupdate::check(&client, &version, test_builds) {
-            Ok(Check::Available(r)) => {
-                reached = true;
-                f.update = Some(r.version.clone());
-            }
-            Ok(Check::UpToDate) => {
-                reached = true;
-                f.update = Some(String::new());
-            }
-            Err(_) => {}
-        }
-        f.online = Some(reached);
-        if reached {
-            ui::set_checked(&cache, turbinehub_engine::now());
-        }
+        let _ = tx.send(Event::Facts(Box::new(local_facts(&g.home, g.helper_there))));
+        let client = Client::new(&g.version, &g.cache);
+        let now = turbinehub_engine::now();
+        let mut fetch = |u: &str| client.get_text(u, &[]).map_err(|e| e.to_string());
+        // The lists, then Valve's rating for the installed Steam games: at most 40 fetched in one go.
+        let ids: Vec<String> = turbinehub_engine::scan_games(&g.home).games.into_iter().filter(|x| x.store == Store::Steam).map(|x| x.store_id).collect();
+        let lists = sources::refresh(&g.cache, &ids, Some(&turbinehub_engine::cli::anticheat_cache(&g.config_home)), now, 40, &mut fetch);
+        let decky = sources::get(&sources::DECKY_RELEASE, &g.cache, now, &mut fetch);
+        let (found, updates_online) = look_for_updates(&g.home, &g.cache, &g.version, g.test_builds);
+        let answers = [lists.online, if decky.origin == Origin::Live { Some(true) } else if decky.offline { Some(false) } else { None }, updates_online];
+        let f = Facts {
+            updates: found.apps,
+            update: found.update,
+            plugins: found.plugins,
+            decky_tag: sources::release_tag(&decky.text),
+            online: if answers.contains(&Some(true)) { Some(true) } else if answers.contains(&Some(false)) { Some(false) } else { None },
+            ..Facts::default()
+        };
         let _ = tx.send(Event::Facts(Box::new(f)));
     });
 }
@@ -287,13 +299,6 @@ pub fn gather(home: PathBuf, cache: PathBuf, version: String, test_builds: bool,
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reads_sound_outputs_with_their_plain_names() {
-        let text = "Sink #56\n\tState: RUNNING\n\tName: alsa_output.pci-0000_03_00.1.hdmi-stereo\n\tDescription: Navi 48 HDMI Digital Stereo\n\tDriver: PipeWire\nSink #71\n\tName: alsa_output.usb-headset.analog-stereo\n\tDescription: Arctis Nova 7\n";
-        assert_eq!(sinks(text), vec![("alsa_output.pci-0000_03_00.1.hdmi-stereo".to_string(), "Navi 48 HDMI Digital Stereo".to_string()), ("alsa_output.usb-headset.analog-stereo".to_string(), "Arctis Nova 7".to_string())]);
-        assert!(sinks("").is_empty());
-    }
 
     #[test]
     fn commands_run_directly_outside_the_flatpak() {

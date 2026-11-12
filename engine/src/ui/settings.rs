@@ -74,7 +74,8 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
                 choice("mode", "Mode", "Guided explains things. Veteran shows every control.", &["Guided", "Veteran"], if st.mode == Some(Mode::Veteran) { 1 } else { 0 }),
                 scale,
                 with(row("animations", "", "toggle", "Animations", "Fades and slides between screens"), "on", b(st.animations)),
-                with(with(row("none", "", "info", "Background helper", "Game Boost, lighting, sleep checks and save snapshots while you play"), "badge", s("Not in this build")), "tone", s("muted")),
+                agent_row(ui),
+                with(with(with(row("snapshots", "", "toggle", "Save time machine", &format!("A snapshot of a game's saves each time it starts. The newest {} are kept.", crate::snapshots::KEEP)), "on", b(st.save_snapshots)), "badge", s(if st.save_snapshots && !ui.agent_running() { "Needs the background helper" } else { "" })), "tone", s("warn")),
                 open_row("bring", "Bring it over", "Run the Windows steps again", "Open"),
                 open_row("changes", "Review changes", &match changes { 0 => "Nothing changed yet".to_string(), 1 => "1 system change, with Undo".into(), c => format!("{c} system changes, each with Undo") }, "Review"),
             ]
@@ -93,6 +94,9 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
                 rows.push(with(row("testbuilds", "", "toggle", "Test builds", "Get builds before they are released. They can have rough edges."), "on", b(st.test_builds)));
             }
             rows.push(row("none", "", "info", "Store apps", "Apps from the Store tab keep themselves current through Flathub."));
+            if ui.agent_running() {
+                rows.push(row("none", "", "info", "Checked every day", "The background helper looks once a day and says so here and on Home. Nothing installs by itself."));
+            }
             rows
         }
         "setup" => {
@@ -123,6 +127,17 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "sections": arr([section("", rows)]),
         "hints": arr([]),
     }
+}
+
+/// The background helper's switch, with whether it is running now.
+fn agent_row(ui: &Ui) -> Json {
+    let on = ui.agent_running();
+    let (badge, tone) = match (on, ui.agent().alive(crate::now())) {
+        (true, true) => ("Running", "ok"),
+        (true, false) => ("Not running", "warn"),
+        _ => ("", ""),
+    };
+    with(with(with(row("agent", "", "toggle", "Background helper", "Game Boost, moving lights, battery and sleep history and save snapshots while you play"), "on", b(on)), "badge", s(badge)), "tone", s(tone))
 }
 
 /// A recorded change in the words a player uses: the settings Turbine Hub's own controls make are named after the
@@ -195,6 +210,31 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             st.reports = !st.reports;
             refresh()
         }
+        "agent" => {
+            let home = ui.ctx.home.clone();
+            let p = if ui.agent_running() {
+                let mut p = Plan::new("Turn the background helper off?", "Game Boost, moving lights, battery and sleep history and save snapshots stop. What it wrote down so far stays.", "Turn off");
+                p.items.push(("Stop it and remove its start-up entry".into(), crate::agent::unit_file(&home).to_string_lossy().into_owned()));
+                p.steps = crate::agent::turn_off(&home);
+                p.done = "Background helper off".into();
+                p
+            } else {
+                let mut p = Plan::new("Turn the background helper on?", "Turbine Hub keeps running without a window, from the moment this machine starts. It needs no password and changes nothing by itself.", "Turn on");
+                p.items.push(("Add a start-up entry in your own folder".into(), crate::agent::unit_file(&home).to_string_lossy().into_owned()));
+                p.items.push(("Start it now and with every start".into(), "Turn it off here at any time.".into()));
+                p.steps = crate::agent::turn_on(&home);
+                p.done = "Background helper on".into();
+                p
+            };
+            return Some(dialog(ui, p));
+        }
+        "snapshots" => {
+            if !st.save_snapshots && !ui.installed.iter().any(|a| a == super::store::LUDUSAVI) {
+                return Some(with(toast("Saves need Ludusavi. Install it from Store, Essentials."), "open", s("store")));
+            }
+            st.save_snapshots = !st.save_snapshots;
+            if st.save_snapshots && !ui.agent_running() { with(refresh(), "toast", s("Snapshots start once the background helper is on.")) } else { refresh() }
+        }
         "home-all" => {
             ui.home_all = !ui.home_all;
             return Some(refresh());
@@ -258,6 +298,10 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "remove-app" => {
             let mut p = Plan::new("Remove Turbine Hub completely?", "Every system change is undone, the helper and its files go, then the app itself. Your games, saves and Store apps stay.", "Remove");
             p.danger = true;
+            if ui.agent_on == Some(true) {
+                p.items.push(("Turn off the background helper".into(), String::new()));
+                p.steps.extend(crate::agent::turn_off(&ui.ctx.home));
+            }
             if helper::installed(&ui.ctx.root) {
                 p.items.push(("Undo every system change and remove the helper".into(), String::new()));
                 p.steps.push(Step::Host(helper::job("uninstall", None)));
@@ -271,6 +315,10 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let v = ui.update.clone()?;
             let mut p = Plan::new(&format!("Update to Turbine Hub {v}?"), "Turbine Hub downloads the new version from its GitHub releases, checks it against the published checksum and installs it. It takes effect the next time Turbine Hub starts.", "Update");
             p.steps.push(Step::SelfUpdate);
+            if ui.agent_on == Some(true) {
+                // The background helper is the same program: it starts again as the new version.
+                p.steps.push(Step::Host(crate::agent::restart()));
+            }
             p.done = format!("Turbine Hub {v} installed. It starts next time.");
             return Some(dialog(ui, p));
         }

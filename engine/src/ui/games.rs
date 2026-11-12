@@ -70,17 +70,15 @@ impl Switches {
     }
 }
 
-/// What Turbine Hub knows about how games run, from the files the app fetched into the cache folder: the anti-cheat
-/// list, Turbine Hub's fixes and Valve's report per game.
+/// What Turbine Hub knows about how games run, from the files in the cache folder: the anti-cheat list, Turbine
+/// Hub's fixes and Valve's report per game. `crate::sources::refresh` keeps them current, each with a saved copy
+/// and, for the two lists, a built-in one, so they are there offline too.
 #[derive(Debug, Default)]
 pub struct Ratings {
     anticheat: Vec<(String, AntiCheat)>,
     fixes: Vec<(String, Fix)>,
     cache: PathBuf,
 }
-
-pub const ANTICHEAT_URL: &str = "https://raw.githubusercontent.com/AreWeAntiCheatYet/AreWeAntiCheatYet/master/games.json";
-pub const FIXES_URL: &str = "https://raw.githubusercontent.com/Ravenor907/TurbineHub/main/data/fixes.json";
 
 impl Ratings {
     pub fn load(cache: &Path) -> Ratings {
@@ -91,9 +89,6 @@ impl Ratings {
     pub fn valve_file(cache: &Path, app_id: &str) -> PathBuf {
         cache.join("valve").join(format!("{app_id}.json"))
     }
-    pub fn valve_url(app_id: &str) -> String {
-        format!("https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?nAppID={app_id}")
-    }
     pub fn verdict(&self, g: &Game, o: Options) -> Verdict {
         if g.store != Store::Steam {
             return library::verdict(ValveRating::Unknown, None, None, o);
@@ -103,19 +98,6 @@ impl Ratings {
         let fix = self.fixes.iter().find(|(id, _)| *id == g.store_id).map(|(_, f)| f);
         library::verdict(valve, ac, fix, o)
     }
-}
-
-/// What the app fetches to keep the ratings fresh: (address, file in the cache folder). Valve's reports only for
-/// games without one yet.
-pub fn rating_downloads(ui: &Ui) -> Vec<(String, PathBuf)> {
-    let mut out = vec![(ANTICHEAT_URL.to_string(), ui.cache.join("anticheat.json")), (FIXES_URL.to_string(), ui.cache.join("fixes.json"))];
-    for g in crate::scan_games(&ui.ctx.home).games.iter().filter(|g| g.store == Store::Steam) {
-        let f = Ratings::valve_file(&ui.cache, &g.store_id);
-        if !f.exists() {
-            out.push((Ratings::valve_url(&g.store_id), f));
-        }
-    }
-    out
 }
 
 pub(crate) fn game_id(g: &Game) -> String {

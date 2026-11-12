@@ -485,6 +485,15 @@ jobs:
           mkdir -p shots
           python3 tools/stand-in.py --port 47900 --log shots/stand-in-${{ matrix.part }}-${{ matrix.shard }}.log > /dev/null 2>&1 &
           bash tools/ci-shots.sh "${{ matrix.part }}" "${{ matrix.shard }}" "${{ matrix.shards }}"
+      # The background helper, run once from the same bundle on made-up machines: it prints what it would run.
+      - name: The background helper's dry run
+        if: matrix.shard == 0 && matrix.part == '1280x800'
+        shell: bash
+        env:
+          KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
+        run: |
+          if [ -n "$KEEP" ]; then export FLATPAK_USER_DIR="$KEEP/flatpak-user"; fi
+          sh tools/agent-check.sh
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         if: runner.environment == 'github-hosted' && steps.rtcache.outputs.cache-hit != 'true' && matrix.shard == 0 && matrix.part == '1280x800'
         with:

@@ -7,6 +7,7 @@ use crate::helper::{self, Setting};
 use crate::json::{self, Json};
 use crate::modules;
 use crate::tuneup::{self, State};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const EFFECTS: &[&str] = &["Static", "Breathe", "Heartbeat", "Color cycle", "Wave", "Spiral", "Candle", "Twinkle"];
@@ -31,11 +32,13 @@ pub struct Lighting {
     pub battery_level: bool,
     pub off_when_docked: bool,
     pub tv_sound_when_docked: bool,
+    /// With `per_game`: the color each game keeps, game id ("steam:1145360") to one of `COLORS`.
+    pub game_colors: BTreeMap<String, String>,
 }
 
 impl Default for Lighting {
     fn default() -> Self {
-        Lighting { effect: "Static".into(), speed: 50, brightness: 60, color: COLORS[0].1.into(), rainbow: false, per_game: false, battery_level: false, off_when_docked: false, tv_sound_when_docked: false }
+        Lighting { effect: "Static".into(), speed: 50, brightness: 60, color: COLORS[0].1.into(), rainbow: false, per_game: false, battery_level: false, off_when_docked: false, tv_sound_when_docked: false, game_colors: BTreeMap::new() }
     }
 }
 
@@ -58,10 +61,11 @@ impl Lighting {
             battery_level: flag("batteryLevel"),
             off_when_docked: flag("offWhenDocked"),
             tv_sound_when_docked: flag("tvSoundWhenDocked"),
+            game_colors: j.get("gameColors").map(Json::entries).unwrap_or(&[]).iter().filter_map(|(id, c)| Some((id.clone(), c.as_str().filter(|c| COLORS.iter().any(|(_, h)| h == c))?.to_string()))).collect(),
         }
     }
     pub fn to_json(&self) -> String {
-        obj! {"effect": s(&self.effect), "speed": n(self.speed as f64), "brightness": n(self.brightness as f64), "color": s(&self.color), "rainbow": b(self.rainbow), "perGame": b(self.per_game), "batteryLevel": b(self.battery_level), "offWhenDocked": b(self.off_when_docked), "tvSoundWhenDocked": b(self.tv_sound_when_docked)}.to_text() + "\n"
+        obj! {"effect": s(&self.effect), "speed": n(self.speed as f64), "brightness": n(self.brightness as f64), "color": s(&self.color), "rainbow": b(self.rainbow), "perGame": b(self.per_game), "batteryLevel": b(self.battery_level), "offWhenDocked": b(self.off_when_docked), "tvSoundWhenDocked": b(self.tv_sound_when_docked), "gameColors": Json::Obj(self.game_colors.iter().map(|(id, c)| (id.clone(), s(c))).collect())}.to_text() + "\n"
     }
     pub fn load(folder: &Path) -> Lighting {
         std::fs::read_to_string(Self::file(folder)).map(|t| Lighting::parse(&t)).unwrap_or_default()
@@ -93,6 +97,22 @@ pub fn light_writes(root: &Path, m: &Machine, l: &Lighting) -> Vec<(String, Stri
         out.push((format!("{dir}/brightness"), (l.brightness * 255 / 100).to_string()));
     }
     out
+}
+
+/// What docking changes, in a few words.
+pub(crate) fn dock_words(l: &Lighting) -> String {
+    match (l.off_when_docked, l.tv_sound_when_docked) {
+        (true, true) => "Lights off, sound to the TV",
+        (true, false) => "Lights off",
+        (false, true) => "Sound to the TV",
+        (false, false) => "Nothing changes",
+    }
+    .into()
+}
+
+/// A row that says the background helper is off, on the pages whose controls only work with it. None while it runs.
+fn agent_off_row(ui: &Ui, what: &str) -> Option<Json> {
+    (!ui.agent_running()).then(|| with(with(with(with(row("open", "settings", "button", "The background helper is off", &format!("{what} it. Settings, General turns it on.")), "button", s("Settings")), "badge", s("Off")), "tone", s("warn")), "icon", s("external")))
 }
 
 /// The built-in screen's refresh range, from what the screen itself reports.
@@ -136,7 +156,11 @@ pub(crate) fn cards_page(ui: &mut Ui) -> Json {
         "note": s(format!("Only what this {} has is shown.", kind_word(&m))),
         "columns": n(4.0),
         "cards": arr(cards.iter().map(|c| {
-            let value = if c.id == "lighting" { format!("{} \u{b7} {}%", lighting.effect, lighting.brightness) } else { c.value.clone() };
+            let value = match c.id {
+                "lighting" => format!("{} \u{b7} {}%", lighting.effect, lighting.brightness),
+                "dock" => dock_words(&lighting),
+                _ => c.value.clone(),
+            };
             obj! {"id": s(c.id), "title": s(c.title), "icon": s(c.icon), "value": s(value), "line": s(if c.id == "lighting" { "Effects, colors per game and the battery level.".to_string() } else if veteran { c.line.to_string() } else { c.line.replace(" (TDP)", "") }), "badge": s(if c.experimental { "Experimental" } else { "" }), "act": s("open"), "arg": s(format!("module:{}", c.id)), "button": s("")}
         })),
         "hints": arr(if undo { vec![hint("y", "Undo all")] } else { vec![] }),
@@ -196,7 +220,9 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
     let m = ui.machine();
     let st = ui.settings();
     let veteran = ui.veteran();
-    let boost = with(row("boost", "", "toggle", "Game Boost", "Full processor speed while a game runs, quiet the rest of the time."), "on", b(st.game_boost));
+    // Game Boost only happens with Turbine Hub's helper installed and the background helper running.
+    let boost_waits = st.game_boost && !(helper::installed(&ui.ctx.root) && ui.agent_running());
+    let boost = with(with(with(row("boost", "", "toggle", "Game Boost", "Full processor speed while a game runs, quiet the rest of the time."), "on", b(st.game_boost)), "badge", s(if boost_waits { "Not active yet" } else { "" })), "tone", s("warn"));
     let mut hints: Vec<Json> = Vec::new();
     let mut extra: Vec<(&str, Json)> = Vec::new();
     let (title, intro, sections): (String, String, Vec<Json>) = match id {
@@ -231,18 +257,27 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 }
                 with(with(with(r, "live", b(true)), "low", s(low)), "high", s(high))
             };
-            let colors = with(with(with(row("light", "color", "choice", "Color", ""), "options", arr(COLORS.iter().map(|(name, _)| s(*name)))), "swatches", arr(COLORS.iter().map(|(_, h)| s(*h)))), "index", n(COLORS.iter().position(|(_, h)| *h == l.color).unwrap_or(0) as f64));
+            // With colors per game on, the color picked while a game runs is that game's own.
+            let playing = ui.agent().game_now(crate::now()).cloned().filter(|_| l.per_game);
+            let (color_title, color_now) = match &playing {
+                Some((id, name, _)) => (if name.is_empty() { "Color for this game".to_string() } else { format!("Color for {name}") }, l.game_colors.get(id).unwrap_or(&l.color).clone()),
+                None => ("Color".to_string(), l.color.clone()),
+            };
+            let colors = with(with(with(row("light", "color", "choice", &color_title, ""), "options", arr(COLORS.iter().map(|(name, _)| s(*name)))), "swatches", arr(COLORS.iter().map(|(_, h)| s(*h)))), "index", n(COLORS.iter().position(|(_, h)| *h == color_now).unwrap_or(0) as f64));
             let t = |key: &str, title: &str, line: &str, on: bool| with(row("light", key, "toggle", title, line), "on", b(on));
             hints.push(hint("x", "Test lights"));
             extra.push(("x", obj! {"act": s("light-test"), "arg": s("")}));
-            (
-                "Lighting".into(),
-                "The background helper plays moving effects. Test lights shows the color and brightness now.".into(),
-                vec![
-                    section("Effect", vec![effect, slider("speed", "Speed", l.speed, "Slow", "Fast"), slider("brightness", "Brightness", l.brightness, "0%", "100%")]),
-                    section("Colors", vec![colors, t("rainbow", "Rainbow", "Ignore the color above", l.rainbow), t("pergame", "Colors per game", "Each game keeps its own", l.per_game), t("level", "Battery level", "The lights show the charge level", l.battery_level)]),
-                ],
-            )
+            let mut sections = vec![
+                section("Effect", vec![effect, slider("speed", "Speed", l.speed, "Slow", "Fast"), slider("brightness", "Brightness", l.brightness, "0%", "100%")]),
+                section("Colors", vec![colors, t("rainbow", "Rainbow", "Ignore the color above", l.rainbow), t("pergame", "Colors per game", "Pick a color while a game runs and the game keeps it", l.per_game), t("level", "Battery level", "Green, orange or red with the charge", l.battery_level)]),
+            ];
+            let ready = crate::lights::leds(&ui.ctx.root, &m.rgb_leds).iter().all(|led| crate::lights::writable(&ui.ctx.root, led)) || ui.ledger().find_key(&modules::lighting_access().key()).is_some();
+            if let Some(off) = agent_off_row(ui, "Moving effects, colors per game and the battery level need") {
+                sections.insert(0, section("", vec![off]));
+            } else if !ready {
+                sections.insert(0, section("", vec![with(with(row("light-test", "", "button", "The lights need a one-time setup", "Test lights asks for it once. After that the effects play by themselves."), "button", s("Test lights")), "tone", s("warn"))]));
+            }
+            ("Lighting".into(), "The background helper plays the effects. Test lights shows the color and brightness now.".into(), sections)
         }
         "battery" => {
             let mut rows = Vec::new();
@@ -255,7 +290,23 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                     rows.push(with(row("none", "", "info", "Charge now", ""), "value", s(format!("{c}%"))));
                 }
             }
-            ("Battery".into(), String::new(), vec![section("", rows)])
+            let now = crate::now();
+            let r = ui.readings();
+            if r.battery_pct.is_some() {
+                let (value, line) = match super::home::battery_left(ui, &r, now) {
+                    _ if r.charging => ("Charging".to_string(), "Shown while running on battery."),
+                    Some(secs) => (format!("About {}", crate::history::time_words(secs)), "At the draw of the last few minutes."),
+                    None => ("Not known yet".to_string(), "It shows after a few minutes on battery."),
+                };
+                rows.push(with(row("none", "", "info", "Time left", line), "value", s(value)));
+            }
+            let by_game: Vec<Json> = crate::history::use_by_game(&crate::history::sessions(&ui.data))
+                .iter()
+                .take(8)
+                .map(|g| with(row("none", "", "info", if g.name.is_empty() { "A game" } else { &g.name }, &format!("{} on battery, {}", crate::history::time_words(g.secs), if g.sessions == 1 { "1 session".to_string() } else { format!("{} sessions", g.sessions) })), "value", s(format!("{} an hour", crate::history::percent(g.per_hour)))))
+                .collect();
+            let empty = if !by_game.is_empty() { "" } else if ui.agent_running() { "Nothing yet. It fills in as you play on battery." } else { "The background helper keeps this history. Settings, General turns it on." };
+            ("Battery".into(), String::new(), vec![section("", rows), with(section("Battery use by game", by_game), "empty", s(empty))])
         }
         "sleep" => {
             let ledger = ui.ledger();
@@ -268,7 +319,14 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 })
                 .collect();
             let empty = if rows.is_empty() { "No USB device can wake this machine." } else { "" };
-            (if m.kind == Kind::Desktop { "Sleep and wake" } else { "Sleep" }.into(), "Which devices may wake the machine. Turn one off when it wakes it by accident, leave a controller's receiver on to wake from the couch.".into(), vec![with(section("Wake from", rows), "empty", s(empty))])
+            let mut sections = vec![with(section("Wake from", rows), "empty", s(empty))];
+            // What each sleep used is a battery matter: machines without one have nothing to list.
+            if m.battery().is_some() {
+                let last: Vec<Json> = crate::history::sleeps(&ui.data, 6).iter().map(|x| with(row("none", "", "info", &format!("Asleep {}", crate::history::time_words(x.secs)), &x.words()), "value", s(format!("{} ago", super::ago(crate::now(), x.at))))).collect();
+                let empty = if !last.is_empty() { "" } else if ui.agent_running() { "Nothing yet. Each sleep shows here once the machine wakes." } else { "The background helper keeps this history. Settings, General turns it on." };
+                sections.push(with(section("Last sleeps", last), "empty", s(empty)));
+            }
+            (if m.kind == Kind::Desktop { "Sleep and wake" } else { "Sleep" }.into(), "Which devices may wake the machine. Turn one off when it wakes it by accident, leave a controller's receiver on to wake from the couch.".into(), sections)
         }
         "tuneup" => {
             let (rows, off) = tuneup_rows(ui);
@@ -280,8 +338,11 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
         }
         "dock" => {
             let l = Lighting::load(&ui.folder());
-            let rows = vec![with(row("light", "dockoff", "toggle", "Lights off while docked", "No lights when the handheld sits in its dock"), "on", b(l.off_when_docked)), with(row("light", "docksound", "toggle", "Sound to the TV while docked", "Switches to HDMI sound when a TV is connected"), "on", b(l.tv_sound_when_docked))];
-            ("Dock".into(), "What changes when the handheld is docked to a TV. The background helper does the switching.".into(), vec![section("", rows)])
+            let mut rows = vec![with(row("light", "dockoff", "toggle", "Lights off while docked", "No lights while a TV or monitor is connected"), "on", b(l.off_when_docked)), with(row("light", "docksound", "toggle", "Sound to the TV while docked", "Switches to the TV's sound when one is connected, and back when it's gone"), "on", b(l.tv_sound_when_docked))];
+            if let Some(off) = agent_off_row(ui, "The dock options need") {
+                rows.insert(0, off);
+            }
+            ("Dock".into(), "What changes when a TV or monitor is connected. The background helper does the switching.".into(), vec![section("", rows)])
         }
         "gpu" => {
             let mut rows = Vec::new();
@@ -364,7 +425,19 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let mut st = ui.settings();
             st.game_boost = !st.game_boost;
             ui.save(&st);
-            Some(refresh())
+            // Game Boost is the background helper setting the processor through Turbine Hub's helper: both must be
+            // there, and turning it on says what is missing.
+            Some(if !st.game_boost {
+                refresh()
+            } else if !helper::installed(&ui.ctx.root) {
+                let mut p = Plan::new("Set up Turbine Hub's helper?", "Game Boost sets the processor to full speed while a game runs. That is a system setting, so it goes through Turbine Hub's helper.", "Set up");
+                p.done = "Game Boost on".into();
+                with(with_helper(ui, p), "refresh", b(true))
+            } else if !ui.agent_running() {
+                with(with(refresh(), "toast", s("Game Boost starts once the background helper is on. Settings, General.")), "open", s("settings"))
+            } else {
+                refresh()
+            })
         }
         "tdp" => {
             let w = num?;
@@ -456,7 +529,13 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let idx = num.unwrap_or(0) as usize;
             match arg {
                 "effect" => l.effect = EFFECTS.get(idx)?.to_string(),
-                "color" => l.color = COLORS.get(idx)?.1.to_string(),
+                "color" => {
+                    let color = COLORS.get(idx)?.1.to_string();
+                    match ui.agent().game_now(crate::now()).filter(|_| l.per_game) {
+                        Some((game, _, _)) => drop(l.game_colors.insert(game.clone(), color)),
+                        None => l.color = color,
+                    }
+                }
                 "speed" => l.speed = (num? as u32).min(100),
                 "brightness" => l.brightness = (num? as u32).min(100),
                 "rainbow" => l.rainbow = !l.rainbow,

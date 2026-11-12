@@ -67,6 +67,7 @@ use turbinehub_engine::cli::Ctx;
 use turbinehub_engine::fake::Preset;
 use turbinehub_engine::json::{Json, quote};
 use turbinehub_engine::settings::Mode;
+use turbinehub_engine::sources;
 use turbinehub_engine::ui::plan::Ask;
 use turbinehub_engine::ui::{self, Plan, Step, Ui};
 
@@ -82,6 +83,8 @@ pub struct HubRust {
     rx: Receiver<Event>,
     /// The plan whose steps are running.
     running: Option<Plan>,
+    /// When the background helper's files were last looked at.
+    looked: std::time::Instant,
 }
 
 /// The value of `--name=value` among the program's arguments; "1" for a bare `--name`.
@@ -92,6 +95,16 @@ pub fn option(name: &str) -> Option<String> {
 
 fn dir_from(var: &str, fallback: &str) -> PathBuf {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| turbinehub_engine::home_dir().join(fallback))
+}
+
+/// Turbine Hub's data folder: the background helper's history and reports, and the save snapshots.
+pub fn data_dir() -> PathBuf {
+    dir_from("XDG_DATA_HOME", ".local/share").join("turbinehub")
+}
+
+/// Turbine Hub's cache folder: the last copy of everything fetched.
+pub fn cache_dir() -> PathBuf {
+    dir_from("XDG_CACHE_HOME", ".cache").join("turbinehub")
 }
 
 /// Where the real machine is read from.
@@ -113,7 +126,14 @@ fn make_ui() -> Ui {
     };
     let Some(preset) = preset else {
         let mut ui = Ui::new(real_ctx(), dir_from("XDG_CACHE_HOME", ".cache").join("turbinehub"));
-        ui.decky_tag = std::fs::read_to_string(ui.cache.join("decky-tag")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        ui.data = data_dir();
+        // The lists that came with the app stand in until the first fetch, and what the background helper found
+        // shows before the app has asked anything itself.
+        for list in [&sources::ANTICHEAT, &sources::FIXES] {
+            sources::seed(list, &ui.cache);
+        }
+        ui.decky_tag = sources::release_tag(&sources::local(&sources::DECKY_RELEASE, &ui.cache));
+        ui.absorb();
         ui.window = !run::in_game_mode();
         return ui;
     };
@@ -152,7 +172,7 @@ impl Default for HubRust {
         let ui = make_ui();
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: run::in_game_mode() && option("screenshot").is_none(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None };
+        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: run::in_game_mode() && option("screenshot").is_none(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None, looked: std::time::Instant::now() };
         hub.gather();
         hub
     }
@@ -165,7 +185,8 @@ impl HubRust {
             return;
         }
         let st = self.ui.settings();
-        run::gather(self.ui.ctx.home.clone(), self.ui.cache.clone(), self.ui.ctx.version.clone(), st.test_builds, turbinehub_engine::helper::installed(&self.ui.ctx.root), ui::games::rating_downloads(&self.ui), self.tx.clone());
+        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root) };
+        run::gather(g, self.tx.clone());
     }
 
     fn take(&mut self, f: Facts) {
@@ -176,6 +197,10 @@ impl HubRust {
         if let Some(v) = f.updates {
             ui.facts.updates = ui::store::APPS.iter().filter(|a| v.iter().any(|u| u == a.id)).map(|a| a.name.to_string()).collect();
             ui.updates = v;
+            ui.updates_own = true;
+        }
+        if let Some(v) = f.plugins {
+            ui.facts.plugin_updates = v;
         }
         if f.local {
             ui.facts.has_password = f.has_password;
@@ -183,7 +208,15 @@ impl HubRust {
             ui.sound = f.sound;
             ui.sound_now = f.sound_now;
             ui.free_bytes = f.free_bytes;
-            ui.facts.drift = f.drift;
+            if let Some(drift) = f.drift {
+                // The background helper reads the same note, so it knows what the app found (and put back).
+                turbinehub_engine::agent::save_drift(&ui.data, turbinehub_engine::now(), &turbinehub_engine::agent::steamos(&ui.ctx.root), &drift);
+                ui.facts.drift = drift;
+                ui.drift_own = true;
+            }
+            if f.agent_on.is_some() {
+                ui.agent_on = f.agent_on;
+            }
             if let Some(e) = f.efibootmgr {
                 ui.ctx.efibootmgr = e;
             }
@@ -198,6 +231,7 @@ impl HubRust {
         }
         if let Some(v) = f.update {
             ui.update = Some(v).filter(|v| !v.is_empty());
+            ui.updates_own = true;
         }
     }
 
@@ -316,6 +350,7 @@ impl qobject::Hub {
 
     pub fn poll(mut self: Pin<&mut Self>) -> QString {
         let mut out: Vec<(&str, String)> = Vec::new();
+        let mut tick = false;
         if self.rust().pads.is_none() && crate::backend::option("screenshot").is_none() {
             self.as_mut().rust_mut().pads = Some(Pads::open());
         }
@@ -326,6 +361,11 @@ impl qobject::Hub {
                 out.push(("keys", format!("[{}]", keys.join(","))));
             }
         }
+        // What the background helper wrote since the last look (a sleep, updates it found), every half minute.
+        if !self.rust().ui.sample && self.rust().looked.elapsed() >= Duration::from_secs(30) {
+            self.as_mut().rust_mut().looked = std::time::Instant::now();
+            tick |= self.as_mut().rust_mut().ui.absorb();
+        }
         let mut events = Vec::new();
         while let Ok(e) = self.rust().rx.try_recv() {
             events.push(e);
@@ -335,7 +375,7 @@ impl qobject::Hub {
                 Event::Progress(words) => self.as_mut().set_busy_words(QString::from(words.as_str())),
                 Event::Facts(f) => {
                     self.as_mut().rust_mut().take(*f);
-                    out.push(("tick", "true".into()));
+                    tick = true;
                 }
                 Event::Done(result) => {
                     let plan = self.as_mut().rust_mut().running.take();
@@ -353,6 +393,9 @@ impl qobject::Hub {
                     }));
                 }
             }
+        }
+        if tick {
+            out.push(("tick", "true".into()));
         }
         if out.is_empty() { QString::default() } else { answer(&out) }
     }

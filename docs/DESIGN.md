@@ -29,7 +29,8 @@ Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs.
 
 ### Home
 - Guided: what needs attention first ("Two things could use a look"), the checkup, health stats, a "Finish setting up" card until setup is done.
-- Veteran: dashboard (temps, power, battery, fps, fans), quick switches, compact checkup, activity log.
+- Veteran: dashboard (temps, power, battery with time left, fans), quick switches, compact checkup, activity log. No fps tile: nothing in Turbine Hub measures it (MangoHud's overlay does, per game).
+- The battery tile says how long the charge lasts: the energy left over the average draw of the last ten minutes.
 - The checkup lists only problems, each with its fix. It includes "known limits" for the hardware in plain words (Nvidia drivers, 4K 120 Hz over HDMI, one screen in Game Mode) and PC checks (monitor below its refresh rate, unused drive).
 
 ### Will my games run? (library check)
@@ -56,7 +57,7 @@ Capability modules, shown only when the hardware has them:
 - TDP is shown only where the kernel exposes power limits, and hidden while Steam's own slider or a TDP plugin manages it.
 
 ### Settings
-Mode, interface size (50 to 150%, re-flows), animations, theme and accent (Turbine's design system), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
+Mode, interface size (50 to 150%, re-flows), animations, the background helper (on or off) and the save time machine, theme and accent (Turbine's design system), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
 
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.
@@ -104,7 +105,9 @@ New:
 - `library`: owned games from Steam and Heroic, Valve ratings, anti-cheat status, the three labels and the alternative.
 - `bring`: stores, Game Pass, Windows drive scan (games and Ludusavi save plan), Windows app map.
 - `store`: Flathub (via `flatpak` on the host), Decky store, launchers, streaming tiles.
-- `saves`: save time machine on top of the Ludusavi CLI.
+- `snapshots`: the save time machine's snapshots on top of the Ludusavi CLI (one folder per snapshot, the newest few kept).
+- `agent`: every decision of the background agent (see below). `history`: its battery, sleep and session files and what the screens make of them. `lights`: lighting effects as frames for any RGB light.
+- `sources`: everything fetched online, each with a saved copy, a second host where one exists, and a built-in copy; `refresh` is the one place the app goes online for the anti-cheat list, the fixes and Valve's ratings.
 - `ledger`: the change record shared with the helper (see 4).
 - `settings`, `glossary`, `mode`.
 - `cli`: `--json` verbs for the Decky backend and scripts.
@@ -118,7 +121,21 @@ One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and t
 `turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
 
 ### Background agent
-The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit in `~/.config/systemd/user/` (user-level, survives SteamOS updates). It watches game launches (Game Boost on/off, save snapshots), records battery and sleep history, animates lighting, checks for updates daily, and runs the after-update check (see 4.6).
+The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit, `~/.config/systemd/user/turbinehub-agent.service` (user-level, no password, survives SteamOS updates). Settings, Background helper writes the unit through `flatpak-spawn --host` and enables it; turning it off disables and removes it. Players see it as "the background helper".
+
+What it does, all decided in `engine/src/agent.rs` (the app's `agent.rs` only looks, runs the commands it is handed and brings the answers back):
+
+- **Games.** Steam starts every game under its `reaper` program with `SteamLaunch AppId=<id>` in the arguments. The agent reads the process list every few seconds (through `pgrep` on the host, because the sandbox has its own /proc) and changes nothing about Steam.
+- **Game Boost.** With the setting on and the privileged helper installed: `set-now` for each CPU policy's energy preference at a game's start, and the values from before at its end (kept in its state file, so a restart of the agent still puts them back). It is a processor setting, not a change to a game, so it applies to every game, including those with online anti-cheat.
+- **Save snapshots.** With the save time machine on and Ludusavi installed: a snapshot of the game's saves at each start (see `engine/src/snapshots.rs` for the layout), at most one per game in ten minutes, the newest five kept, unchanged saves skipped. Reading save files touches no game.
+- **Battery.** A reading a minute into `history/battery.jsonl` (a week of them), each game session into `history/sessions.jsonl`. From these: time left, and battery use per game (sessions that ran on battery from start to end).
+- **Sleep.** A wall clock that jumped ahead of the steady clock is a sleep, confirmed by the kernel's count in `/sys/power/suspend_stats/success`. The charge before and after and the USB devices whose wake count rose go into `history/sleep.jsonl`; the checkup's sleep item and the Sleep page read it.
+- **Lighting.** Frames for every `*:rgb:*` light in `/sys/class/leds` (static, breathe, heartbeat, color cycle, wave, spiral, candle, twinkle; the charge as a color; a color per game), 20 a second on wall power and 8 on battery, only the files that changed. Only once the player has saved lighting choices and the helper's lighting access rule has opened the files. Inside the sandbox /sys is read only, so each file gets one long-lived `tee` on the host.
+- **Dock.** On a handheld, an outside screen connecting or going away: lights off while docked and sound to the TV's output and back, as the Dock page says.
+- **Updates.** Once a day, never while a game runs: a newer Turbine Hub, Flathub apps (`flatpak remote-ls --updates`), Decky plugins against the plugin store's list. It only reports; installing is the player's press in the app.
+- **After a SteamOS update.** See 4.6.
+
+It talks to the app through files in the app's data folder, no socket: `agent/status.json` (still running, the game, updates found), `agent/drift.json`, the history files, and lines in the activity list. One agent at a time (a lock file). `turbinehub --agent --once --machine=handheld` runs it once on a made-up machine and prints what it would run; the build's checks do that.
 
 ### Steam integration
 - Adds itself to Steam with art (Turbine's shortcuts and steam_art).
@@ -208,7 +225,7 @@ One JSON file, one entry per setting (a second change to the same setting update
 ### 4.6 SteamOS updates
 - Files in `/etc` and everything in `/var` survive.
 - Runtime values are put back at every boot by `turbinehub-reapply.service`.
-- After an update (the agent sees the SteamOS version change), the app runs `verify`. Anything SteamOS now does itself (for example a tune-up item that became default) is reported and offered for removal. Anything that drifted is re-applied, and the player is told in one line.
+- After an update (the agent sees the SteamOS version change), the agent runs `verify` and writes down what differs. The app runs `verify` at its own start too. Anything that drifted shows in the checkup with one tap to put it back (`reapply`), and the activity list says so in one line. Anything SteamOS now does itself (for example a tune-up item that became default) shows as "SteamOS does it" in the tune-up.
 
 ### 4.7 Safety rules
 - Check before applying: every module states the exact change and the undo before asking.
@@ -219,7 +236,7 @@ One JSON file, one entry per setting (a second change to the same setting update
 
 ## 5. Updates, reports, CI
 
-- Updates: GitHub releases checked at startup, installed only when the player agrees, bundle checked by SHA-256 (Turbine's selfupdate). Test builds: opt-in pre-releases.
+- Updates: GitHub releases checked at startup and once a day by the background agent, installed only when the player agrees, bundle checked by SHA-256 (Turbine's selfupdate). Test builds: opt-in pre-releases.
 - Reports and Labs mode: Turbine's report and Labs.
 - A release only ships a bundle from a green CI run of the same commit (Turbine's reuse and release jobs).
 - CI follows Turbine's build.yml: house rules check, engine tests and `clippy -D warnings` on 1.97.0, QML syntax check, release rules, Flatpak build, screenshot shards at 1280x800, 1920x1080 and 1600x900 with SelfCheck, stand-in servers and fake home folders (a live check may warn, never fail), layout checks and before/after screenshot comparison.

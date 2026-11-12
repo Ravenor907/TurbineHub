@@ -15,7 +15,7 @@ pub mod settings;
 mod setup;
 pub mod store;
 
-pub use activity::{ago, note as note_activity};
+pub use activity::{ago, note as note_activity, read as read_activity};
 pub use games::Switches;
 pub use plan::{Plan, Step};
 pub use sample::HANDHELD;
@@ -101,6 +101,14 @@ pub struct Ui {
     pub offline: bool,
     /// A newer Turbine Hub, when the last check found one.
     pub update: Option<String>,
+    /// Turbine Hub's data folder: the background helper's history and reports, and the save snapshots.
+    pub data: PathBuf,
+    /// The background helper is set to start with the session (the host says). None until it was asked.
+    pub agent_on: Option<bool>,
+    /// The app looked for updates itself in this run, so its lists are newer than the background helper's.
+    pub updates_own: bool,
+    /// The app asked the helper about drift itself in this run.
+    pub drift_own: bool,
     pub(crate) picked: BTreeMap<String, BTreeSet<String>>,
     pub(crate) pending: Option<Plan>,
     pub(crate) home_all: bool,
@@ -109,7 +117,8 @@ pub struct Ui {
 
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
-        Ui { ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        let data = ctx.config_home.join("turbinehub/data");
+        Ui { data, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -136,6 +145,41 @@ impl Ui {
     /// The player's own folder for Turbine Hub's files (per-game switches, lighting, the activity list).
     pub fn folder(&self) -> PathBuf {
         self.ctx.config_home.join("turbinehub")
+    }
+
+    /// What the background helper last wrote, when it is running now.
+    pub fn agent(&self) -> crate::agent::Report {
+        crate::agent::Report::load(&self.data)
+    }
+    /// Is the background helper on? What the host said about its unit, or until then whether it wrote a moment ago.
+    pub fn agent_running(&self) -> bool {
+        self.agent_on.unwrap_or_else(|| self.agent().alive(crate::now()))
+    }
+
+    /// Takes in what the background helper wrote since the last look: the last sleep, and (until the app has asked
+    /// for itself in this run) the updates it found and what a SteamOS update reset. Answers whether anything
+    /// the screens show changed.
+    pub fn absorb(&mut self) -> bool {
+        let before = (self.facts.clone(), self.updates.clone(), self.update.clone());
+        let report = self.agent();
+        self.facts.last_sleep = crate::history::last_sleep(&self.data);
+        if !self.updates_own && report.checked > 0 {
+            self.facts.updates = store::APPS.iter().filter(|a| report.updates.iter().any(|u| u == a.id)).map(|a| a.name.to_string()).collect();
+            self.updates = report.updates.clone();
+            self.facts.plugin_updates = report.plugins.clone();
+            if let Some(v) = &report.update {
+                self.update = Some(v.clone()).filter(|v| !v.is_empty());
+            }
+        }
+        if !self.drift_own {
+            self.facts.drift = crate::agent::drift(&self.data);
+        }
+        before != (self.facts.clone(), self.updates.clone(), self.update.clone())
+    }
+
+    /// The facts for the checkup, with the newer Turbine Hub among them.
+    pub(crate) fn facts_now(&self) -> Facts {
+        Facts { app_update: self.update.clone(), ..self.facts.clone() }
     }
 
     /// What the top bar and the window need at every start and after every change.
@@ -301,3 +345,5 @@ pub(crate) fn size_words(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_background;

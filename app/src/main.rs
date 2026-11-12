@@ -1,3 +1,4 @@
+mod agent;
 mod backend;
 mod pad;
 mod run;
@@ -40,6 +41,10 @@ fn main() {
         let (text, code) = turbinehub_engine::cli::run(args.get(i + 1).map(String::as_str).unwrap_or(""), &backend::real_ctx());
         println!("{text}");
         std::process::exit(code);
+    }
+    // The background helper: the same program without a window, started by its systemd user unit.
+    if args.iter().any(|a| a == "--agent") {
+        std::process::exit(agent::main());
     }
     choose_platform();
     pad::clear_steam_filters();

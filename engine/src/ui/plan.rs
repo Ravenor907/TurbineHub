@@ -14,7 +14,7 @@ pub enum Step {
     HelperInstall,
     /// Sets the machine's first password: passwd, with the dialog's new password on stdin twice.
     SetPassword,
-    /// Writes one value to a lighting file on the host (through tee, no shell).
+    /// Writes a file on the host (through tee, no shell): a lighting value, or the background helper's unit.
     HostWrite { path: String, value: String },
     /// Adds a tile to the Steam library that opens this address in the browser.
     Tile { name: String, url: String },

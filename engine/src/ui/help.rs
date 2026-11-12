@@ -59,6 +59,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "password" => return super::setup::act(ui, "password", "", value),
         "reapply" => return super::settings::act(ui, "reapply", "", value),
         "update-all" => return super::store::act(ui, "update-all", "", value),
+        "update-app" => return super::settings::act(ui, "update-app", "", value),
+        "help:plugins" => guide("Updating Decky plugins", "Plugins update from Decky's own store, in Steam's quick menu.", &[("1", "Open Steam's quick menu and pick the plug icon."), ("2", "Open the store icon at the top, then Updates."), ("3", "Update each plugin, or all of them.")]),
         "bring" => open("bring"),
         "help:nvidia" => guide("Nvidia graphics on SteamOS", "Valve and Nvidia are still working on it, so some things are rough.", &[("Works", "Most games in Desktop Mode and in Game Mode."), ("Rough", "HDR, variable refresh and sleep can misbehave in Game Mode."), ("If a game stutters", "Try it in Desktop Mode, and keep SteamOS up to date: fixes arrive with its updates.")]),
         "help:hdmi" => guide("4K at 120 Hz over HDMI", "Linux graphics drivers aren't allowed to use HDMI 2.1's fastest mode, so HDMI stops at 4K 60 Hz with full color.", &[("The way around it", "A DisplayPort to HDMI 2.1 adapter between the PC and the TV carries 4K at 120 Hz."), ("Or", "Run 1440p at 120 Hz over HDMI. On a TV from the couch it looks close.")]),

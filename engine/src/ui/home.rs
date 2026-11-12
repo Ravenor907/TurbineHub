@@ -2,6 +2,7 @@
 use super::{Ui, activity, arr, b, hint, kind_word, n, obj, s};
 use crate::checkup::{self, Item, Level};
 use crate::hardware::Machine;
+use crate::history::{self, Sample};
 use crate::json::Json;
 use crate::sensors::Readings;
 use crate::settings::{SETUP_STEPS, Settings};
@@ -27,11 +28,26 @@ fn thousands(v: u32) -> String {
     if v >= 1000 { format!("{},{:03}", v / 1000, v % 1000) } else { v.to_string() }
 }
 
-/// The readings as tiles, only the ones this machine has: (id, big value, small words, icon).
-pub(crate) fn tiles(m: &Machine, r: &Readings) -> Vec<(&'static str, String, String, &'static str)> {
+/// Seconds of battery left: from the background helper's readings of the last hours with the reading of this
+/// moment at the end, so there is an answer (a rougher one) without the background helper too.
+pub(crate) fn battery_left(ui: &Ui, r: &Readings, now: u64) -> Option<u64> {
+    let mut run = history::samples(&ui.data, now.saturating_sub(3 * 3600));
+    run.retain(|x| x.at <= now);
+    run.push(Sample { at: now, pct: r.battery_pct?, watts: r.battery_w, charging: r.charging, game: String::new() });
+    history::time_left(&run, now, r.battery_wh)
+}
+
+/// The readings as tiles, only the ones this machine has: (id, big value, small words, icon). `left` is the
+/// battery time left in seconds, when it can be told.
+pub(crate) fn tiles(m: &Machine, r: &Readings, left: Option<u64>) -> Vec<(&'static str, String, String, &'static str)> {
     let mut out = Vec::new();
     if let Some(p) = r.battery_pct {
-        out.push(("battery", format!("{p}%"), if r.charging { "Battery, charging" } else { "Battery" }.to_string(), "battery"));
+        let words = match left {
+            _ if r.charging => "Battery, charging".to_string(),
+            Some(secs) => format!("Battery, about {} left", history::time_words(secs)),
+            None => "Battery".to_string(),
+        };
+        out.push(("battery", format!("{p}%"), words, "battery"));
     }
     if let Some(c) = r.cpu_c {
         out.push(("cpu", format!("{c:.0}\u{b0}C"), "CPU".into(), "temp"));
@@ -78,7 +94,11 @@ fn switches(ui: &Ui, m: &Machine, st: &Settings) -> Vec<Json> {
         if c.id == "cpu" {
             continue;
         }
-        let value = if c.id == "lighting" { super::machine::Lighting::load(&ui.folder()).effect } else { c.value.clone() };
+        let value = match c.id {
+            "lighting" => super::machine::Lighting::load(&ui.folder()).effect,
+            "dock" => super::machine::dock_words(&super::machine::Lighting::load(&ui.folder())),
+            _ => c.value.clone(),
+        };
         out.push(obj! {"id": s(format!("module:{}", c.id)), "title": s(c.title), "value": s(value), "toggle": b(false), "on": b(false), "icon": s(c.icon)});
     }
     out.truncate(8);
@@ -88,12 +108,12 @@ fn switches(ui: &Ui, m: &Machine, st: &Settings) -> Vec<Json> {
 pub(crate) fn page(ui: &mut Ui) -> Json {
     let m = ui.machine();
     let st = ui.settings();
-    let items = checkup::items(&m, &ui.facts);
+    let items = checkup::items(&m, &ui.facts_now());
     let (headline, sub) = checkup::headline(&items);
     let r = ui.readings();
-    let tiles = arr(tiles(&m, &r).into_iter().map(|(id, v, l, icon)| obj! {"id": s(id), "value": s(v), "label": s(l), "icon": s(icon)}));
+    let now = crate::now();
+    let tiles = arr(tiles(&m, &r, battery_left(ui, &r, now)).into_iter().map(|(id, v, l, icon)| obj! {"id": s(id), "value": s(v), "label": s(l), "icon": s(icon)}));
     if ui.veteran() {
-        let now = crate::now();
         return obj! {
             "view": s("veteran"),
             "tiles": tiles,

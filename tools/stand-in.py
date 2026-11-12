@@ -9,7 +9,7 @@ which the engine's own parsers are tested against in engine/tests/standin.rs).
 Serves on 127.0.0.1 only:
   /saleaction/ajaxgetdeckappcompatibilityreport?nAppID=<id>   Valve's rating for one game
   /AreWeAntiCheatYet/AreWeAntiCheatYet/master/games.json      the anti-cheat list
-  /Ravenor907/TurbineHub/main/data/fixes.json                 Turbine Hub's own fixes
+  /Ravenor907/TurbineHub/main/engine/data/fixes.json          Turbine Hub's own fixes
   /Ravenor907/TurbineHub/releases.atom                        the release feed (0.2, and 0.3 as a test build)
   /Ravenor907/TurbineHub/releases/latest                      redirects to the newest full release's page
   /Ravenor907/TurbineHub/releases/download/<tag>/TurbineHub.flatpak and .sha256   a small file and its checksum
@@ -56,7 +56,7 @@ def answer(path, query):
         return 200, "application/json", json.dumps(reports.get(app, {"success": 1, "results": []})).encode(), {}
     if path == "/AreWeAntiCheatYet/AreWeAntiCheatYet/master/games.json":
         return 200, "application/json", data("anticheat.json"), {}
-    if path == REPO + "/main/data/fixes.json":
+    if path == REPO + "/main/engine/data/fixes.json":
         return 200, "application/json", data("fixes.json"), {}
     if path == REPO + "/releases.atom":
         return 200, "application/atom+xml", feed(), {}
@@ -126,7 +126,7 @@ def self_test():
     check("a game without a rating", status == 200 and json.loads(body)["results"] == [])
     status, body, _ = get("/AreWeAntiCheatYet/AreWeAntiCheatYet/master/games.json")
     check("the anti-cheat list", status == 200 and any(g["storeIds"].get("steam") == "1172470" for g in json.loads(body)))
-    status, body, _ = get(REPO + "/main/data/fixes.json")
+    status, body, _ = get(REPO + "/main/engine/data/fixes.json")
     check("the fixes", status == 200 and json.loads(body)["1245620"]["kind"] == "switch")
     status, body, _ = get(REPO + "/releases.atom")
     check("the feed", status == 200 and b"/releases/tag/v0.3" in body and body.index(b"v0.3") < body.index(b"v0.2"))

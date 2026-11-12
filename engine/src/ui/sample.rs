@@ -39,6 +39,8 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("power", "--page=module:power --machine=handheld --mode=veteran"),
     ("tuneup", "--page=module:tuneup --machine=handheld --mode=guided"),
     ("sleep", "--page=module:sleep --machine=handheld --mode=guided"),
+    ("battery", "--page=module:battery --machine=handheld --mode=guided"),
+    ("dock", "--page=module:dock --machine=handheld --mode=guided"),
     ("dialog", "--page=machine --act=tuneup:all --machine=handheld --mode=guided"),
     ("dialog-guide", "--page=home --act=checkup:help:hdmi --machine=tv --mode=guided"),
     ("menu", "--page=home --act=menu: --machine=handheld --mode=guided"),
@@ -112,11 +114,11 @@ fn cache(cache: &Path, now: u64, offline: bool) {
 
 fn sensors(root: &Path, preset: Preset) -> Readings {
     match preset {
-        HANDHELD => Readings { cpu_c: Some(58.0), gpu_c: Some(55.0), gpu_w: Some(12.0), battery_pct: Some(78), battery_w: Some(14.2), charging: false, fan_rpm: Some(3100) },
-        Preset::Desktop => Readings { cpu_c: Some(41.0), gpu_c: Some(38.0), gpu_w: Some(34.0), battery_pct: None, battery_w: None, charging: false, fan_rpm: Some(880) },
+        HANDHELD => Readings { cpu_c: Some(58.0), gpu_c: Some(55.0), gpu_w: Some(12.0), battery_pct: Some(78), battery_w: Some(14.2), battery_wh: Some(46.0), charging: false, fan_rpm: Some(3100) },
+        Preset::Desktop => Readings { cpu_c: Some(41.0), gpu_c: Some(38.0), gpu_w: Some(34.0), battery_pct: None, battery_w: None, battery_wh: None, charging: false, fan_rpm: Some(880) },
         Preset::TvPc => {
             let _ = root;
-            Readings { cpu_c: Some(44.0), gpu_c: Some(48.0), gpu_w: Some(62.0), battery_pct: None, battery_w: None, charging: false, fan_rpm: Some(940) }
+            Readings { cpu_c: Some(44.0), gpu_c: Some(48.0), gpu_w: Some(62.0), battery_pct: None, battery_w: None, battery_wh: None, charging: false, fan_rpm: Some(940) }
         }
     }
 }
@@ -134,6 +136,29 @@ fn ledger(root: &Path, preset: Preset, now: u64) {
         w(root, "sys/class/power_supply/BAT0/charge_control_end_threshold", "80\n");
     }
     w(root, crate::helper::LEDGER, &l.to_text());
+}
+
+/// What the background helper would have written on this machine over the last days: it is on and running, with
+/// battery readings, sleeps and game sessions on the handheld.
+fn agent_files(ui: &Ui, preset: Preset, now: u64) {
+    use crate::history::{Sample, Session, Sleep, add_sample, add_session, add_sleep};
+    let report = crate::agent::Report { at: now, version: ui.ctx.version.clone(), game: None, update: Some(String::new()), updates: ui.updates.clone(), plugins: Vec::new(), checked: now - 3 * 3600 };
+    report.save(&ui.data);
+    if preset != HANDHELD {
+        return;
+    }
+    for i in (0..=30u64).rev() {
+        add_sample(&ui.data, &Sample { at: now - i * 60, pct: 78 + (i / 8) as u32, watts: Some(13.6 + (i % 3) as f64 * 0.6), charging: false, game: String::new() });
+    }
+    add_sleep(&ui.data, &Sleep { at: now - 3 * 86_400, secs: 9 * 3600, before: 71, after: 69, charging: false, wakers: Vec::new() });
+    add_sleep(&ui.data, &Sleep { at: now - 2 * 86_400, secs: 6 * 3600 + 1200, before: 40, after: 100, charging: true, wakers: Vec::new() });
+    add_sleep(&ui.data, &Sleep { at: now - 9 * 3600, secs: 7 * 3600, before: 92, after: 50, charging: false, wakers: vec!["Built-in controller".into()] });
+    let play = |game: &str, name: &str, ago: u64, mins: u64, before: u32, after: u32| add_session(&ui.data, &Session { game: game.into(), name: name.into(), start: now - ago, end: now - ago + mins * 60, asleep: 0, before: Some(before), after: Some(after), on_battery: true });
+    play("steam:1091500", "Cyberpunk 2077", 4 * 86_400, 75, 96, 41);
+    play("steam:1086940", "Baldur's Gate 3", 3 * 86_400 + 40_000, 110, 100, 38);
+    play("steam:1086940", "Baldur's Gate 3", 2 * 86_400 + 30_000, 64, 88, 50);
+    play("steam:367520", "Hollow Knight", 86_400, 95, 90, 62);
+    play("steam:2379780", "Balatro", 20_000, 130, 97, 70);
 }
 
 pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
@@ -162,7 +187,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     ui.sound = vec![("speakers".into(), "Speakers".into()), ("headset".into(), "Headset".into()), ("hdmi".into(), "TV over HDMI".into())];
     ui.sound_now = "headset".into();
     ui.facts = match preset {
-        HANDHELD => Facts { updates: vec!["Heroic Games Launcher".into()], last_sleep: Some((6.0, vec!["A USB device".into()])), has_password: Some(true), windows_not_brought: true, ..Facts::default() },
+        HANDHELD => Facts { updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
         Preset::Desktop => Facts { current_hz: Some(60), updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
         Preset::TvPc => Facts { updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), ..Facts::default() },
     };
@@ -171,6 +196,9 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
         fake::windows_drive(&mount);
         ui.windows_mount = Some(mount);
     }
+    ui.agent_on = Some(true);
+    agent_files(&ui, preset, now);
+    ui.absorb();
     for (ago, text) in [(86_400 * 2, "Tune-up: 3 settings turned on"), (3600 * 5, if preset == HANDHELD { "Charge limit set to 80%" } else { "Sound goes to Headset" }), (3600 * 2, "Heroic Games Launcher installed"), (1500, "Checked 10 games against the ratings"), (240, "Xbox Cloud added to the library")] {
         super::note_activity(&ui.folder(), now - ago, text);
     }

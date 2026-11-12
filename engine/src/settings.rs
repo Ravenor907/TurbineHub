@@ -22,6 +22,8 @@ pub struct Settings {
     /// "brass", "iron", "copper" or "jade".
     pub accent: String,
     pub game_boost: bool,
+    /// The save time machine: the background helper snapshots a game's saves each time it starts.
+    pub save_snapshots: bool,
     /// Pre-releases too.
     pub test_builds: bool,
     /// Problem reports go out only when the player turns this on.
@@ -46,6 +48,7 @@ impl Default for Settings {
             theme: "dark".into(),
             accent: "brass".into(),
             game_boost: false,
+            save_snapshots: false,
             test_builds: false,
             reports: false,
             setup_done: Vec::new(),
@@ -80,6 +83,7 @@ impl Settings {
             theme: word(&j, "theme", THEMES, &d.theme),
             accent: word(&j, "accent", ACCENTS, &d.accent),
             game_boost: b("gameBoost", d.game_boost),
+            save_snapshots: b("saveSnapshots", d.save_snapshots),
             test_builds: b("testBuilds", d.test_builds),
             reports: b("reports", d.reports),
             setup_done: list(&j, "setupDone", SETUP_STEPS),
@@ -95,12 +99,13 @@ impl Settings {
             None => "null",
         };
         format!(
-            "{{\n  \"mode\": {mode},\n  \"uiScale\": {},\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
+            "{{\n  \"mode\": {mode},\n  \"uiScale\": {},\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"saveSnapshots\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
             self.ui_scale,
             self.animations,
             quote(&self.theme),
             quote(&self.accent),
             self.game_boost,
+            self.save_snapshots,
             self.test_builds,
             self.reports,
             l(&self.setup_done),
@@ -132,7 +137,7 @@ mod tests {
 
     #[test]
     fn round_trips_and_repairs() {
-        let mut s = Settings { mode: Some(Mode::Veteran), ui_scale: 125, game_boost: true, ..Settings::default() };
+        let mut s = Settings { mode: Some(Mode::Veteran), ui_scale: 125, game_boost: true, save_snapshots: true, ..Settings::default() };
         s.setup_done = vec!["machine".into(), "password".into()];
         assert_eq!(Settings::parse(&s.to_json()), s);
         let bad = Settings::parse(r#"{"mode":"hacker","uiScale":900,"theme":"pink","accent":7,"setupDone":["machine","x","machine"],"extra":1}"#);

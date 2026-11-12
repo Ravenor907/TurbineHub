@@ -1,8 +1,8 @@
 import QtQuick
 
 // Anything the highlight can land on. Main.qml finds these by `focusable`, moves between them by where they are on
-// screen, and sends the pressed button to `press`. A click or a tap lands the highlight and activates in one go;
-// the mouse resting on one moves the highlight there.
+// screen, and sends the pressed button to `press`. A click or a tap lands the highlight and activates in one go,
+// when a press of A would count right now (app.gate); the mouse moved onto one moves the highlight there.
 //
 // The highlight is always a ring outside the item, never a fill, so it reads the same on a card, a row or a
 // button and can't be mistaken for "selected" (an accent mark) or "primary" (an accent fill).
@@ -47,6 +47,14 @@ Item {
         visible: opacity > 0
         Behavior on opacity { enabled: f.app.motion.on; NumberAnimation { duration: f.app.motion.quick; easing.type: f.app.motion.ease } }
     }
-    HoverHandler { id: hover; enabled: f.focusable; onHoveredChanged: if (hovered && hover.point.device.pointerType !== PointerDevice.Finger) f.app.setFocus(f, true) }
-    TapHandler { enabled: f.focusable; onTapped: { f.app.setFocus(f, true); if (f.tapActivates && f.aLabel !== "") f.activated() } }
+    // The mouse over it: Main.qml decides whether that is the mouse being used (hoverAt).
+    HoverHandler {
+        id: hover
+        enabled: f.focusable
+        function tell() { if (hovered) f.app.hoverAt(f, hover.point.scenePosition, hover.point.device.pointerType === PointerDevice.Finger) }
+        onHoveredChanged: tell()
+        onPointChanged: tell()
+    }
+    // A tap is a press of A here, and obeys what a press obeys (gate).
+    TapHandler { enabled: f.focusable; onTapped: if (f.app.gate(f)) { f.app.setFocus(f, true); if (f.tapActivates && f.aLabel !== "") f.activated() } }
 }

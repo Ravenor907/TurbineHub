@@ -56,7 +56,7 @@ Rectangle {
                 height: bar.height
                 KeyCap { app: bar.app; k: hint.modelData.k; anchors.verticalCenter: parent.verticalCenter }
                 Text { text: hint.modelData.label; color: bar.app.colors.text; font.family: bar.app.bodyFont; font.pixelSize: bar.app.fpx(16); anchors.verticalCenter: parent.verticalCenter }
-                TapHandler { onTapped: bar.app.press(hint.modelData.k) }
+                TapHandler { onTapped: if (bar.app.gate(hint, hint.modelData.k)) { if (bar.app.typing) bar.app.typingDone(); else bar.app.press(hint.modelData.k) } }
             }
         }
     }

@@ -4,7 +4,9 @@
 #   tools/ci-shots.sh <size> <shard> <shards>      one shard of a size, into shots/ (CI)
 # The app lists its pictures (turbinehub --shots: one "<name> <arguments>" line each) and draws them with fake data
 # of its own, so nothing here depends on this PC. Each picture lands in <out>/<size>/<name>.png with its log beside
-# it. 1600x900 is a Desktop Mode window (--window). Fails when a picture is missing or a check fails.
+# it. 1600x900 is a Desktop Mode window (--window). Fails when a picture is missing or a check fails. The pictures
+# named check-... are taken after the page was worked with real keys, a real mouse and a finger: taps never go
+# through a dialog, a held key acts once, a resting mouse never takes the highlight (app/qml/SelfCheck.qml).
 # In CI the bundle the build made (TurbineHub.flatpak in the working folder) is installed first; on a development
 # PC tools/dev-build.sh has installed it.
 set -u
@@ -50,6 +52,7 @@ missing=0
 failed=0
 passed=0
 hung=0
+inputs=0
 for size in $sizes; do
   mkdir -p "$out/$size"
   extra=""
@@ -87,6 +90,18 @@ for size in $sizes; do
       bad=1
     fi
     passed=$((passed + $(grep -c '^SELFCHECK ok' "$log")))
+    # A picture taken after the page was worked with real keys, a mouse and a finger (--check=...): the run must
+    # say that every step held, so a check that never ran is a failure too.
+    case " $args " in
+      *" --check="*)
+        if grep -q '^INPUTCHECK ok' "$log"; then
+          inputs=$((inputs + 1))
+        else
+          echo "::error title=Input check failed::$size $name"
+          failed=$((failed + 1))
+          bad=1
+        fi ;;
+    esac
     # A script error in the page is a failure even when the picture came out.
     if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "$log"; then
       echo "::error title=QML problem::$size $name"
@@ -99,6 +114,6 @@ for size in $sizes; do
     if [ $hung -ge 3 ]; then echo "::error title=Turbine Hub hangs::three pictures timed out"; exit 1; fi
   done < "$list"
 done
-echo "Pictures: $total taken in $out ($sizes), $missing missing, checks: $passed ok, $failed failed"
+echo "Pictures: $total taken in $out ($sizes), $missing missing, checks: $passed ok, $failed failed, input checks: $inputs ok"
 if [ $missing -gt 0 ] || [ $failed -gt 0 ] || [ $total -eq 0 ]; then exit 1; fi
 exit 0

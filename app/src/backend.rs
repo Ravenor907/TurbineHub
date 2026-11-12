@@ -23,6 +23,9 @@ pub mod qobject {
         #[qproperty(QString, busy_words, cxx_name = "busyWords")]
         /// Where the fonts and pictures are.
         #[qproperty(QString, share)]
+        /// A controller is there, and its name (the footer's glyphs follow it).
+        #[qproperty(bool, pads)]
+        #[qproperty(QString, pad_name, cxx_name = "padName")]
         type Hub = super::HubRust;
 
         /// One page as JSON.
@@ -52,7 +55,42 @@ pub mod qobject {
         /// Prints one line on standard output (the screenshot run's check results).
         #[qinvokable]
         fn say(self: &Self, line: &QString);
+
+        /// The window came to the front (true) or went behind another (false): the controller's presses only count
+        /// in front, and not for a moment after coming back.
+        #[qinvokable]
+        fn front(self: Pin<&mut Self>, active: bool);
+
+        /// What the player used last: keys or the mouse (true), or the controller (false). Help names the buttons
+        /// from it.
+        #[qinvokable]
+        fn input(self: Pin<&mut Self>, keys: bool);
+
+        /// For the build's checks (screenshot runs only): a keyboard key with Qt's code and modifiers, delivered
+        /// to the window like a real one. `repeat`: the key is held down and this is the keyboard repeating it.
+        #[qinvokable]
+        #[cxx_name = "testKey"]
+        fn test_key(self: &Self, key: i32, mods: i32, pressed: bool, repeat: bool);
+
+        /// For the build's checks (screenshot runs only): a real mouse's move (kind 0), press (1), release (2) or
+        /// wheel step (3) at a place in the window, with Qt's button and modifiers.
+        #[qinvokable]
+        #[cxx_name = "testMouse"]
+        fn test_mouse(self: &Self, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32);
+
+        /// For the build's checks (screenshot runs only): a finger put down (kind 0), moved (1) or lifted (2) at a
+        /// place in the window.
+        #[qinvokable]
+        #[cxx_name = "testTouch"]
+        fn test_touch(self: &Self, kind: i32, x: f64, y: f64);
     }
+}
+
+unsafe extern "C" {
+    // qtglue.cpp
+    fn turbinehub_test_key(key: i32, mods: i32, pressed: i32, repeat: i32) -> i32;
+    fn turbinehub_test_mouse(kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) -> i32;
+    fn turbinehub_test_touch(kind: i32, x: f64, y: f64) -> i32;
 }
 
 use crate::pad::Pads;
@@ -77,8 +115,17 @@ pub struct HubRust {
     busy: bool,
     busy_words: QString,
     share: QString,
+    pads: bool,
+    pad_name: QString,
     ui: Ui,
-    pads: Option<Pads>,
+    reader: Option<Pads>,
+    /// When the controllers were first asked for, and whether the checkup was told that none showed.
+    asked_pads: Option<std::time::Instant>,
+    said_no_pad: bool,
+    /// What the window last said about being in front (nothing yet: in front).
+    in_front: bool,
+    /// Releases found while the window changed places, for the next `poll`.
+    let_go: Vec<(&'static str, bool)>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     /// The plan whose steps are running.
@@ -240,7 +287,7 @@ impl Default for HubRust {
         let ui = make_ui();
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None, looked: std::time::Instant::now() };
+        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), pads: false, pad_name: QString::default(), ui, reader: None, asked_pads: None, said_no_pad: false, in_front: true, let_go: Vec::new(), tx, rx, running: None, looked: std::time::Instant::now() };
         hub.gather(false);
         hub
     }
@@ -326,6 +373,36 @@ impl HubRust {
     }
 }
 
+/// How long the controller's presses are ignored after the window comes back to the front.
+const QUIET_AFTER_BACK: Duration = Duration::from_millis(250);
+/// How long a Desktop Mode window waits for a controller before the checkup says none was found.
+const NO_PAD_AFTER: Duration = Duration::from_secs(10);
+
+/// The help page with one more section, for a Desktop Mode window where no controller was found.
+fn with_pad_hint(page: &str) -> String {
+    let Ok(Json::Obj(mut fields)) = turbinehub_engine::json::parse(page) else { return page.to_string() };
+    let text = |v: &str| Json::Str(v.to_string());
+    let row = Json::Obj(vec![
+        ("id".into(), text("no-controller")),
+        ("kind".into(), text("info")),
+        ("title".into(), text("No controller found")),
+        ("line".into(), text("Keyboard and mouse work everywhere. For a controller in Desktop Mode, start Turbine Hub from Steam: Settings, My setup adds it to your library.")),
+        ("act".into(), text("none")),
+        ("arg".into(), text("")),
+        ("icon".into(), text("games")),
+    ]);
+    let section = Json::Obj(vec![("title".into(), text("Controller")), ("rows".into(), Json::Arr(vec![row]))]);
+    for (k, v) in fields.iter_mut() {
+        if k == "sections"
+            && let Json::Arr(list) = v
+        {
+            list.insert(list.len().min(1), section);
+            break;
+        }
+    }
+    Json::Obj(fields).to_text()
+}
+
 fn answer(pairs: &[(&str, String)]) -> QString {
     let body: Vec<String> = pairs.iter().map(|(k, v)| format!("{}:{v}", quote(k))).collect();
     QString::from(format!("{{{}}}", body.join(",")).as_str())
@@ -338,8 +415,51 @@ impl qobject::Hub {
     }
 
     pub fn page(mut self: Pin<&mut Self>, name: &QString, arg: &QString) -> QString {
-        let text = self.as_mut().rust_mut().ui.page(&name.to_string(), &arg.to_string());
+        let name = name.to_string();
+        let mut text = self.as_mut().rust_mut().ui.page(&name, &arg.to_string());
+        // Help in a Desktop Mode window with no controller seen says how to get one working.
+        let no_pad = !*self.gamemode() && !self.rust().ui.sample && self.rust().reader.as_ref().is_some_and(|r| !r.connected());
+        if name == "help" && no_pad {
+            text = with_pad_hint(&text);
+        }
         QString::from(text.as_str())
+    }
+
+    pub fn front(mut self: Pin<&mut Self>, active: bool) {
+        self.as_mut().rust_mut().in_front = active;
+        let mut this = self.as_mut().rust_mut();
+        let Some(r) = this.reader.as_mut() else { return };
+        if active {
+            // No controller yet: ask SDL again now (after leaving Game Mode, or one switched on meanwhile).
+            r.rescan(Duration::from_secs(2));
+        }
+        let ups = r.set_front(active, QUIET_AFTER_BACK);
+        this.let_go.extend(ups);
+    }
+
+    pub fn input(mut self: Pin<&mut Self>, keys: bool) {
+        self.as_mut().rust_mut().ui.keys = Some(keys);
+    }
+
+    pub fn test_key(&self, key: i32, mods: i32, pressed: bool, repeat: bool) {
+        if option("screenshot").is_some() {
+            // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to this window.
+            unsafe { turbinehub_test_key(key, mods, i32::from(pressed), i32::from(repeat)) };
+        }
+    }
+
+    pub fn test_mouse(&self, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) {
+        if option("screenshot").is_some() {
+            // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to this window.
+            unsafe { turbinehub_test_mouse(kind, x, y, button, mods, wheel) };
+        }
+    }
+
+    pub fn test_touch(&self, kind: i32, x: f64, y: f64) {
+        if option("screenshot").is_some() {
+            // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to this window.
+            unsafe { turbinehub_test_touch(kind, x, y) };
+        }
     }
 
     pub fn act(mut self: Pin<&mut Self>, action: &QString, arg: &QString, value: &QString) -> QString {
@@ -417,15 +537,48 @@ impl qobject::Hub {
     pub fn poll(mut self: Pin<&mut Self>) -> QString {
         let mut out: Vec<(&str, String)> = Vec::new();
         let mut tick = false;
-        if self.rust().pads.is_none() && crate::backend::option("screenshot").is_none() {
-            self.as_mut().rust_mut().pads = Some(Pads::open());
-        }
-        if let Some(p) = self.as_mut().rust_mut().pads.as_mut() {
-            p.rescan(Duration::from_secs(10));
-            let keys: Vec<String> = p.poll().into_iter().map(|(k, down)| format!("[{},{down}]", quote(k))).collect();
-            if !keys.is_empty() {
-                out.push(("keys", format!("[{}]", keys.join(","))));
+        if self.rust().reader.is_none() && crate::backend::option("screenshot").is_none() {
+            let mut r = Pads::open();
+            if !self.rust().in_front {
+                r.set_front(false, QUIET_AFTER_BACK);
             }
+            self.as_mut().rust_mut().reader = Some(r);
+            self.as_mut().rust_mut().asked_pads = Some(std::time::Instant::now());
+        }
+        // What was let go while the window changed places comes first.
+        let mut events = std::mem::take(&mut self.as_mut().rust_mut().let_go);
+        let mut seen: Option<(bool, String, bool)> = None;
+        if let Some(p) = self.as_mut().rust_mut().reader.as_mut() {
+            p.rescan(Duration::from_secs(10));
+            events.extend(p.poll());
+            seen = Some((p.connected(), p.name(), p.take_lost()));
+        }
+        if let Some((connected, name, lost)) = seen {
+            if *self.pads() != connected || self.pad_name().to_string() != name {
+                self.as_mut().set_pad_name(QString::from(name.as_str()));
+                self.as_mut().set_pads(connected);
+            }
+            // A Desktop Mode window where no controller has shown for a while: the checkup says how to get one
+            // working, and stops saying it the moment one shows.
+            let none = !connected && !*self.gamemode() && self.rust().asked_pads.is_some_and(|t| t.elapsed() >= NO_PAD_AFTER);
+            if none != self.rust().said_no_pad {
+                self.as_mut().rust_mut().said_no_pad = none;
+                self.as_mut().rust_mut().ui.facts.no_controller = none;
+                crate::log::line("pad", if none { "No controller after ten seconds: the checkup says how to get one" } else { "A controller is there now" });
+                tick = true;
+            }
+            // A controller went away: whatever it held in the interface stops.
+            if lost {
+                out.push(("lost", "true".into()));
+            }
+        }
+        if !events.is_empty() {
+            let keys: Vec<String> = events.into_iter().map(|(k, down)| format!("[{},{down}]", quote(k))).collect();
+            out.push(("keys", format!("[{}]", keys.join(","))));
+        }
+        // A second launch asked this window to come to the front.
+        if crate::single::take_show() {
+            out.push(("show", "true".into()));
         }
         // What the background helper wrote since the last look (a sleep, updates it found), every half minute.
         if !self.rust().ui.sample && self.rust().looked.elapsed() >= Duration::from_secs(30) {
@@ -476,5 +629,26 @@ impl qobject::Hub {
 
     pub fn say(&self, line: &QString) {
         println!("{line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn help_without_a_controller_says_how_to_get_one_working() {
+        let page = r#"{"title":"Home","sections":[{"title":"","rows":[]},{"title":"Buttons","rows":[]}],"hints":[]}"#;
+        let j = turbinehub_engine::json::parse(&with_pad_hint(page)).unwrap();
+        let sections = j.get("sections").unwrap().as_array();
+        assert_eq!(sections.len(), 3);
+        // Right under Where's my...?, before the list of buttons.
+        assert_eq!(sections[1].str_at("title"), Some("Controller"));
+        let row = &sections[1].get("rows").unwrap().as_array()[0];
+        assert_eq!(row.str_at("kind"), Some("info"));
+        assert!(row.str_at("line").unwrap().contains("start Turbine Hub from Steam"));
+        assert_eq!(sections[2].str_at("title"), Some("Buttons"));
+        // Something that isn't a page comes back as it was.
+        assert_eq!(with_pad_hint("not a page"), "not a page");
     }
 }

@@ -153,11 +153,27 @@ Window {
     })
 
     // ---------------------------------------------------------------- the last input: which glyphs the hints show
-    property bool keyboard: st.window
+    // "pad", "keys" or "mouse"; "" until something was used. The hints follow it: the controller's buttons after a
+    // press on it, a keyboard's keys after a key or the mouse. In Game Mode they are always the controller's (Steam
+    // may be sending the controller as keys there), and a window starts on the controller's when one is seen.
+    property string lastInput: ""
+    // (A picture starts on keys when it is of a Desktop Mode window.)
+    readonly property bool keyboard: !Hub.gamemode && (lastInput === "" ? (shot.on ? st.window : !Hub.pads) : lastInput !== "pad")
+    // An Xbox 360 pad says Back and Start where newer pads and the handhelds say View and Menu. (Not in Game Mode,
+    // where Steam's own pad stands in for whichever is held.)
+    readonly property bool oldPad: !Hub.gamemode && /360/.test(Hub.padName) && !/steam|virtual/i.test(Hub.padName)
     function glyph(k) {
         if (keyboard) return ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "Tab", rt: "/", view: "F1", start: "F10", move: "Arrows" })[k] || k.toUpperCase()
-        return ({ view: "VIEW", start: "MENU", move: "D-PAD" })[k] || k.toUpperCase()
+        return ({ view: oldPad ? "BACK" : "VIEW", start: oldPad ? "START" : "MENU", move: "D-PAD" })[k] || k.toUpperCase()
     }
+    // When a key or the controller was last pressed, or the page last rebuilt: for a moment after, the mouse
+    // resting on something isn't the mouse being used (see hoverAt).
+    property double quietAt: 0
+    // The engine's Help page names keys or buttons to match.
+    onKeyboardChanged: Hub.input(keyboard)
+    function keyUsed() { if (lastInput !== "keys") lastInput = "keys"; quietAt = Date.now() }
+    function padUsed() { if (lastInput !== "pad") lastInput = "pad"; quietAt = Date.now() }
+    function mouseUsed() { if (lastInput !== "mouse") lastInput = "mouse" }
 
     // ---------------------------------------------------------------- pages
     readonly property var tabs: [
@@ -285,10 +301,84 @@ Window {
     property var held: []
     function settle(arrived) {
         restoring = true
-        if (arrived) { fresh = true; freshGuard.restart() }
+        // What the mouse rests on after a rebuild is not the mouse being used.
+        quietAt = Date.now()
+        // A direction held on the page before doesn't go on moving on this one.
+        if (arrived) { fresh = true; freshGuard.restart(); stopHolds() }
     }
     Timer { id: freshGuard; interval: mo.pressGuard; onTriggered: app.fresh = false }
     readonly property bool ready: !restoring && !fresh
+
+    // ---------------------------------------------------------------- taps and the mouse obey what presses obey
+    // In Qt 6 a backdrop stops the items under it but not their tap and hover handlers, so every tap in every file
+    // asks here first (tools/qml-check.js fails the build on one that doesn't), and the page is turned off under a
+    // dialog and under the busy cover (`enabled` on the view and the bars below). `item`: what was tapped (null for
+    // something that belongs to the whole window). `k`: the button the tap stands for ("a" when left out).
+    // Refused: while work runs, while the highlight is being put back, for a moment after a page or dialog appeared
+    // (as A is), and anything of the page while a dialog is open.
+    // How many taps were refused and taken (the build's checks read them).
+    property int refused: 0
+    property int taken: 0
+    function under(item, root) { for (let p = item; p; p = p.parent) if (p === root) return true; return false }
+    function gate(item, k) {
+        const key = k || "a"
+        let ok = !Hub.busy && !restoring
+        if (ok && fresh && ["a", "x", "y", "start"].indexOf(key) >= 0) ok = false
+        if (ok && dialog.open && item && !under(item, dialog) && !under(item, bottomBar)) ok = false
+        if (!ok) { refused++; return false }
+        taken++
+        mouseUsed()
+        return true
+    }
+    // The mouse over something moves the highlight there, when it is the mouse being used: the pointer really moved
+    // (Qt hovers what lies under a resting mouse again whenever the screen changes), and no key or controller press
+    // and no rebuild came just before. A finger never hovers.
+    property point mouseAt: Qt.point(-1, -1)
+    property point mouseNext: Qt.point(-1, -1)
+    function keepMouse() { mouseAt = mouseNext }
+    function hoverAt(item, pos, finger) {
+        if (finger) return
+        const moved = Math.abs(pos.x - mouseAt.x) > 1 || Math.abs(pos.y - mouseAt.y) > 1
+        // Everything under the pointer hears of the same move: the place is kept once all of them have.
+        mouseNext = Qt.point(pos.x, pos.y)
+        Qt.callLater(keepMouse)
+        if (!moved || Date.now() - quietAt < mo.hoverQuiet) return
+        if (Hub.busy || (item && dialog.open && !under(item, dialog))) return
+        // While a text box is being typed in, the highlight stays with it: a tap elsewhere ends the typing, the
+        // mouse drifting over the page doesn't.
+        if (typing) return
+        mouseUsed()
+        if (item) setFocus(item, true)
+    }
+
+    // ---------------------------------------------------------------- typing
+    // The text box that has the keyboard. In Game Mode Steam's on-screen keyboard opens over the app when typing
+    // starts and closes when it ends; until then the controller belongs to that keyboard, so a B meant for it never
+    // goes back a page here: B says "Done typing" and does only that.
+    property Item typing: null
+    function typeIn(input) { input.forceActiveFocus() }
+    // Every text box calls these two as it gets and loses the keyboard (a tap straight into it counts too).
+    function typingBegan(input) {
+        if (typing === input) return
+        typing = input
+        // The highlight goes with it.
+        for (let p = input.parent; p; p = p.parent) if (p.focusable === true) { setFocus(p, true); break }
+        if (!keyboardUp) { keyboardUp = true; steamKeyboard("open") }
+    }
+    function typingEnded(input) {
+        // The whole window going behind another (Steam's keyboard may do that) is not the end of typing.
+        if (typing === input && (active || shot.on)) endTyping()
+    }
+    function endTyping() {
+        typing = null
+        // Once this press is through: going from one box to the next keeps the keyboard up.
+        Qt.callLater(keyboardDown)
+    }
+    // Steam's on-screen keyboard was asked for and not yet sent away.
+    property bool keyboardUp: false
+    function keyboardDown() { if (!typing && keyboardUp) { keyboardUp = false; steamKeyboard("close") } }
+    function steamKeyboard(what) { if (Hub.gamemode && !shot.on) Qt.openUrlExternally("steam://" + what + "/keyboard") }
+    function typingDone() { keys.forceActiveFocus(); if (typing) endTyping() }
 
     // ---------------------------------------------------------------- presses to the engine
     function doAct(act, arg, value) {
@@ -335,6 +425,8 @@ Window {
     function setFocus(item, quiet) {
         if (focusItem === item) return
         focusItem = item
+        // The highlight leaving a text box ends the typing in it.
+        if (typing && item && !under(typing, item)) typingDone()
         if (item && item.fid !== "") lastFid = item.fid
         if (item && !quiet) reveal(item)
         placeToast()
@@ -454,7 +546,10 @@ Window {
     }
 
     // ---------------------------------------------------------------- one press, whatever it came from
+    // The last press that arrived, whatever came of it (the build's checks read it).
+    property string lastPress: ""
     function press(k) {
+        lastPress = k
         if (Hub.busy) return
         if (restoring) { if (held.length < 4) held = held.concat([k]); return }
         if (fresh && ["a", "x", "y", "start"].indexOf(k) >= 0) return
@@ -484,33 +579,116 @@ Window {
         return false
     }
 
+    // The keyboard is as good as the controller: arrows or W A S D move, Enter or Space is A, Esc or Backspace is B,
+    // Q and E (Page Up and Page Down too) switch tabs, Tab is LT, / is RT, X and Y are themselves, F1 is Help, F10
+    // the menu, Home and End jump to the first and the last thing of the list, Ctrl with = or - changes the
+    // interface size. A text box that is being typed in has the keys itself: none of these reach here then.
+    readonly property var keyMap: {
+        const map = {}
+        map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
+        map[Qt.Key_W] = "up"; map[Qt.Key_S] = "down"; map[Qt.Key_A] = "left"; map[Qt.Key_D] = "right"
+        map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
+        map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
+        map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_PageUp] = "lb"; map[Qt.Key_PageDown] = "rb"; map[Qt.Key_Tab] = "lt"
+        map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F1] = "view"; map[Qt.Key_F10] = "start"; map[Qt.Key_F5] = "f5"
+        map[Qt.Key_Slash] = "rt"; map[Qt.Key_Home] = "home"; map[Qt.Key_End] = "end"
+        return map
+    }
+    readonly property var dirs: ["up", "down", "left", "right"]
     Item {
         id: keys
         anchors.fill: parent
         focus: true
         Keys.onPressed: (e) => {
-            const map = {}
-            map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
-            map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
-            map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
-            map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_Tab] = "lt"
-            map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F1] = "view"; map[Qt.Key_F10] = "start"; map[Qt.Key_F5] = "f5"
-            map[Qt.Key_Slash] = "rt"
-            const k = map[e.key]
+            const ctrl = (e.modifiers & Qt.ControlModifier) !== 0
+            if (ctrl && (e.key === Qt.Key_Equal || e.key === Qt.Key_Plus || e.key === Qt.Key_Minus)) {
+                e.accepted = true
+                app.keyUsed()
+                app.sizeBy(e.key === Qt.Key_Minus ? -1 : 1)
+                return
+            }
+            // A key with Ctrl, Alt or the system key belongs to the desktop.
+            if (ctrl || (e.modifiers & (Qt.AltModifier | Qt.MetaModifier)) !== 0) return
+            const k = app.keyMap[e.key]
             if (!k) return
             e.accepted = true
-            app.keyboard = true
-            if (k === "f5") app.reloadPage(); else app.press(k)
+            // A key held down repeats only where a held D-pad does: the directions. Enter held is one A, so it
+            // never flips a switch back and forth or answers the dialog its first press opened.
+            if (e.isAutoRepeat && app.dirs.indexOf(k) < 0) return
+            app.keyUsed()
+            if (k === "f5") app.reloadPage()
+            else if (k === "home" || k === "end") app.jump(k === "end")
+            else app.press(k)
         }
+        // Where the mouse is, also over nothing that takes the highlight.
+        HoverHandler { id: mouseTrack; onPointChanged: app.hoverAt(null, mouseTrack.point.scenePosition, mouseTrack.point.device.pointerType === PointerDevice.Finger) }
     }
     // Qt Quick's software drawing (pictures, machines without a GPU): icons paint into pictures there (Icon.qml).
     readonly property bool softwareDraw: keys.GraphicsInfo.api === GraphicsInfo.Software
-    // A text box took the keyboard; this gives it back to the window.
-    function keysBack() { keys.forceActiveFocus() }
-    // A text box wants typing: in Game Mode Steam's on-screen keyboard opens over the app.
-    function askKeyboard() { if (Hub.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard") }
+    // A text box had the keyboard; this gives it back to the window (and closes Steam's keyboard).
+    function keysBack() { typingDone() }
+    // Home and End: the first and the last thing in the list the highlight is in.
+    function jump(toEnd) {
+        if (Hub.busy || restoring) return
+        let within = scopeRoot
+        for (let p = focusItem ? focusItem.parent : null; p; p = p.parent) if (p.contentY !== undefined && p.contentItem !== undefined) { within = p.contentItem; break }
+        const list = focusables(within)
+        if (list.length > 0) setFocus(toEnd ? list[list.length - 1] : list[0], false)
+    }
+    // Ctrl with = or -, and Ctrl with the mouse wheel: the interface size, a step at a time. The new size asks to
+    // be kept, as it does in Settings.
+    function sizeBy(d) {
+        if (Hub.busy || restoring || dialog.open || st.mode === "") return
+        const v = Math.max(50, Math.min(150, Math.round(st.scale / 10) * 10 + d * 10))
+        if (v !== st.scale) doAct("scale", "", v)
+    }
+    // Over everything, taking nothing from what is under it: the mouse's Back button is B and its right button is
+    // X wherever the pointer is, and Ctrl with the wheel changes the interface size. (A finger has no buttons, so
+    // these two listen to mice only: a tap of a finger is never Back or X.)
+    Item {
+        anchors.fill: parent
+        z: 100
+        TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; acceptedButtons: Qt.BackButton; onTapped: if (app.gate(null, "b")) app.press("b") }
+        TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; acceptedButtons: Qt.RightButton; onTapped: if (app.gate(null, "x")) app.press("x") }
+        WheelHandler {
+            property real turned: 0
+            acceptedModifiers: Qt.ControlModifier
+            target: null
+            onWheel: (w) => {
+                turned += w.angleDelta.y
+                if (Math.abs(turned) < 120) return
+                app.mouseUsed()
+                app.sizeBy(turned > 0 ? 1 : -1)
+                turned = 0
+            }
+        }
+    }
 
-    // The controller and finished work, every frame.
+    // The window came to the front or went behind another one (a game, in Game Mode). Behind, the controller's
+    // presses are not for Turbine Hub; a direction held as it went is let go, since its release can't be seen from
+    // there. Coming back, presses made in the game don't count, nor do new ones for a moment (pad.rs).
+    onActiveChanged: windowActive(active)
+    function windowActive(front) {
+        stopHolds()
+        Hub.front(front)
+    }
+    // A held direction stops repeating: the window went to the back, the page changed, the controller went away.
+    function stopHolds() { heldDir = ""; repeatDelay.stop(); repeatTick.stop() }
+    // One press on the controller.
+    function padPress(k) {
+        padUsed()
+        if (typing) {
+            // B ends the typing and nothing else; in Game Mode everything else belongs to Steam's keyboard.
+            if (k === "b") { typingDone(); return }
+            if (Hub.gamemode) return
+            typingDone()
+        }
+        press(k)
+        if (dirs.indexOf(k) >= 0) { heldDir = k; repeatDelay.restart() }
+    }
+
+    // The controller and finished work, every frame. It runs behind other windows too: work that finishes there
+    // still shows, and pad.rs passes on no presses from there.
     property string heldDir: ""
     Timer {
         interval: 16; repeat: true; running: !shot.on
@@ -518,12 +696,15 @@ Window {
             const text = Hub.poll()
             if (text === "") return
             const r = JSON.parse(text)
+            if (r.lost) app.stopHolds()
             for (const kd of (r.keys || [])) {
-                if (kd[1]) {
-                    app.keyboard = false
-                    app.press(kd[0])
-                    if (["up", "down", "left", "right"].indexOf(kd[0]) >= 0) { app.heldDir = kd[0]; repeatDelay.restart() }
-                } else if (kd[0] === app.heldDir) { app.heldDir = ""; repeatDelay.stop(); repeatTick.stop() }
+                if (kd[1]) app.padPress(kd[0])
+                else if (kd[0] === app.heldDir) app.stopHolds()
+            }
+            // Turbine Hub was started a second time: this window comes to the front instead.
+            if (r.show) {
+                if (app.visibility === Window.Minimized) { if (Hub.gamemode) app.showFullScreen(); else app.showNormal() }
+                app.raise(); app.requestActivate()
             }
             if (r.done) {
                 if (r.done.ok && r.done.open) app.open(r.done.open); else app.reloadPage()
@@ -542,6 +723,7 @@ Window {
         id: topBar
         app: app
         visible: !app.bare
+        enabled: view.enabled
         anchors { top: parent.top; left: parent.left; right: parent.right }
     }
     // A page arriving fades up from partly there, never from nothing.
@@ -549,6 +731,9 @@ Window {
     Loader {
         id: view
         property string file: ""
+        // Off under a dialog and under the busy cover: nothing of the page takes a tap, a click or the mouse
+        // resting on it then (a backdrop alone doesn't stop those, see Backdrop.qml).
+        enabled: !dialog.open && !Hub.busy
         // On an ultrawide screen the page keeps a sensible width, centered, so a switch stays near its words.
         width: Math.min(parent.width, Math.max(app.px(1280), app.height * 1.9))
         anchors { top: app.bare ? parent.top : topBar.bottom; horizontalCenter: parent.horizontalCenter; bottom: bottomBar.top }
@@ -557,12 +742,15 @@ Window {
         id: bottomBar
         app: app
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+        enabled: !Hub.busy
         hints: app.footerHints()
     }
     // The footer's hints, most important first: A and B always, then the page's own, then Help and Menu.
     function footerHints() {
         const out = []
         const item = focusItem
+        // While a text box has the keyboard, B (Esc on a keyboard) ends the typing and that is all there is.
+        if (typing) return [{ k: "b", label: "Done typing" }]
         if (dialog.open) {
             // On the cancel button A and B do the same thing: B says it.
             if (item && item.aLabel && item.fid !== "cancel") out.push({ k: "a", label: item.aLabel })
@@ -599,14 +787,15 @@ Window {
         // Highlight and note overlapping at the bottom: the note goes up.
         toastHigh = at.y + it.height > low - px(8) && at.y < bottomBar.y
     }
-    DialogCard { id: dialog; app: app; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top } }
+    DialogCard { id: dialog; app: app; enabled: !Hub.busy; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top } }
 
     // While a confirmed dialog's steps run: one line saying what is happening, nothing else to press.
     Rectangle {
         anchors.fill: parent
         visible: Hub.busy
+        z: 60
         color: c.scrim
-        MouseArea { anchors.fill: parent; hoverEnabled: true; onWheel: (w) => w.accepted = true }
+        Backdrop { }
         Column {
             anchors.centerIn: parent
             spacing: app.px(16)
@@ -640,6 +829,7 @@ Window {
             loadPage()
         } else loadPage()
         keys.forceActiveFocus()
+        Hub.input(keyboard)
         if (shot.on) {
             selfCheck.setSource("SelfCheck.qml", { app: app, target: shot.path })
             scripted.start()

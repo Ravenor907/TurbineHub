@@ -85,6 +85,9 @@ pub struct Ui {
     pub sample: bool,
     /// A Desktop Mode window: hints name keys, tips mention the mouse.
     pub window: bool,
+    /// What the player used last, when the window knows: keys (true) or the controller (false). Help names the
+    /// buttons from it; unknown, a Desktop Mode window means keys.
+    pub keys: Option<bool>,
     pub facts: Facts,
     /// App ids installed on the host (Flathub), and the ones with an update.
     pub installed: Vec<String>,
@@ -143,7 +146,7 @@ impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { keys: None, host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {

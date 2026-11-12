@@ -34,6 +34,8 @@ pub struct Facts {
     pub allowed_libraries: Vec<String>,
     /// Turbine Hub runs in a Desktop Mode window (it can start itself again there).
     pub window: bool,
+    /// In a Desktop Mode window, no controller has shown for a while.
+    pub no_controller: bool,
     /// With `lights_locked` once the setup was done: what happened, in plain words. Empty before the setup.
     pub lights_note: String,
     /// With `lights_locked`: opening them again was tried and didn't hold, so the same fix isn't offered again.
@@ -194,6 +196,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     if f.not_in_library {
         out.push(item("library", Level::Tip, "games", "Turbine Hub isn't in your Game Mode library".into(), "Add it and it opens from Game Mode like a game.", ("Add", "self-tile")));
+    }
+    if f.no_controller {
+        out.push(item("controller", Level::Tip, "games", "No controller found".into(), "Start Turbine Hub from its Steam entry to use a controller.", ("How", "help:controller")));
     }
     if m.has_nvidia() {
         out.push(item("nvidia", Level::Tip, "gauge", "Nvidia graphics on SteamOS".into(), "Nvidia support on SteamOS is still experimental. Turbine Hub shows what works.", ("How", "help:nvidia")));

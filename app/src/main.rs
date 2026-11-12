@@ -3,6 +3,7 @@ mod backend;
 mod log;
 mod pad;
 mod run;
+mod single;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
@@ -99,6 +100,13 @@ fn main() {
     if args.iter().any(|a| a == "--agent") {
         std::process::exit(agent::main());
     }
+    // One Turbine Hub at a time: a second launch brings the open one to the front and ends, before it touches the
+    // logs (it must not read as a run that ended without closing). Pictures and trial runs on a made-up machine
+    // start regardless.
+    let real = backend::option("screenshot").is_none() && matches!(backend::option("machine").as_deref(), None | Some("real"));
+    if real && single::other_is_open() {
+        return;
+    }
     choose_platform();
     let software = choose_drawing();
     pad::clear_steam_filters();
@@ -117,6 +125,8 @@ fn main() {
     let code = app.as_mut().map(|a| a.exec()).unwrap_or(1);
     log::clean_exit();
     backend::remove_sample_dir();
+    // Before a restart: the copy started next must find nobody answering and become the Turbine Hub that listens.
+    single::stop();
     if RESTART.load(std::sync::atomic::Ordering::Relaxed) {
         start_again();
     }

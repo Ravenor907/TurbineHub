@@ -23,10 +23,27 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
   can hold it. Directions move it to the nearest focusable on screen in that direction; `reveal` scrolls every
   list around it so the whole item shows (with its section heading on a section's first line, and the list's end
   after its last item). After a reload it returns to the item with the same `fid`.
-- **Presses.** `press(k)` takes every input: the controller (polled from `Hub.poll`), the keyboard (arrows, Enter,
-  Esc, Q and E, X, Y, Tab, /, F1, F10) and taps on the footer. Order: the dialog, the highlighted item, the page, then
-  the window (tabs, Back, Help, Menu). While the highlight is being put back after a page or dialog change, presses
-  wait for it; for a moment after a new page or dialog appears, A, X, Y and Menu are left out (no double presses).
+- **Presses.** `press(k)` takes every input: the controller (polled from `Hub.poll`), the keyboard (arrows or
+  W A S D, Enter, Esc, Q and E or Page Up and Page Down, X, Y, Tab, /, F1, F10), the mouse's Back button (B) and
+  right button (X), and taps on the footer. Order: the dialog, the highlighted item, the page, then the window
+  (tabs, Back, Help, Menu). While the highlight is being put back after a page or dialog change, presses wait for
+  it; for a moment after a new page or dialog appears, A, X, Y and Menu are left out (no double presses). A key
+  held down repeats only for the directions: Enter held is one A. Home and End jump to the first and last thing of
+  the list; Ctrl with = or -, or with the wheel, changes the interface size (and asks to keep it).
+- **Only in front.** The controller is read behind other windows too, but pad.rs passes on releases only while
+  another window is in front, and for a quarter of a second after coming back (`onActiveChanged`, `Hub.front`).
+  A held direction stops repeating when the window goes back, the page changes or the controller goes away.
+- **Taps and the mouse.** Every tap asks `gate()` first, so it obeys what a press obeys: nothing while work runs,
+  while the highlight is being put back, or in the moment a page or dialog appears, and nothing of the page under
+  a dialog. The page and the bars are also turned off (`enabled`) under a dialog and the busy cover, because a
+  backdrop stops the items under it but not their tap and hover handlers; `Backdrop` takes what is left and is the
+  only MouseArea. The mouse moves the highlight only when it really moved (`hoverAt`): what a resting mouse
+  lies on after a key, a controller press or a rebuild is left alone. tools/qml-check.js holds these rules.
+- **Typing.** A text box that gets the keyboard reports it (`typingBegan`, `typingEnded`). In Game Mode Steam's
+  keyboard opens with it and closes when the typing is done; until then the controller belongs to that keyboard,
+  and B only ends the typing ("Done typing" in the footer).
+- **Glyphs.** The hints follow the last input (`lastInput`): the controller's after a press on it, keys after a key
+  or the mouse. Always the controller's in Game Mode; a window starts on the controller's when one is seen.
 - **Footer.** `footerHints` lists what each button does now, most important first: A only where A does something,
   B as Back, the page's own words for it, or Close at the very start.
 
@@ -60,7 +77,8 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 | Toast | A short note above the footer, or at the top when the highlight is down there. |
 | DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu. |
 | Motion | Every duration and curve. No other file names one. |
-| SelfCheck | The picture run's checks. Loaded only with `--screenshot`. |
+| Backdrop | What takes the mouse and the finger away from everything under it: the dialog's backdrop and card, the busy cover. The only MouseArea. |
+| SelfCheck | The picture run's checks, and with `--check=taps`, `hold`, `hover`, `typing` or `mouse` the same page worked with real keys, a real mouse and a finger first. Loaded only with `--screenshot`. |
 
 ## Pages
 

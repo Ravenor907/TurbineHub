@@ -299,6 +299,40 @@ function styleRule(files) {
   return out;
 }
 
+// Nothing goes through a pop-up. In Qt 6 a MouseArea that takes a press stops the items under it but never their
+// pointer handlers (TapHandler, HoverHandler), so a backdrop of a file's own lets taps through to the page beneath.
+// The rules that keep that from coming back:
+//   the only MouseArea is Backdrop.qml (every backdrop and card uses it);
+//   every tap asks app.gate() first, on the handler's line or the one after, so it obeys what a press obeys;
+//   the mouse resting on things is heard in Focusable.qml and Main.qml only, which decide together (hoverAt);
+//   Main.qml turns the page off under a dialog and under the busy cover.
+function pointerRule(files) {
+  const out = [];
+  let taps = 0;
+  const named = (f) => f.split("/").pop();
+  for (const f of files) {
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    for (let k = 0; k < lines.length; k++) {
+      const l = lines[k].replace(/\/\/.*$/, "");
+      if (/\bMouseArea\s*\{/.test(l) && named(f) !== "Backdrop.qml") out.push(f + ":" + (k + 1) + ": a MouseArea of its own (use Backdrop.qml: it alone stops what is under it)");
+      if (/\bHoverHandler\s*\{/.test(l) && ["Focusable.qml", "Main.qml"].indexOf(named(f)) < 0) out.push(f + ":" + (k + 1) + ": a HoverHandler of its own (the highlight follows the mouse through Focusable.qml)");
+      if (/\bonTapped\s*:/.test(l)) {
+        taps++;
+        const next = (lines[k + 1] || "").replace(/\/\/.*$/, "");
+        if (!/\bgate\(/.test(l) && !/\bgate\(/.test(next)) out.push(f + ":" + (k + 1) + ": a tap with no app.gate() first: " + l.trim().slice(0, 80));
+      }
+    }
+    if (named(f) === "Main.qml") {
+      const src = lines.join("\n");
+      if (!/^\s*enabled: !dialog\.open && !Hub\.busy$/m.test(src)) out.push(f + ": the page isn't turned off under a dialog and the busy cover (enabled: !dialog.open && !Hub.busy on the view)");
+      if (!/visible: Hub\.busy[\s\S]{0,200}?Backdrop \{/.test(src)) out.push(f + ": the busy cover has no Backdrop");
+    }
+    if (named(f) === "DialogCard.qml" && !/Backdrop \{ onTapped:/.test(lines.join("\n"))) out.push(f + ": the dialog's backdrop isn't a Backdrop");
+  }
+  console.log("Pointer check: " + taps + " taps ask the gate, " + out.length + " problems");
+  return out;
+}
+
 // Every .qml file under a folder, in a steady order.
 function qmlFiles(dir) {
   let out = [];
@@ -327,7 +361,7 @@ for (const f of files) {
   }
 }
 const readable = files.filter(f => fs.existsSync(f));
-all = all.concat(motionRule(readable)).concat(styleRule(readable));
+all = all.concat(motionRule(readable)).concat(styleRule(readable)).concat(pointerRule(readable));
 for (const e of all) console.log(e);
 console.log("QML check: " + files.length + " files, " + all.length + " problems");
 process.exit(all.length ? 1 : 0);

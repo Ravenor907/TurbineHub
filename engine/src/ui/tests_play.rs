@@ -789,3 +789,26 @@ fn screens_are_read_from_desktop_modes_settings_and_game_mode_is_told_where_to_g
     assert_eq!(parse(&u.act("checkup", "refresh-rate", "")).unwrap().str_at("open"), Some("module:monitors"));
     done("screens");
 }
+
+#[test]
+fn a_window_without_a_controller_says_how_to_get_one_and_help_names_what_the_hand_is_on() {
+    let mut ui = ui("controller", Preset::Handheld);
+    // The checkup: nothing while a controller is there, one tip with a way out when none shows.
+    assert!(!crate::checkup::items(&ui.machine(), &ui.facts_now()).iter().any(|i| i.id == "controller"));
+    ui.facts.no_controller = true;
+    let items = crate::checkup::items(&ui.machine(), &ui.facts_now());
+    let tip = items.iter().find(|i| i.id == "controller").expect("the tip");
+    assert!(tip.line.contains("Steam entry"));
+    let guide = ui.act("checkup", tip.action.1, "");
+    assert!(guide.contains("Using a controller in Desktop Mode"), "{guide}");
+    // Help: a window means keys until the window says the controller is in the hand, and the other way round.
+    ui.window = true;
+    assert!(ui.page("help", "home").contains("\"Esc\""));
+    ui.keys = Some(false);
+    let help = ui.page("help", "home");
+    assert!(help.contains("\"B\"") && !help.contains("\"Esc\""), "{help}");
+    ui.window = false;
+    ui.keys = Some(true);
+    assert!(ui.page("help", "home").contains("\"Esc\""));
+    done("controller");
+}

@@ -79,7 +79,7 @@ pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
     let about = ABOUT.iter().find(|(p, _)| *p == name).map(|(_, w)| *w).unwrap_or(if name.starts_with("module:") { "One part of this machine: what it is set to now and what can change." } else { "One of Turbine Hub's pages." });
     // The page's own buttons, as the page itself lists them.
     let shown = crate::json::parse(&ui.page(name, page_arg)).unwrap_or(Json::Null);
-    let keyboard = ui.window;
+    let keyboard = ui.keys.unwrap_or(ui.window);
     let mut own: Vec<(String, String)> = Vec::new();
     let mut add = |k: &str, label: &str| {
         if !label.is_empty() && !own.iter().any(|(x, _)| x == k) {
@@ -183,6 +183,11 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "lighting" => open("module:lighting"),
         "self-tile" => return super::selftile::act(ui, "self-tile", "add", value),
         "help:panel" => return super::store::act(ui, "panel-guide", "", value),
+        "help:controller" => guide(
+            "Using a controller in Desktop Mode",
+            "No controller was found. Steam passes yours on to the things it starts, so start Turbine Hub from Steam.",
+            &[("1", "Add Turbine Hub to your Steam library: Settings, My setup."), ("2", "Close Turbine Hub and start it from its entry in Steam."), ("Meanwhile", "Keyboard and mouse do everything here.")],
+        ),
         "help:nvidia" => guide("Nvidia graphics on SteamOS", "Valve and Nvidia are still working on it, so some things are rough.", &[("Works", "Most games in Desktop Mode and in Game Mode."), ("Rough", "HDR, variable refresh and sleep can misbehave in Game Mode."), ("If a game stutters", "Try it in Desktop Mode, and keep SteamOS up to date: fixes arrive with its updates.")]),
         "help:hdmi" => guide("4K at 120 Hz over HDMI", "Linux graphics drivers aren't allowed to use HDMI 2.1's fastest mode, so HDMI stops at 4K 60 Hz with full color.", &[("The way around it", "A DisplayPort to HDMI 2.1 adapter between the PC and the TV carries 4K at 120 Hz."), ("Or", "Run 1440p at 120 Hz over HDMI. On a TV from the couch it looks close.")]),
         // Turbine Hub's monitor controls set Desktop Mode's screens. In Game Mode, Steam sets the screen.

@@ -72,8 +72,9 @@ Phone remote and Wake-on-LAN web page: after the core is solid.
 - No em or en dashes.
 
 ### Controls and layout (from Turbine)
-- One footer hint bar with a fixed priority order. A and B are never dropped, VIEW and START have short labels, LB/RB show tab names. With a keyboard the hints switch to keys (Enter, Esc, Q/E, F1).
+- One footer hint bar with a fixed priority order. A and B are never dropped, VIEW and START have short labels, LB/RB show tab names. The hints follow the last input: keys (Enter, Esc, Q/E, F1) after a key or the mouse in a window, the controller's after a press on it, and always the controller's in Game Mode.
 - One dialog template: sizes to its content, buttons pinned, controller glyph inside each button.
+- Input that can't surprise: the controller only counts while Turbine Hub is in front (not behind a game, and not for a moment after coming back); a tap or click obeys what a press obeys and never reaches what lies under a dialog or the busy cover; a held key or button acts once (only directions repeat); the mouse moves the highlight only when it really moves; the left stick gives one direction per push; one window at a time (a second start brings the open one forward). The build tries these with real keys, a real mouse and a finger (the check-... pictures).
 - Distinct focus, selected and primary styles. Every action has its own icon.
 - Scroll fades, the focused item always fully in view, toasts inside the content area, top insets, dark scrims behind overlays.
 - Body text at least 14 px at 1280x800. Interface size 50 to 150% re-flows instead of truncating.

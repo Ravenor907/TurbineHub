@@ -45,7 +45,7 @@ Rectangle {
                     }
                 }
                 Rectangle { visible: tabItem.on; anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; width: parent.width - bar.app.px(12); height: Math.max(3, bar.app.px(3)); radius: height / 2; color: bar.app.colors.accent }
-                TapHandler { onTapped: bar.app.goTab(tabItem.index) }
+                TapHandler { onTapped: if (bar.app.gate(tabItem, "lb")) bar.app.goTab(tabItem.index) }
             }
         }
         KeyCap { app: bar.app; k: "rb"; anchors.verticalCenter: parent.verticalCenter }

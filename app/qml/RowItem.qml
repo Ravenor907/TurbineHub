@@ -127,6 +127,7 @@ Focusable {
                 Rectangle { x: (parent.width - width) * track.part; anchors.verticalCenter: parent.verticalCenter; width: r.app.px(22); height: width; radius: width / 2; color: r.app.colors.accentHi; border.width: Math.max(1, r.app.px(2)); border.color: r.app.colors.ground }
                 TapHandler {
                     onTapped: (p) => {
+                        if (!r.app.gate(r)) return
                         const steps = Math.round((r.m.min + (r.m.max - r.m.min) * Math.max(0, Math.min(1, p.position.x / track.width)) - r.m.min) / (r.m.step || 1))
                         const v = Math.max(r.m.min, Math.min(r.m.max, r.m.min + steps * (r.m.step || 1)))
                         if (v !== r.val) { r.val = v; r.send(v) }
@@ -238,7 +239,7 @@ Focusable {
                         Icon { app: r.app; visible: opt.picked; d: r.app.icons.check; size: 16; tint: r.app.colors.onAccent; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: opt.modelData; color: opt.picked ? r.app.colors.onAccent : r.app.colors.text; font.family: r.app.bodyFont; font.pixelSize: r.app.fpx(16); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                     }
-                    TapHandler { onTapped: { r.cur = opt.index; r.send(opt.index) } }
+                    TapHandler { onTapped: if (r.app.gate(r)) { r.cur = opt.index; r.send(opt.index) } }
                 }
             }
         }

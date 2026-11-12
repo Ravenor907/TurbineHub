@@ -70,7 +70,7 @@ Item {
             Layout.fillWidth: true
             Layout.maximumWidth: page.app.px(560)
             implicitHeight: page.app.tpx(48)
-            onActivated: input.forceActiveFocus()
+            onActivated: page.app.typeIn(input)
             Rectangle { anchors.fill: parent; radius: page.app.px(8); color: page.app.colors.card; border.width: Math.max(1, page.app.px(2)); border.color: input.activeFocus ? page.app.colors.accent : page.app.colors.line }
             Icon { id: searchIcon; app: page.app; d: page.app.icons.search; size: 20; anchors.verticalCenter: parent.verticalCenter; x: page.app.px(14) }
             TextInput {
@@ -81,8 +81,10 @@ Item {
                 font.pixelSize: page.app.fpx(17)
                 clip: true
                 onTextEdited: page.app.setArg(text)
+                onActiveFocusChanged: if (activeFocus) page.app.typingBegan(input); else page.app.typingEnded(input)
                 Keys.onEscapePressed: page.app.keysBack()
                 Keys.onReturnPressed: page.app.keysBack()
+                Keys.onEnterPressed: page.app.keysBack()
                 Keys.onDownPressed: { page.app.keysBack(); page.app.moveFocus("down") }
                 Text { visible: input.text === "" && !input.activeFocus; text: "Search, like \"control panel\""; color: page.app.colors.muted; font: input.font; anchors.verticalCenter: parent.verticalCenter }
             }

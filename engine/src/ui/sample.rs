@@ -129,6 +129,13 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("settings-size-50", "--page=settings --machine=handheld --mode=guided --scale=50"),
     ("home-light", "--page=home --machine=handheld --mode=veteran --theme=light"),
     ("games-contrast", "--page=games --machine=handheld --mode=guided --theme=contrast"),
+    // The page worked with real keys, a real mouse and a finger before its picture (app/qml/SelfCheck.qml).
+    ("check-taps", "--page=settings --check=taps --machine=handheld --mode=guided"),
+    ("check-hold-switch", "--page=settings --check=hold --focus=animations --machine=handheld --mode=guided"),
+    ("check-hold-dialog", "--page=settings --arg=about --check=hold --focus=remove-app --machine=handheld --mode=guided"),
+    ("check-hover", "--page=settings --check=hover --machine=handheld --mode=guided"),
+    ("check-mouse", "--page=settings --check=mouse --machine=handheld --mode=guided"),
+    ("check-typing", "--page=games --check=typing --gamemode --machine=handheld --mode=guided"),
 ];
 
 fn w(base: &Path, rel: &str, text: &str) {

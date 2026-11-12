@@ -7,8 +7,8 @@ import QtQuick.Layouts
 // highlight is on the right.
 //
 // When the page's model has `search`, a search box sits above the list. RT (or / on a keyboard) jumps to it, A
-// starts typing (in Game Mode Steam's on-screen keyboard opens), and every letter goes to the engine, which answers
-// with the narrowed page. B empties the box before it leaves the page.
+// starts typing (in Game Mode Steam's on-screen keyboard opens, and closes again when the typing is done), and every
+// letter goes to the engine, which answers with the narrowed page. B empties the box before it leaves the page.
 //
 // app (required): Main.qml's window (its model is the page).
 Item {
@@ -79,7 +79,7 @@ Item {
                     height: visible ? page.app.tpx(46) : 0
                     ringRadius: page.app.px(8)
                     ringGap: -page.app.px(1)
-                    onActivated: { input.forceActiveFocus(); page.app.askKeyboard() }
+                    onActivated: page.app.typeIn(input)
                     Rectangle { anchors.fill: parent; radius: page.app.px(8); color: page.app.colors.ground; border.width: Math.max(1, page.app.px(2)); border.color: input.activeFocus ? page.app.colors.accent : page.app.colors.line }
                     Icon { id: searchIcon; app: page.app; d: page.app.icons.search; size: 18; anchors.verticalCenter: parent.verticalCenter; x: page.app.px(12) }
                     TextInput {
@@ -92,6 +92,7 @@ Item {
                         maximumLength: 60
                         text: page.searchValue
                         onTextEdited: page.app.doAct("search", page.search.arg, text)
+                        onActiveFocusChanged: if (activeFocus) page.app.typingBegan(input); else page.app.typingEnded(input)
                         Keys.onEscapePressed: page.app.keysBack()
                         Keys.onReturnPressed: page.app.keysBack()
                         Keys.onEnterPressed: page.app.keysBack()

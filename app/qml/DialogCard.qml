@@ -29,6 +29,8 @@ Item {
     readonly property bool typed: ask === "" || (pw.text !== "" && (ask !== "new" || pw2.text !== ""))
     z: 50
     visible: open
+    // The card, for the build's checks.
+    readonly property Item cardItem: card
 
     function show(model) {
         // A dialog over a dialog (the menu's choice asking something) keeps the page's highlight to come back to.
@@ -43,7 +45,8 @@ Item {
         app.settle(true)
         Qt.callLater(function () {
             app.restoreFocus()
-            if (dlg.ask !== "" && app.keyboard) pw.forceActiveFocus()
+            // At a keyboard the password can be typed at once.
+            if (dlg.ask !== "" && app.keyboard) app.typeIn(pw)
         })
     }
     function close() {
@@ -64,6 +67,14 @@ Item {
         if (d && d.keep) { close(); return }
         if (!typed) { error = ask === "new" ? "Type the new password in both boxes first." : "Type the password first."; return }
         app.confirmDialog(pw.text, pw2.text)
+    }
+    // Enter in a password box: on to the second box when there is one to fill, else the typing is done and the
+    // dialog is answered. A key held down counts once.
+    function entered(e, box) {
+        if (e.isAutoRepeat) return
+        if (box === pw && ask === "new") { app.typeIn(pw2); return }
+        app.typingDone()
+        confirm()
     }
     // A place in the menu: the menu closes, then the place opens (the row is gone by then, so the dialog does it).
     function choose(act, arg) {
@@ -97,7 +108,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: dlg.app.colors.scrim
-        MouseArea { anchors.fill: parent; hoverEnabled: true; onWheel: (w) => w.accepted = true; onClicked: dlg.cancel() }
+        // A tap beside the card closes the dialog, when a press would count (not in the moment it appears).
+        Backdrop { onTapped: if (dlg.app.gate(dlg, "a")) dlg.cancel() }
     }
 
     Rectangle {
@@ -113,7 +125,7 @@ Item {
         border.width: Math.max(1, dlg.app.px(2))
         border.color: dlg.app.colors.accentLo
         // Clicks on the card stay on the card.
-        MouseArea { anchors.fill: parent }
+        Backdrop { }
 
         ColumnLayout {
             id: body
@@ -216,7 +228,7 @@ Item {
                         aLabel: "Type"
                         Layout.fillWidth: true
                         implicitHeight: dlg.app.tpx(48)
-                        onActivated: pw.forceActiveFocus()
+                        onActivated: dlg.app.typeIn(pw)
                         Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.ground; border.width: Math.max(1, dlg.app.px(2)); border.color: pw.activeFocus ? dlg.app.colors.accent : dlg.app.colors.line }
                         TextInput {
                             id: pw
@@ -227,9 +239,10 @@ Item {
                             font.family: dlg.app.bodyFont
                             font.pixelSize: dlg.app.fpx(18)
                             clip: true
-                            Keys.onEscapePressed: dlg.cancel()
-                            Keys.onReturnPressed: dlg.ask === "new" ? pw2.forceActiveFocus() : dlg.confirm()
-                            Keys.onEnterPressed: dlg.ask === "new" ? pw2.forceActiveFocus() : dlg.confirm()
+                            onActiveFocusChanged: if (activeFocus) dlg.app.typingBegan(pw); else dlg.app.typingEnded(pw)
+                            Keys.onEscapePressed: dlg.app.keysBack()
+                            Keys.onReturnPressed: (e) => dlg.entered(e, pw)
+                            Keys.onEnterPressed: (e) => dlg.entered(e, pw)
                         }
                     }
                     ActionButton {
@@ -252,7 +265,7 @@ Item {
                     aLabel: "Type"
                     Layout.fillWidth: true
                     implicitHeight: dlg.app.tpx(48)
-                    onActivated: pw2.forceActiveFocus()
+                    onActivated: dlg.app.typeIn(pw2)
                     Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.ground; border.width: Math.max(1, dlg.app.px(2)); border.color: pw2.activeFocus ? dlg.app.colors.accent : dlg.app.colors.line }
                     TextInput {
                         id: pw2
@@ -263,12 +276,13 @@ Item {
                         font.family: dlg.app.bodyFont
                         font.pixelSize: dlg.app.fpx(18)
                         clip: true
-                        Keys.onEscapePressed: dlg.cancel()
-                        Keys.onReturnPressed: dlg.confirm()
-                        Keys.onEnterPressed: dlg.confirm()
+                        onActiveFocusChanged: if (activeFocus) dlg.app.typingBegan(pw2); else dlg.app.typingEnded(pw2)
+                        Keys.onEscapePressed: dlg.app.keysBack()
+                        Keys.onReturnPressed: (e) => dlg.entered(e, pw2)
+                        Keys.onEnterPressed: (e) => dlg.entered(e, pw2)
                     }
                 }
-                Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "Steam button and X opens the keyboard."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
+                Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "No keyboard on screen? Steam button and X opens it."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
             }
             Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.error; color: dlg.app.colors.stop; font.weight: Font.DemiBold }
 

@@ -156,15 +156,18 @@ Everything works with just the controller, in Game Mode and in Desktop Mode. Not
 
 | Button | Keyboard | Action |
 |---|---|---|
-| D-pad | Arrows | Move |
+| D-pad or left stick | Arrows or W A S D | Move |
 | **A** | Enter | Select, or the main action |
 | **B** | Esc | Back, or close a dialog |
 | **X** / **Y** | X / Y | The page's own actions (shown at the bottom) |
-| **LB / RB** | Q / E | Switch tabs |
+| **LB / RB** | Q / E, or Page Up / Page Down | Switch tabs |
 | **LT** | Tab | Between a list and its details |
 | **RT** | / | Search (Games and Store) |
 | **View** | F1 | Help for this page |
 | **Menu** | F10 | Menu: Where's my...?, Bring it over, Review changes, Settings, Close |
+
+With a mouse, the Back button is **B** and a right-click is **X**. Home and End jump to the top and the bottom of a
+list, and Ctrl with = or - (or with the mouse wheel) changes the interface size.
 
 The bar at the bottom always shows what each button does on the screen you're on.
 

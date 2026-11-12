@@ -44,8 +44,11 @@ README_SHOTS = [
 ]
 
 
-def line(im, text, middle, height, fill=SOFT):
-    font = ImageFont.truetype(BODY, height)
+TAGLINE = "Harness the Power of SteamOS"
+
+
+def line(im, text, middle, height, fill=SOFT, face=BODY):
+    font = ImageFont.truetype(face, height)
     ImageDraw.Draw(im).text(middle, text, font=font, fill=fill, anchor="mm")
 
 
@@ -57,7 +60,7 @@ def banner():
     art.words(im, "TURBINE", (1000, 150), 104)
     art.rule(im, (1000, 222), 520)
     art.words(im, "HUB", (1000, 292), 104, spacing=0.5)
-    line(im, "The first stop after installing SteamOS", (1000, 385), 34)
+    line(im, TAGLINE, (1000, 385), 36, fill=art.BRASS_HI, face=art.FONT)
     return im
 
 
@@ -67,7 +70,7 @@ def social():
     art.put_turbine(im, (w // 2, 250), 560, faint=40)
     art.put_turbine(im, (w // 2, 250), 290)
     art.words(im, "TURBINE HUB", (w // 2, 485), 70, spacing=0.1)
-    line(im, "Unlock the True Potential of SteamOS", (w // 2, 565), 34)
+    line(im, TAGLINE, (w // 2, 565), 36, fill=art.BRASS_HI, face=art.FONT)
     return im
 
 

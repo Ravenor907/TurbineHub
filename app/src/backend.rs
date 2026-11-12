@@ -182,7 +182,7 @@ impl Default for HubRust {
         let ui = make_ui();
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: run::in_game_mode() && option("screenshot").is_none(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None, looked: std::time::Instant::now() };
+        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None, looked: std::time::Instant::now() };
         hub.gather();
         hub
     }

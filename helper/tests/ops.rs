@@ -257,10 +257,27 @@ fn install_and_uninstall() {
     let rule = read(&sys, ops::POLKIT_RULE);
     assert!(rule.contains("subject.user == \"deck\"") && rule.contains(ops::BIN));
     assert!(sys.run.calls.iter().any(|c| c == "systemctl enable turbinehub-reapply.service"));
+    // SteamOS keeps only the files a keep list names when it updates: every file of Turbine Hub's is on it.
+    let keep = read(&sys, ops::KEEP_LIST);
+    for f in policy::FILES.iter().copied().chain([ops::POLKIT_RULE, ops::REAPPLY_UNIT]) {
+        assert!(keep.lines().any(|l| l == f), "{f} isn't kept");
+    }
+    assert!(keep.lines().all(|l| l.starts_with("##") || l.starts_with("/etc/")));
     sys.apply(set(r#"{"kind":"sysctl","key":"vm.page-cluster","value":0}"#)).unwrap();
+    // A SteamOS update from before the keep list: /etc is wiped but for the unit. The next start puts the rule,
+    // the keep list and the settings files back, so the owner is never asked for the password again.
+    for f in [ops::POLKIT_RULE, ops::KEEP_LIST, policy::SYSCTL_FILE] {
+        fs::remove_file(sys.p(f)).unwrap();
+    }
+    let fixed = sys.reapply().unwrap();
+    assert!(fixed.iter().any(|f| f == ops::POLKIT_RULE) && fixed.iter().any(|f| f == ops::KEEP_LIST));
+    assert_eq!(read(&sys, ops::POLKIT_RULE), rule);
+    assert!(read(&sys, policy::SYSCTL_FILE).contains("vm.page-cluster"));
+    // Nothing to put back the second time.
+    assert!(!sys.reapply().unwrap().iter().any(|f| f == ops::POLKIT_RULE || f == ops::KEEP_LIST));
     sys.uninstall().unwrap();
     assert_eq!(read(&sys, "/proc/sys/vm/page-cluster"), "3\n");
-    assert!(!sys.p(ops::STATE_DIR).exists() && !sys.p(ops::POLKIT_RULE).exists());
+    assert!(!sys.p(ops::STATE_DIR).exists() && !sys.p(ops::POLKIT_RULE).exists() && !sys.p(ops::KEEP_LIST).exists());
 }
 
 #[test]

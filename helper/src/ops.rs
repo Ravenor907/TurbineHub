@@ -20,6 +20,9 @@ pub const LOG: &str = "/var/lib/turbinehub/helper.log";
 pub const BACKUP_DIR: &str = "/var/lib/turbinehub/backup";
 pub const POLKIT_RULE: &str = "/etc/polkit-1/rules.d/49-turbinehub.rules";
 pub const REAPPLY_UNIT: &str = "/etc/systemd/system/turbinehub-reapply.service";
+/// SteamOS throws away every change under /etc when it updates, except the files a keep list names. This file adds
+/// Turbine Hub's own files to that list (the list's folder is itself kept), so they are still there after an update.
+pub const KEEP_LIST: &str = "/etc/atomic-update.conf.d/turbinehub.conf";
 pub const DECKY_UNIT: &str = "/etc/systemd/system/plugin_loader.service";
 pub const DECKY_REPO: &str = "SteamDeckHomebrew/decky-loader";
 
@@ -414,6 +417,25 @@ impl<R: Run> Sys<R> {
     }
 
     /// Writes the files under /etc from the ledger and reloads what reads them. Returns the files changed.
+    /// Puts back the helper's own two files when they are gone or differ: the rule that lets the owner start the
+    /// helper without the password, and the keep list. A SteamOS update drops both unless the keep list was already
+    /// there, and without the rule every change would ask for the password again (or fail in Game Mode, where
+    /// nothing can ask). Run at every start by the reapply unit, which SteamOS keeps. Answers what it wrote.
+    pub fn own_files(&mut self) -> Vec<&'static str> {
+        let mut wrote = Vec::new();
+        if let Some(owner) = self.owner() {
+            let rule = polkit_rule(&owner.name);
+            if self.read(POLKIT_RULE).as_deref() != Some(rule.as_str()) && self.write_file(POLKIT_RULE, &rule, 0o644).is_ok() {
+                wrote.push(POLKIT_RULE);
+            }
+        }
+        let keep = keep_list();
+        if self.read(KEEP_LIST).as_deref() != Some(keep.as_str()) && self.write_file(KEEP_LIST, &keep, 0o644).is_ok() {
+            wrote.push(KEEP_LIST);
+        }
+        wrote
+    }
+
     pub fn render_files(&mut self, l: &Ledger) -> Result<Vec<&'static str>, String> {
         let settings = l.settings();
         let mut changed = Vec::new();
@@ -527,7 +549,8 @@ impl<R: Run> Sys<R> {
     /// Puts everything in the record back in effect: at boot (/sys forgets) and after a SteamOS update.
     pub fn reapply(&mut self) -> Result<Vec<String>, String> {
         let l = self.ledger()?;
-        let mut fixed: Vec<String> = self.render_files(&l)?.into_iter().map(String::from).collect();
+        let mut fixed: Vec<String> = self.own_files().into_iter().map(String::from).collect();
+        fixed.extend(self.render_files(&l)?.into_iter().map(String::from));
         let mut errors = Vec::new();
         for e in &l.entries {
             if let Change::Set(s @ (Setting::Sysctl { .. } | Setting::Sysfs { .. } | Setting::Module { .. })) = &e.change {
@@ -760,6 +783,7 @@ impl<R: Run> Sys<R> {
         self.write_file(OWNER, &format!("{}\n", owner.uid), 0o644)?;
         self.write_file(POLKIT_RULE, &polkit_rule(&owner.name), 0o644)?;
         self.write_file(REAPPLY_UNIT, REAPPLY_UNIT_TEXT, 0o644)?;
+        self.write_file(KEEP_LIST, &keep_list(), 0o644)?;
         self.run.run(SYSTEMCTL, &["daemon-reload"])?;
         self.run.run(SYSTEMCTL, &["enable", "turbinehub-reapply.service"])?;
         Ok(())
@@ -769,7 +793,7 @@ impl<R: Run> Sys<R> {
     pub fn uninstall(&mut self) -> Result<(), String> {
         self.undo_all()?;
         let _ = self.run.run(SYSTEMCTL, &["disable", "turbinehub-reapply.service"]);
-        for f in [POLKIT_RULE, REAPPLY_UNIT] {
+        for f in [POLKIT_RULE, REAPPLY_UNIT, KEEP_LIST] {
             let _ = fs::remove_file(self.p(f));
         }
         let _ = self.run.run(SYSTEMCTL, &["daemon-reload"]);
@@ -820,6 +844,16 @@ pub fn windows_entries(efibootmgr: &str) -> Vec<(String, String)> {
             (uuid.len() == 36 && uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| (num.to_string(), uuid))
         })
         .collect()
+}
+
+/// The keep list's text: every file Turbine Hub writes under /etc, one per line, and nothing else.
+pub fn keep_list() -> String {
+    let mut t = String::from("## Turbine Hub: its own settings files, kept when SteamOS updates. Removed with Turbine Hub's helper.\n");
+    for f in policy::FILES.iter().copied().chain([POLKIT_RULE, REAPPLY_UNIT]) {
+        t.push_str(f);
+        t.push('\n');
+    }
+    t
 }
 
 pub fn polkit_rule(user: &str) -> String {

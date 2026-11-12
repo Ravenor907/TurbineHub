@@ -333,7 +333,7 @@ ID: `io.github.ravenor907.TurbineHub`.
 - One password, once, and never before the first system change needs it.
 
 ### 4.2 Where things live
-SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced. So:
+SteamOS replaces `/usr` on update, keeps `/var`, and throws away every change under `/etc` except the files its keep list names (`/usr/lib/rauc/atomic-update-keep.conf`: systemd units and a few others, plus any list in `/etc/atomic-update.conf.d/`). Turbine Hub's helper writes its own keep list there (`turbinehub.conf`, naming exactly its own files), and its reapply unit, which SteamOS always keeps, puts the password-free rule, the keep list and the settings files back at every start if an update dropped them. So:
 
 | What | Where | Owner |
 |---|---|---|
@@ -396,7 +396,7 @@ One JSON file, one entry per setting (a second change to the same setting update
 - The app shows the ledger as **Settings, Review changes**: every change in plain words, with Undo. Under it, the changes made in the player's own folders without the password (the launch tool, Proton picks, game switches, library tiles, the background helper's start-up entry, apps the Store installed), each with its Undo or its page.
 
 ### 4.6 SteamOS updates
-- Files in `/etc` and everything in `/var` survive.
+- Everything in `/var` survives; files in `/etc` survive because the helper's keep list names them, and the reapply unit puts them back if they were dropped.
 - Runtime values are put back at every boot by `turbinehub-reapply.service`.
 - After an update (the agent sees the SteamOS version change), the agent runs `verify` and writes down what differs. The app runs `verify` at its own start too. Anything that drifted shows in the checkup with one tap to put it back (`reapply`), and the activity list says so in one line. Anything SteamOS now does itself (for example a tune-up item that became default) shows as "SteamOS does it" in the tune-up.
 

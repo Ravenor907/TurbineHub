@@ -35,7 +35,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
   mouse's floor for things to press (28 pixels in place of a finger's 44). The top bar gives way to Files' own strip
   of tabs, and the footer shows only once a controller is used. Everywhere else, and Files full screen, sizes are
   as above.
-- **Pages.** Six tabs, and a stack of pages opened on top. `fileFor` picks the component for a page name.
+- **Pages.** Six tabs, and a stack of pages opened on top. `fileFor` picks the component for a page name. A link to one part of the machine (`module:<id>`) is My machine on that section: a change of section from My machine itself, a page on top from anywhere else. A page can say where its highlight starts (`focus`).
   The first-run pages (pick, setup, quick) hide the tabs, and no tab opens before a mode is picked. A page opened
   on top keeps what it showed (the game, the section, the highlight) for when Back comes to it; the top bar lights
   the tab the page on screen belongs to (`tabOf`). Back on the first screen or on Home asks to close Turbine Hub.
@@ -50,7 +50,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
   footer. Order: the dialog, the highlighted item, the page, then the window (tabs, Back, Options, Find, the menu,
   Start). While the highlight is being put back after a page or dialog change, presses wait for it; for a moment
   after a new page or dialog appears, A, X, Y and Start are left out (no double presses). A key held down repeats
-  only for the directions: Enter held is one A. LT and RT jump a screenful (`jumpBy`), Home and End go to the first
+  only for the directions: Enter held is one A. LT and RT jump a screenful (`jumpBy`; on a page with sections see Sections below), Home and End go to the first
   and last thing of the list; Ctrl with = or -, or with the wheel, changes the interface size (and asks to keep
   it). In a dialog Tab and Shift+Tab go from one thing to the next (`tabMove`).
 - **Work that runs while the player browses.** `app.status` is the engine's status for the top bar (the line of
@@ -115,9 +115,10 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | Icon | A line icon from path data on a 24 x 24 grid (skipped by a screen reader). |
 | Chip | A small state label: the tone's color on its fill, its mark and its word. |
 | Toggle | A switch as drawn (the row around it takes the press). |
-| RowItem | One engine row: toggle, check, slider, choice (as chips, or as cards with a color strip), button, info, or a live preview of the lights. |
+| RowItem | One engine row: toggle, check, slider, choice (as chips, or as cards with a color strip), button, info, a chart (a line over time with its scale's and its time's ends named), or a live preview of the lights. |
 | RowsView | Sections of rows as a scrolling list, in columns where they fit. |
-| CardTile | A card in a grid: icon, title, state, a line, status and button. |
+| CardTile | A card in a grid: icon, title, state, a line, status and button, or the name of its switch and the switch (A turns it). |
+| Sparkline | One line over time on a scale, a gap where nothing was read: the battery tile on Home, the charts of My machine, Battery. A picture only; the words beside it say what it shows. |
 | PageHeader | A page's title with where it was opened from. |
 | ScrollFade | Fades at the edges of a list that has more. |
 | TopBar | Tabs between LB and RB, then the status from `app.status` (the engine's): the work that runs while the player browses (a mark that turns, its words, how far it is), the updates mark, the battery with its percent and charging bolt, the clock, the mode, the machine's name. `fitted` works out what fits beside the tabs; the name goes first, then the clock, the long words, the percent. Nothing in it takes the highlight. |
@@ -134,10 +135,10 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 
 | File | Pages |
 |---|---|
-| HomePage | Home, Guided and Veteran. |
-| SectionsPage | The Store: its sections as chips across the top (`model.chips`, `model.index`), the picked section's rows under them, the search box and the main button beside the section's line. `section(d)` goes to the section before or the next (LT and RT, [ and ]); the rows come first in the page's order, so the highlight starts on the first row. |
+| HomePage | Home, Guided and Veteran: readings (Sparkline on the battery's), the quick switches as RowItem, the checkup, what passed, and the main button (Start) that fixes what it can. |
+| SectionsPage | The Store and My machine: the sections as chips across the top (`model.chips`, `model.index`), the picked section's rows under them, the search box and the main button beside the section's line. `section(d)` goes to the section before or the next (LT and RT, [ and ]); the rows come first in the page's order, so the highlight starts on the first row (or where the engine's `focus` says). With `cards` in the model (My machine's Overview) the section is a grid of CardTile; with `backTo`, B on another section goes to that one before it leaves the tab. |
 | SidePage | Games, Settings: a list on the left, its rows on the right. Games has a search box above the list (Find: Y, or F on a keyboard); every letter goes to the engine, which answers with the narrowed page. The page's own actions are buttons under the list. |
-| CardsPage | My machine, Bring it over. |
+| CardsPage | Bring it over. |
 | FilesPage | Files: Explorer's layout (tabs, back, forward, up, address, search, command bar, navigation pane, list or tiles, details pane, status bar). It keeps what the hand is doing (what is ticked, the line the highlight was on, a name being typed, a drag) and asks the engine for everything else. The list is a ListView: lines out of view aren't drawn, so Up and Down go by index (`move`), and a line that scrolls away leaves the highlight with the list (`list-park`). `key(e)` has Explorer's keys, `local()` the Options entries the page carries out itself. With FileCell (a line, a large icon, a short line or a tile), FileTool (a button of its bars) and CutText (words cut where they don't fit). |
 | RowsPage | Every card's controls, the library check, a Store item's own page, Turbine Hub in Steam, a game's Proton, a game's saves, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
 | PickPage | Guided or Veteran. |
@@ -151,6 +152,6 @@ window. `--theme=`, `--accent=`, `--vision=` and `--scale=` pick the look; `--fi
 screen's finger size; `--motion=full` or `reduced` leaves
 animations on (pictures are otherwise taken with them off); `--pointer=<x>,<y>` shows the controller's pointer there
 (as parts of the window); `--half` takes it half as wide (a window snapped to half the screen);
-`--check=taps|hold|hover|mouse|typing|pointer|options|store-row|queue|files-mouse|files-keys|files-pad` works the page with real keys, a
+`--check=taps|hold|hover|mouse|typing|pointer|options|sections|store-row|queue|files-mouse|files-keys|files-pad` works the page with real keys, a
 mouse, a finger and fed sticks first; `--spoken` prints what a screen reader is told. A
 picture named `motion-...` must end on the very picture the same presses give with animations off.

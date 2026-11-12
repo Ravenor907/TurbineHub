@@ -236,8 +236,8 @@ Window {
         if (page === "home") return "HomePage.qml"
         if (page === "files") return "FilesPage.qml"
         if (page === "games" || page === "settings") return "SidePage.qml"
-        if (page === "store") return "SectionsPage.qml"
-        if (page === "machine" || page === "bring") return "CardsPage.qml"
+        if (page === "store" || page === "machine" || page.startsWith("module:")) return "SectionsPage.qml"
+        if (page === "bring") return "CardsPage.qml"
         if (page === "pick") return "PickPage.qml"
         if (page === "setup") return "SetupPage.qml"
         return "RowsPage.qml"
@@ -250,7 +250,8 @@ Window {
         const file = fileFor(current.page)
         if (view.file !== file) { view.file = file; view.setSource(file, { app: app }) }
         focusItem = null
-        // Back on a page that was left for another: the highlight where it was.
+        // Back on a page that was left for another: the highlight where it was. (Else where the page says it starts:
+        // `focus`, see restoreFocus.)
         lastFid = current.fid || ""
         // A text box of the page before doesn't keep the keyboard.
         keysBack()
@@ -288,6 +289,17 @@ Window {
         const parts = target.split("|")
         const page = parts[0], arg = parts.length > 1 ? parts[1] : ""
         if (page === "home") { root("home"); return }
+        // One part of the machine ("module:battery") is My machine on that section. From My machine itself it is
+        // a change of section; from anywhere else it goes on top, so Back comes back to where the link was.
+        if (page.startsWith("module:") || (page === "machine" && arg !== "")) {
+            const id = page === "machine" ? arg : page.substring(7)
+            if (st.mode === "") return
+            if (current.page === "machine" || current.page.startsWith("module:")) { lastFid = ""; setArg(id); return }
+            remember()
+            stack = stack.concat([{ page: "machine", arg: id }])
+            loadPage()
+            return
+        }
         const t = tabs.findIndex(x => x.id === page)
         // No tabs before a mode is picked.
         if (t >= 0 && st.mode === "") return
@@ -497,6 +509,8 @@ Window {
         else {
             let pick = null
             if (lastFid !== "") pick = list.find(x => x.fid === lastFid) || null
+            // A page can say where the highlight starts (My machine: the section's first control, not its chips).
+            if (!pick && !dialog.open && model.focus) pick = list.find(x => x.fid === model.focus) || null
             if (!pick) pick = list.find(x => x.firstFocus === true) || list[0]
             focusItem = null
             setFocus(pick, false)
@@ -601,7 +615,7 @@ Window {
         if (focusItem && focusItem.press && focusItem.press(k)) return
         if (k === "up" || k === "down" || k === "left" || k === "right") { step(k); return }
         // LT and RT ([ and ] on a keyboard): the section before or the next where the page has sections across its
-        // top (the Store). Elsewhere LT and RT jump a screenful up or down the list the highlight is in, and [ and
+        // top (the Store, My machine). Elsewhere LT and RT jump a screenful up or down the list the highlight is in, and [ and
         // ] turn the tabs.
         if (k === "lt" || k === "rt" || k === "sprev" || k === "snext") {
             const next = k === "rt" || k === "snext"
@@ -836,7 +850,7 @@ Window {
 
     // The keyboard is as good as the controller, with Turbine Mod Manager's keys: arrows or W A S D move, Enter or
     // Space is A, Esc or Backspace is B, R is Options (X, the Menu key and Shift+F10 too), F is Find (Ctrl+F, / and
-    // Y too), Q and E switch tabs (Page Up and Page Down, [ and ] too), Tab opens the menu (V and F10 too; in a
+    // Y too), Q and E switch tabs (Page Up and Page Down too), [ and ] are LT and RT (the section before and the next on My machine, a screenful elsewhere), Tab opens the menu (V and F10 too; in a
     // dialog Tab and Shift+Tab go from one thing to the next), Ctrl+Enter is Start (P too), Space held is Start
     // held, F1 is Help, F5 reads the page again, Home and End jump to the first and the last thing of the list,
     // Ctrl with = or - changes the interface size. A letter or digit with no meaning of its own starts Find with

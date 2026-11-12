@@ -121,10 +121,11 @@ fn the_sections_are_chips_and_update_all_is_the_main_button() {
     assert!(j.get("primary").is_none());
     assert_eq!(j.get("chips").unwrap().as_array()[6].str_at("chip"), Some(""));
     assert_eq!(act(&mut u, "update-all", "").str_at("toast"), Some("Everything is up to date."));
-    // Help names the sections' keys on the Store, and not on a page without sections.
+    // Help names the sections' keys on the Store and on My machine, and not on a page without sections.
     let titles = |j: &Json| -> Vec<String> { j.get("sections").unwrap().as_array().iter().flat_map(|s| s.get("rows").unwrap().as_array().to_vec()).filter_map(|r| r.str_at("title").map(String::from)).collect() };
     assert!(titles(&parse(&u.page("help", "store@apps")).unwrap()).contains(&"Sections".to_string()));
-    assert!(!titles(&parse(&u.page("help", "machine@")).unwrap()).contains(&"Sections".to_string()));
+    assert!(titles(&parse(&u.page("help", "machine@")).unwrap()).contains(&"Sections".to_string()));
+    assert!(!titles(&parse(&u.page("help", "settings@")).unwrap()).contains(&"Sections".to_string()));
     done("chips");
 }
 

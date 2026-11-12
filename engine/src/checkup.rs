@@ -42,6 +42,11 @@ pub struct Facts {
     pub lights_stuck: bool,
     /// Another app that is setting the lights at the same time as Turbine Hub (Ally Hub, HueSync), by name.
     pub lights_rival: Option<String>,
+    /// Decky Loader's files are in the home folder and the player didn't turn its plugins off, yet the loader isn't
+    /// running: a SteamOS update took its service away.
+    pub decky_stopped: bool,
+    /// Decky Loader is running now (the host says).
+    pub decky_running: bool,
     /// What Desktop Mode's display settings say each screen is set to now (empty in Game Mode, where they can't
     /// be asked).
     pub screens: Vec<ScreenNow>,
@@ -185,6 +190,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     if let Some(name) = &f.lights_rival {
         out.push(item("lights-rival", Level::Look, "light", format!("{name} is setting the lights too"), "Two apps setting the same lights overwrite each other many times a second. Pick who runs them.", ("Choose", "lighting")));
     }
+    if f.decky_stopped {
+        out.push(item("decky", Level::Look, "restore", "Decky Loader is missing after a SteamOS update".into(), "Your plugins are still here, but the loader that runs them is gone. Repair installs it again.", ("Repair", "decky-repair")));
+    }
     if !f.updates.is_empty() {
         let n = f.updates.len();
         out.push(item("updates", Level::Look, "download", if n == 1 { "1 update ready".into() } else { format!("{n} updates ready") }, f.updates.join(", "), ("Update all", "update-all")));
@@ -228,6 +236,34 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
         out.push(item("charge", Level::Tip, "battery", "Battery always charges to 100%".into(), "Stopping at 80% keeps the battery healthy when it's mostly plugged in.", ("Set a limit", "battery")));
     }
     out.sort_by_key(|i| i.level);
+    out
+}
+
+/// What the checkup looked at and found in order: one line per check that applies to this machine and isn't among
+/// `found`, as (the check's id, the words). Home lists them under "Show all checks", so a clean checkup shows what
+/// it stands on. A check that couldn't be made (nothing known yet) is in neither list.
+pub fn passed(m: &Machine, f: &Facts, found: &[Item]) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let mut ok = |id: &'static str, applies: bool, words: String| {
+        if applies && !found.iter().any(|i| i.id == id) {
+            out.push((id, words));
+        }
+    };
+    ok("drift", true, "Every setting Turbine Hub made is still in place".into());
+    ok("sleep", f.last_sleep.is_some(), "The last sleep used little battery".into());
+    let outside = m.connected_displays().find(|d| !d.internal).and_then(|d| d.edid.as_ref());
+    ok("refresh", f.current_hz.is_some() && outside.is_some(), format!("Your screen runs at {} Hz, as fast as it goes", f.current_hz.unwrap_or(0)));
+    ok("drive", m.drives.iter().any(|d| !d.removable), "Every drive is in use".into());
+    ok("unseen", true, "Every Steam library can be read".into());
+    ok("lights", !m.rgb_leds.is_empty(), "The lights are open to your look".into());
+    ok("lights-rival", !m.rgb_leds.is_empty(), "No other app is setting the lights".into());
+    ok("decky", f.decky_running, "Decky Loader is running".into());
+    ok("updates", true, "Everything from the Store is up to date".into());
+    ok("plugins", f.decky_running, "No Decky plugin waits for an update".into());
+    ok("app", true, "Turbine Hub is up to date".into());
+    ok("library", true, "Turbine Hub is in your Game Mode library".into());
+    let limit = m.battery().and_then(|b| b.charge_limit);
+    ok("charge", m.kind == Kind::Handheld && limit.is_some(), format!("The battery stops charging at {}%", limit.unwrap_or(100)));
     out
 }
 

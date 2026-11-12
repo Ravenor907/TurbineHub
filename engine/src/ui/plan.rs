@@ -375,6 +375,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
     }
     let found = super::files::act(ui, action, arg, value)
         .or_else(|| super::settings::act(ui, action, arg, value))
+        .or_else(|| super::home::act(ui, action, arg, value))
         .or_else(|| super::games::act(ui, action, arg, value))
         .or_else(|| super::launch::act(ui, action, arg, value))
         .or_else(|| super::saves::act(ui, action, arg, value))

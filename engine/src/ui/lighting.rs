@@ -54,6 +54,9 @@ pub struct Lighting {
     pub low_flash: bool,
     pub off_when_docked: bool,
     pub tv_sound_when_docked: bool,
+    /// The brightness the lights come back on with after they were switched off (Home's and Overview's Lights
+    /// switch): the last one above nothing.
+    pub lit: u32,
     /// The lights are left to HueSync, the Decky plugin: Turbine Hub doesn't touch them.
     pub huesync: bool,
     /// The lights are left to Ally Hub on the same machine: Turbine Hub doesn't touch them.
@@ -86,6 +89,7 @@ impl Default for Lighting {
             low_flash: false,
             off_when_docked: false,
             tv_sound_when_docked: false,
+            lit: 60,
             huesync: false,
             allyhub: false,
             route: String::new(),
@@ -266,6 +270,7 @@ impl Lighting {
             low_flash: flag("lowFlash", false),
             off_when_docked: flag("offWhenDocked", false),
             tv_sound_when_docked: flag("tvSoundWhenDocked", false),
+            lit: pct("lit", d.lit).max(10),
             huesync: flag("huesync", false),
             allyhub: flag("allyhub", false),
             route: j.str_at("route").filter(|r| lights::route_ok(r)).unwrap_or("").to_string(),
@@ -278,7 +283,7 @@ impl Lighting {
             "effect": s(&self.effect), "preset": s(&self.preset), "speed": n(self.speed as f64), "brightness": n(self.brightness as f64),
             "color": s(&self.color), "colors": arr(self.colors.iter().map(s)), "param": n(self.param as f64), "rainbow": b(self.rainbow),
             "ccw": b(self.ccw), "layout": s(&self.layout), "chip": b(self.chip), "perGame": b(self.per_game), "batteryLevel": b(self.battery_level),
-            "lowFlash": b(self.low_flash), "offWhenDocked": b(self.off_when_docked), "tvSoundWhenDocked": b(self.tv_sound_when_docked), "huesync": b(self.huesync),
+            "lowFlash": b(self.low_flash), "offWhenDocked": b(self.off_when_docked), "tvSoundWhenDocked": b(self.tv_sound_when_docked), "lit": n(self.lit as f64), "huesync": b(self.huesync),
             "allyhub": b(self.allyhub), "route": s(&self.route),
             "gameColors": Json::Obj(self.game_colors.iter().map(|(id, c)| (id.clone(), s(c))).collect())
         }
@@ -782,7 +787,7 @@ pub(crate) fn page(ui: &mut Ui, m: &Machine) -> Json {
     if let Some(name) = l.left_to() {
         let r = if l.huesync { &HUESYNC } else { &ALLYHUB };
         sections.push(section("", vec![handoff_row(r, true)]));
-        return obj! {"crumb": s("My machine"), "title": s("Lighting"), "intro": s(format!("{name} runs the lights. Turn this off to set them here.")), "sections": arr(sections)};
+        return obj! {"title": s("Lighting"), "intro": s(format!("{name} runs the lights. Turn this off to set them here.")), "sections": arr(sections)};
     }
 
     // With colors per game on, the look picked while a game runs is that game's own.
@@ -912,7 +917,7 @@ pub(crate) fn page(ui: &mut Ui, m: &Machine) -> Json {
         sections.insert(i, sec);
     }
     obj! {
-        "crumb": s("My machine"), "title": s("Lighting"),
+        "title": s("Lighting"),
         "intro": s(if ui.light_test.is_some() { "The light test is running: answer what you see on the lights." } else if game_name.is_some() { "A game is running: the look and color you pick are its own." } else { "Pick a look with A. The background helper plays it." }),
         "sections": arr(sections)
     }
@@ -1007,7 +1012,20 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                     l.rainbow = !l.rainbow;
                     custom(&mut l);
                 }
-                "brightness" => l.brightness = (num? as u32).min(100),
+                "brightness" => {
+                    l.brightness = (num? as u32).min(100);
+                    if l.brightness > 0 {
+                        l.lit = l.brightness;
+                    }
+                }
+                // The one switch for the lights: off keeps the look and the brightness for when they come back.
+                "power" => {
+                    if l.brightness > 0 {
+                        (l.lit, l.brightness) = (l.brightness, 0);
+                    } else {
+                        l.brightness = l.lit.clamp(10, 100);
+                    }
+                }
                 "pergame" => l.per_game = !l.per_game,
                 "level" => l.battery_level = !l.battery_level,
                 "lowflash" => l.low_flash = !l.low_flash,

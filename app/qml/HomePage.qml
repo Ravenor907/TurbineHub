@@ -2,9 +2,14 @@ import QtQuick
 import QtQuick.Layouts
 
 // Home. Guided: what needs a look in one sentence, setup until it is finished, the checkup's cards with their
-// fixes, a few readings and a tip. Veteran: the readings in a row, the quick switches, the checkup in short and
-// what Turbine Hub did lately. Both scroll as one page and fold into one column when the window is narrow or the
-// interface size is large.
+// fixes, and beside them a few readings, the quick switches and a tip. Veteran: the readings in a row, every quick
+// switch, the checkup in short and what Turbine Hub did lately. Both scroll as one page and fold into one column
+// when the window is narrow or the interface size is large.
+//
+// The quick switches are the engine's rows (RowItem): the power mode as a choice, Game Boost, the lights and the
+// charge limit as switches, and the ways to My machine's sections. Guided keeps the ones used less under "More",
+// on the same page. Under the checkup, "Show all checks" lists what was looked at and found in order, greyed with
+// a tick, and the page's main button (Start) fixes what needs nothing but a yes.
 //
 // app (required): Main.qml's window (its model is the page).
 Item {
@@ -35,7 +40,65 @@ Item {
                 spacing: 0
                 Label { app: page.app; Layout.fillWidth: true; text: tile.modelData.value; font.pixelSize: page.app.fpx(tile.compact ? 20 : 26); font.weight: Font.Bold; wrapMode: Text.NoWrap; fontSizeMode: Text.HorizontalFit; minimumPixelSize: page.app.fpx(14) }
                 Label { app: page.app; Layout.fillWidth: true; text: tile.modelData.label; color: page.app.colors.muted; font.pixelSize: page.app.fpx(14) }
+                // The reading over the last hours, where the background helper kept it (the battery's charge):
+                // under the words in a narrow tile, beside them in a wide one.
+                Sparkline {
+                    app: page.app
+                    visible: !!tile.modelData.spark && !tile.compact
+                    points: tile.modelData.spark || []
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: page.app.px(26)
+                    Layout.topMargin: page.app.px(4)
+                }
             }
+            Sparkline {
+                app: page.app
+                visible: !!tile.modelData.spark && tile.compact
+                points: tile.modelData.spark || []
+                Layout.preferredWidth: page.app.px(56)
+                Layout.preferredHeight: page.app.px(30)
+            }
+        }
+    }
+
+    // What the checkup looked at and found in order: greyed, each with a tick.
+    component Passed: ColumnLayout {
+        spacing: page.app.px(6)
+        visible: (page.model.passed || []).length > 0
+        Repeater {
+            model: page.model.passed || []
+            RowLayout {
+                id: ok
+                required property var modelData
+                Layout.fillWidth: true
+                spacing: page.app.px(10)
+                Accessible.role: Accessible.StaticText
+                Accessible.name: "Checked, fine: " + ok.modelData.title
+                Icon { app: page.app; d: page.app.icons.check; size: 18; tint: page.app.colors.muted }
+                Label { app: page.app; Layout.fillWidth: true; text: ok.modelData.title; color: page.app.colors.muted; font.pixelSize: page.app.fpx(15); Accessible.ignored: true }
+            }
+        }
+    }
+
+    // Under the checkup: how much more there is, every check on request, and Start's fix for all of it.
+    component CheckupEnd: Flow {
+        spacing: page.app.px(10)
+        Row {
+            spacing: page.app.px(10)
+            height: showAll.height
+            visible: endWords.text !== ""
+            Icon { app: page.app; d: page.app.icons.check; size: 18; tint: page.app.colors.ok; anchors.verticalCenter: parent.verticalCenter }
+            Label { id: endWords; app: page.app; text: page.model.all ? "That's everything." : (page.model.more || ""); color: page.app.colors.muted; font.pixelSize: page.app.fpx(15); anchors.verticalCenter: parent.verticalCenter }
+        }
+        ActionButton { id: showAll; app: page.app; fid: "showall"; label: page.model.all ? "Show fewer checks" : "Show all checks"; onActivated: page.app.doAct("home-all", "", "") }
+        ActionButton {
+            app: page.app
+            visible: !!page.model.primary
+            fid: "primary"
+            primary: true
+            label: page.model.primary ? page.model.primary.label : ""
+            cap: page.model.primary ? page.model.primary.k : ""
+            onActivated: page.app.doAct(page.model.primary.act, page.model.primary.arg, "")
         }
     }
 
@@ -146,14 +209,8 @@ Item {
                     model: page.guided ? (page.model.items || []) : []
                     Finding { Layout.fillWidth: true }
                 }
-                RowLayout {
-                    visible: (page.model.more || "") !== "" || page.model.all === true
-                    Layout.fillWidth: true
-                    spacing: page.app.px(10)
-                    Icon { app: page.app; d: page.app.icons.check; size: 18; tint: page.app.colors.ok }
-                    Label { app: page.app; Layout.fillWidth: true; text: page.model.all ? "That's everything." : (page.model.more || ""); color: page.app.colors.muted; font.pixelSize: page.app.fpx(15) }
-                    ActionButton { app: page.app; fid: "showall"; label: page.model.all ? "Show fewer" : "Show all"; onActivated: page.app.doAct("home-all", "", "") }
-                }
+                Passed { Layout.fillWidth: true }
+                CheckupEnd { Layout.fillWidth: true; visible: page.guided }
             }
             ColumnLayout {
                 Layout.preferredWidth: page.wide ? page.app.px(380) : -1
@@ -168,8 +225,21 @@ Item {
                     columnSpacing: page.app.px(12); rowSpacing: page.app.px(12)
                     Repeater {
                         model: page.guided ? (page.model.tiles || []) : []
-                        Tile { Layout.fillWidth: true; Layout.preferredWidth: 1 }
+                        Tile { Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredWidth: 1 }
                     }
+                }
+                // The quick switches: one press each, and the ones used less under More.
+                Heading { text: "Quick switches"; visible: (page.model.switches || []).length > 0 }
+                Repeater {
+                    model: page.guided ? (page.model.switches || []).concat(page.model.extra || []) : []
+                    RowItem { required property var modelData; app: page.app; m: modelData; Layout.fillWidth: true }
+                }
+                ActionButton {
+                    app: page.app
+                    visible: page.guided && (page.model.moreSwitches || "") !== ""
+                    fid: "more-switches"
+                    label: page.model.moreSwitches || ""
+                    onActivated: page.app.doAct("home-more", "", "")
                 }
                 Rectangle {
                     Layout.fillWidth: true
@@ -211,39 +281,19 @@ Item {
             }
             Heading { text: "Quick switches" }
             GridLayout {
+                id: quick
                 Layout.fillWidth: true
-                columns: Math.max(1, Math.min(4, Math.floor(veteranBody.width / page.app.px(250))))
+                columns: Math.max(1, Math.min(4, Math.floor(veteranBody.width / page.app.px(290))))
                 columnSpacing: page.app.px(12); rowSpacing: page.app.px(12)
                 Repeater {
                     model: page.guided ? [] : (page.model.switches || [])
-                    Focusable {
-                        id: sw
+                    RowItem {
                         required property var modelData
                         app: page.app
-                        fid: "switch:" + modelData.id
-                        aLabel: modelData.toggle ? (modelData.on ? "Turn off" : "Turn on") : "Open"
-                        sayRole: modelData.toggle ? Accessible.CheckBox : Accessible.Button
-                        sayName: [modelData.title || "", modelData.toggle ? (modelData.on ? "on" : "off") : "", modelData.value || ""].filter(x => x !== "").join(", ")
-                        Accessible.checkable: modelData.toggle === true
-                        Accessible.checked: modelData.toggle === true && modelData.on === true
-                        Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.fillHeight: true
-                        implicitHeight: Math.max(page.app.px(76), swRow.implicitHeight + page.app.px(24))
-                        onActivated: modelData.toggle ? page.app.doAct(modelData.id, "", "") : page.app.doAct("open", modelData.id, "")
-                        Rectangle { anchors.fill: parent; radius: page.app.px(10); color: page.app.colors.panel; border.width: Math.max(1, page.app.px(1)); border.color: page.app.colors.line }
-                        RowLayout {
-                            id: swRow
-                            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: page.app.px(14); rightMargin: page.app.px(12) }
-                            spacing: page.app.px(10)
-                            Icon { app: page.app; d: page.app.icons[sw.modelData.icon] || page.app.icons.info; size: 22; tint: page.app.colors.accent }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 0
-                                Label { app: page.app; Layout.fillWidth: true; text: sw.modelData.title; font.weight: Font.DemiBold }
-                                Label { app: page.app; Layout.fillWidth: true; text: sw.modelData.value; color: sw.modelData.toggle ? page.app.colors.muted : page.app.colors.accentText; font.pixelSize: page.app.fpx(15) }
-                            }
-                            Toggle { app: page.app; visible: sw.modelData.toggle === true; on: sw.modelData.on === true }
-                            Icon { app: page.app; visible: sw.modelData.toggle !== true; d: page.app.icons.chevron; size: 18 }
-                        }
+                        m: modelData
+                        // The mode's three choices take two columns where there are that many.
+                        Layout.columnSpan: modelData.wide === true && quick.columns > 1 ? 2 : 1
+                        Layout.fillWidth: true; Layout.preferredWidth: Layout.columnSpan; Layout.fillHeight: true
                     }
                 }
             }
@@ -260,6 +310,8 @@ Item {
                         Finding { compact: true; Layout.fillWidth: true }
                     }
                     Label { app: page.app; visible: text !== ""; Layout.fillWidth: true; text: page.model.fine || ""; color: page.app.colors.muted }
+                    Passed { Layout.fillWidth: true }
+                    CheckupEnd { Layout.fillWidth: true; visible: !page.guided }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.alignment: Qt.AlignTop

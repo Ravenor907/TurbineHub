@@ -29,7 +29,7 @@ pub const WHERE: &[(&str, &str)] = &[
 
 /// What each page is, in a sentence or two: (page, words). A page not listed here falls back to its kind.
 const ABOUT: &[(&str, &str)] = &[
-    ("home", "What could use a look on this machine, each with its fix, and how setup is going."),
+    ("home", "What could use a look on this machine, each with its fix, the readings, and the quick switches: the power mode, Game Boost, the lights and the charge limit, one press each. Start fixes what the checkup can put right by itself, and Show all checks lists what it looked at and found in order."),
     ("games", "Every installed game. Pick one to play it and see whether it runs here, with its switches, its Proton and its saves. Games that won't run here are at the end, with the other ways to play them."),
     ("library", "Will my games run? Each game checked against Valve's ratings, the anti-cheat lists and Turbine Hub's own fixes."),
     ("files", "A file explorer laid out like the one on Windows. Windows-like names the places as Windows does (This PC, C:, Users, Games, Program Files, Recycle Bin) and True Linux shows every real name; the switch is on the command bar and the real path is always in the status bar. A opens, B goes back a folder, Start ticks a line, and Options (X or a right-click) has Cut, Copy, Rename, Delete and the rest. At a keyboard a letter jumps to the name that starts with it, so Options is Shift+F10 and Find is Ctrl+F here; F2, Del, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+A, Ctrl+T, Ctrl+W, Ctrl+L and Alt+Up work as on Windows. Delete goes to the Recycle Bin and can be undone. SteamOS's own files are shown locked. No password is ever asked."),
@@ -38,11 +38,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("tool", "Turbine Hub's launch tool in Steam. Picked for a game in Steam, it carries that game's switches and Proton pick into the game."),
     ("proton", "Which Proton this game starts with. Proton is what runs Windows games here, and another version often fixes a game that won't start. Undo puts the last one back."),
     ("saves", "This game's save snapshots. Back up now takes one, Restore puts one back after keeping the saves as they are now, and Undo goes back to those."),
-    ("machine", "What this machine has, one card per part. Each card's page shows what it is set to and what can change."),
-    ("module:tuneup", "Memory and kernel settings that make games smoother, from other gaming systems. Each one can be turned off again."),
-    ("module:windows", "Starts Windows once, at the next start only. After that, SteamOS starts again as usual."),
-    ("module:monitors", "Your screens: refresh rate, variable refresh (VRR) and HDR. These are for Desktop Mode; in Game Mode, Steam's Settings, Display decides."),
-    ("module:power", "How much power the processor may use, and Game Boost. Lower is quieter and the battery lasts longer."),
+    ("machine", "What this machine has, a section each. The chips across the top pick one (LT and RT, or [ and ] on a keyboard, go to the one before and the next, round and round; the highlight can walk up into them too). Overview shows every part with its main switch on its card; every other section has its controls right on the page. B on a section goes back to Overview."),
     ("settings", "How Turbine Hub looks and works, updates, your setup file, help and reports. Look holds the theme, the colors for your eyes (Color vision) and how much moves (Animations)."),
     ("changes", "Everything Turbine Hub changed on this machine, with Undo, or a button to the page where it is undone."),
     ("bring", "What to bring over from Windows: other stores, your Windows drive, your Windows apps, TV and streaming."),
@@ -57,7 +53,12 @@ const ABOUT: &[(&str, &str)] = &[
 pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
     let (name, page_arg) = arg.split_once('@').unwrap_or((arg, ""));
     let name = if name.is_empty() || name == "help" || name == "wheres" { "home" } else { name };
-    let about = ABOUT.iter().find(|(p, _)| *p == name).map(|(_, w)| *w).unwrap_or(if name.starts_with("module:") { "One part of this machine: what it is set to now and what can change." } else { "One of Turbine Hub's pages." });
+    // A section of My machine has its own words (the same its "About" shows).
+    let part = name.strip_prefix("module:").or(Some(page_arg).filter(|a| name == "machine" && !a.is_empty() && *a != "overview"));
+    let about = match part {
+        Some(id) => super::machine::about(id).0,
+        None => ABOUT.iter().find(|(p, _)| *p == name).map(|(_, w)| *w).unwrap_or("One of Turbine Hub's pages."),
+    };
     // What the page itself offers, as its Options menu lists it.
     let shown = crate::json::parse(&ui.page(name, page_arg)).unwrap_or(Json::Null);
     let own: Vec<(String, String)> = shown.get("options").map(Json::as_array).unwrap_or(&[]).iter().filter(|o| o.str_at("key") != Some("f1")).map(|o| (o.str_at("title").unwrap_or("").to_string(), o.str_at("key").unwrap_or("").to_string())).filter(|(t, _)| !t.is_empty()).collect();
@@ -101,6 +102,11 @@ pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
         "setup" => Some("First steps"),
         "pick" => Some("Pick a mode"),
         _ => None,
+    };
+    // (A section of My machine goes by its own name.)
+    let tab = match part {
+        Some(id) => Some(super::machine::section_title(id, &ui.machine())),
+        None => tab,
     };
     let page_title = tab.map(String::from).or_else(|| shown.str_at("title").filter(|t| !t.is_empty()).map(String::from)).unwrap_or_else(|| "This page".into());
     let wheres = with(with(row("open", "wheres", "button", "Where's my...?", "Windows things and where they are on SteamOS, and the words Turbine Hub uses"), "icon", s("help")), "button", s("Open"));
@@ -156,6 +162,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "help:plugins" => guide("Updating Decky plugins", "Plugins update from Decky's own store, in Steam's quick menu.", &[("1", "Open Steam's quick menu and pick the plug icon."), ("2", "Open the store icon at the top, then Updates."), ("3", "Update each plugin, or all of them.")]),
         "bring" => open("bring"),
         "light-test" | "light-report" => return super::lighting::act(ui, arg, "", value),
+        // Decky Loader's own Repair: its newest release again, over what is there.
+        "decky-repair" => return super::store::act(ui, "decky", "", value),
         "lighting" => open("module:lighting"),
         "self-tile" => return super::selftile::act(ui, "self-tile", "add", value),
         "tile-art" => return super::onepress::act(ui, "tile-art", "fix", value),

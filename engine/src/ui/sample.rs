@@ -127,6 +127,80 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("pc-monitors", "--page=module:monitors --machine=desktop --mode=guided"),
     ("pc-sound", "--page=module:sound --machine=desktop --mode=guided"),
     ("pc-gpu", "--page=module:gpu --machine=desktop --mode=veteran"),
+    // My machine: every section of each made-up machine, in both modes (the ones above are the rest of them).
+    ("machine-veteran", "--page=machine --machine=handheld --mode=veteran"),
+    ("power-guided", "--page=module:power --machine=handheld --mode=guided"),
+    ("screen", "--page=module:display --machine=handheld --mode=guided"),
+    ("screen-veteran", "--page=module:display --machine=handheld --mode=veteran"),
+    ("battery-veteran", "--page=module:battery --machine=handheld --mode=veteran"),
+    ("sleep-veteran", "--page=module:sleep --machine=handheld --mode=veteran"),
+    ("tuneup-veteran", "--page=module:tuneup --machine=handheld --mode=veteran"),
+    ("dock-veteran", "--page=module:dock --machine=handheld --mode=veteran"),
+    ("windows", "--page=module:windows --machine=handheld --mode=guided"),
+    ("windows-veteran", "--page=module:windows --machine=handheld --mode=veteran"),
+    ("pc-machine-veteran", "--page=machine --machine=desktop --mode=veteran"),
+    ("pc-gpu-guided", "--page=module:gpu --machine=desktop --mode=guided"),
+    ("pc-processor", "--page=module:cpu --machine=desktop --mode=guided"),
+    ("pc-processor-veteran", "--page=module:cpu --machine=desktop --mode=veteran"),
+    ("pc-monitors-veteran", "--page=module:monitors --machine=desktop --mode=veteran"),
+    ("pc-drives-veteran", "--page=module:drives --machine=desktop --mode=veteran"),
+    ("pc-sound-veteran", "--page=module:sound --machine=desktop --mode=veteran"),
+    ("pc-sleep", "--page=module:sleep --machine=desktop --mode=guided"),
+    ("pc-sleep-veteran", "--page=module:sleep --machine=desktop --mode=veteran"),
+    ("pc-tuneup", "--page=module:tuneup --machine=desktop --mode=guided"),
+    ("pc-tuneup-veteran", "--page=module:tuneup --machine=desktop --mode=veteran"),
+    ("pc-windows", "--page=module:windows --machine=desktop --mode=guided"),
+    ("pc-windows-veteran", "--page=module:windows --machine=desktop --mode=veteran"),
+    ("tv-machine", "--page=machine --machine=tv --mode=guided"),
+    ("tv-machine-veteran", "--page=machine --machine=tv --mode=veteran"),
+    ("tv-gpu", "--page=module:gpu --machine=tv --mode=guided"),
+    ("tv-gpu-veteran", "--page=module:gpu --machine=tv --mode=veteran"),
+    ("tv-processor", "--page=module:cpu --machine=tv --mode=guided"),
+    ("tv-processor-veteran", "--page=module:cpu --machine=tv --mode=veteran"),
+    ("tv-screen", "--page=module:monitors --machine=tv --mode=guided"),
+    ("tv-screen-veteran", "--page=module:monitors --machine=tv --mode=veteran"),
+    ("tv-drives", "--page=module:drives --machine=tv --mode=guided"),
+    ("tv-drives-veteran", "--page=module:drives --machine=tv --mode=veteran"),
+    ("tv-sound", "--page=module:sound --machine=tv --mode=guided"),
+    ("tv-sound-veteran", "--page=module:sound --machine=tv --mode=veteran"),
+    ("tv-sleep", "--page=module:sleep --machine=tv --mode=guided"),
+    ("tv-sleep-veteran", "--page=module:sleep --machine=tv --mode=veteran"),
+    ("tv-tuneup", "--page=module:tuneup --machine=tv --mode=guided"),
+    ("tv-tuneup-veteran", "--page=module:tuneup --machine=tv --mode=veteran"),
+    // In a Desktop Mode window the screens take their choices; a large interface size and the light theme.
+    ("screen-window", "--page=module:display --machine=handheld --mode=guided --window"),
+    ("pc-monitors-window", "--page=module:monitors --machine=desktop --mode=veteran --window"),
+    ("power-size-150", "--page=module:power --machine=handheld --mode=guided --scale=150"),
+    ("battery-size-150", "--page=module:battery --machine=handheld --mode=guided --scale=150"),
+    ("tv-machine-size-150", "--page=machine --machine=tv --mode=guided --scale=150"),
+    ("machine-light", "--page=machine --machine=handheld --mode=veteran --theme=light"),
+    ("battery-light", "--page=module:battery --machine=handheld --mode=guided --theme=light"),
+    ("pc-monitors-light", "--page=module:monitors --machine=desktop --mode=guided --theme=light --accent=iron"),
+    ("machine-helper", "--page=machine --machine=handheld --mode=guided --helper"),
+    ("power-helper", "--page=module:power --machine=handheld --mode=veteran --helper --power-mode=quiet"),
+    // The sections by the controls: RT twice, the highlight walked up into the chips and along them, B back to
+    // Overview, a section's Options, its About, and a switch on an Overview card.
+    ("machine-rt", "--page=machine --keys=rt,rt --machine=handheld --mode=guided"),
+    ("machine-lt-keys", "--page=module:tuneup --keys=lt --machine=desktop --mode=guided --window"),
+    ("machine-chips", "--page=module:power --keys=up,right,right,a --machine=handheld --mode=guided"),
+    ("machine-b-overview", "--page=machine --keys=rt,rt,rt,b --machine=handheld --mode=guided"),
+    ("options-machine-section", "--page=module:power --keys=down,x --machine=handheld --mode=guided"),
+    ("dialog-about", "--page=module:battery --act=about:battery --machine=handheld --mode=guided"),
+    ("dialog-card-switch", "--page=machine --keys=right,right,right,a --machine=handheld --mode=guided"),
+    ("dialog-power-mode", "--page=module:power --act=power-mode: --value=0 --machine=handheld --mode=veteran"),
+    ("motion-machine-section", "--page=machine --keys=rt,down,down --machine=handheld --mode=guided --motion=full"),
+    // Home: every check, Guided's More, Decky Loader gone after a SteamOS update, Start's fix for all, a mode in
+    // effect, and the quick switches at a large interface size and in the light theme.
+    ("home-all-checks", "--page=home --act=home-all: --machine=handheld --mode=guided"),
+    ("home-veteran-all-checks", "--page=home --act=home-all: --machine=handheld --mode=veteran"),
+    ("home-more", "--page=home --act=home-more: --machine=handheld --mode=guided"),
+    ("home-decky", "--page=home --machine=handheld --mode=guided --decky-stopped"),
+    ("dialog-fix-all", "--page=home --keys=start --machine=handheld --mode=veteran --decky-stopped"),
+    ("home-mode", "--page=home --machine=handheld --mode=guided --helper --power-mode=balanced"),
+    ("dialog-home-mode", "--page=home --act=power-mode: --value=2 --machine=handheld --mode=guided"),
+    ("home-veteran-size-150", "--page=home --machine=handheld --mode=veteran --scale=150"),
+    ("pc-home-light", "--page=home --machine=desktop --mode=guided --theme=light"),
+    ("tv-home-veteran", "--page=home --machine=tv --mode=veteran"),
     ("home-size-150", "--page=home --machine=handheld --mode=guided --scale=150"),
     ("machine-size-150", "--page=machine --machine=handheld --mode=guided --scale=150"),
     ("settings-size-50", "--page=settings --machine=handheld --mode=guided --scale=50"),
@@ -192,6 +266,7 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("check-pointer", "--page=settings --check=pointer --focus=snapshots --machine=handheld --mode=guided --installed=com.github.mtkennerly.ludusavi"),
     ("check-drag", "--page=module:lighting --check=drag --machine=handheld --mode=guided"),
     ("check-options", "--page=games --arg=steam:1086940 --check=options --machine=desktop --mode=guided"),
+    ("check-sections", "--page=machine --check=sections --machine=handheld --mode=guided"),
     // Options (X, R, a right-click, R3 held): a menu for one thing, with its own press first.
     ("options-game", "--page=games --arg=steam:1086940 --keys=x --machine=handheld --mode=guided"),
     ("options-store-item", "--page=store --arg=apps --keys=x --machine=handheld --mode=guided"),
@@ -470,8 +545,27 @@ fn agent_files(ui: &Ui, preset: Preset, now: u64) {
     if preset != HANDHELD {
         return;
     }
+    // The day before the last half hour, a reading every ten minutes: charged in the evening, played, asleep from
+    // 16 to 9 hours ago (nothing was read then), charged again in the morning and on battery since.
+    for i in (4..=144u64).rev() {
+        let h = i as f64 / 6.0;
+        let (pct, charging, temp) = if h > 22.0 {
+            (60.0 + (24.0 - h) * 20.0, true, 46.0)
+        } else if h > 19.0 {
+            (100.0 - (22.0 - h) * 1.0, false, 44.0)
+        } else if h > 16.0 {
+            (97.0 - (19.0 - h) * 1.7, false, 68.0 + (i % 4) as f64)
+        } else if h > 9.0 {
+            continue;
+        } else if h > 6.5 {
+            (50.0 + (9.0 - h) * 20.0, true, 47.0)
+        } else {
+            (100.0 - (6.5 - h) * 3.1, false, if h < 3.0 { 62.0 + (i % 3) as f64 } else { 45.0 })
+        };
+        add_sample(&ui.data, &Sample { at: now - i * 600, pct: pct.round().clamp(0.0, 100.0) as u32, watts: (!charging).then_some(9.5), charging, game: String::new(), temp: Some(temp) });
+    }
     for i in (0..=30u64).rev() {
-        add_sample(&ui.data, &Sample { at: now - i * 60, pct: 78 + (i / 8) as u32, watts: Some(13.6 + (i % 3) as f64 * 0.6), charging: false, game: String::new() });
+        add_sample(&ui.data, &Sample { at: now - i * 60, pct: 78 + (i / 8) as u32, watts: Some(13.6 + (i % 3) as f64 * 0.6), charging: false, game: String::new(), temp: Some(58.0 - (i % 2) as f64) });
     }
     add_sleep(&ui.data, &Sleep { at: now - 3 * 86_400, secs: 9 * 3600, before: 71, after: 69, charging: false, wakers: Vec::new() });
     add_sleep(&ui.data, &Sleep { at: now - 2 * 86_400, secs: 6 * 3600 + 1200, before: 40, after: 100, charging: true, wakers: Vec::new() });
@@ -592,7 +686,8 @@ impl Ui {
         let folder = self.folder();
         Lighting::load(&folder).save(&folder);
         let rule = turbinehub_helper::policy::Access::Lighting.rule().to_string();
-        let mut host = HostLights { asked: true, rule: Some(rule), reapply: "enabled".into(), ..HostLights::default() };
+        // (Decky Loader is on the made-up machines and runs.)
+        let mut host = HostLights { asked: true, decky_running: true, rule: Some(rule), reapply: "enabled".into(), ..HostLights::default() };
         let setup = |ui: &Ui| {
             let mut l = ui.ledger();
             l.record(Change::Set(crate::modules::lighting_access()), Vec::new(), crate::now() - 3600, "3.9.5");
@@ -633,6 +728,22 @@ impl Ui {
             _ => {}
         }
         self.host_lights = host;
+    }
+    /// A sample run after a SteamOS update took Decky Loader's service away: its files are there, it doesn't run.
+    pub fn sample_decky_stopped(&mut self) {
+        self.host_lights.asked = true;
+        self.host_lights.decky_running = false;
+    }
+    /// A sample run with the machine in one of the power modes ("quiet", "balanced", "boost"): the kernel holds
+    /// that mode's values.
+    pub fn sample_power_mode(&mut self, mode: &str) {
+        use crate::modules::{PowerMode, power_mode};
+        let Some(mode) = PowerMode::ALL.into_iter().find(|x| x.title().eq_ignore_ascii_case(mode)) else { return };
+        for x in power_mode(&self.ctx.root, &self.machine(), mode) {
+            if let Setting::Sysfs { path, value } = x {
+                w(&self.ctx.root, path.trim_start_matches('/'), &format!("{value}\n"));
+            }
+        }
     }
     /// A sample run as if the internet were gone: the lists were fetched three days ago.
     pub fn sample_offline(&mut self) {

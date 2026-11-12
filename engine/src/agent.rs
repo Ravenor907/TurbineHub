@@ -502,7 +502,7 @@ impl Agent {
             && now.saturating_sub(self.last_sample) >= SAMPLE_SECS
         {
             self.last_sample = now;
-            history::add_sample(&self.paths.data, &Sample { at: now, pct, watts: r.battery_w, charging: r.charging, game: self.game().to_string() });
+            history::add_sample(&self.paths.data, &Sample { at: now, pct, watts: r.battery_w, charging: r.charging, game: self.game().to_string(), temp: r.cpu_c });
         }
         self.last = Some((now, r.clone()));
         self.wake_counts = wake_counts;

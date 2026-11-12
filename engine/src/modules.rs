@@ -128,3 +128,143 @@ pub fn game_boost(root: &Path, on: bool) -> Vec<(String, String)> {
     policies.sort_by_key(|p| p.trim_start_matches("policy").parse::<u32>().unwrap_or(0));
     policies.into_iter().filter(|p| root.join(format!("{}/{p}/energy_performance_preference", base.trim_start_matches('/'))).exists()).map(|p| (format!("{base}/{p}/energy_performance_preference"), if on { "performance" } else { "balance_performance" }.to_string())).collect()
 }
+
+/// The three power modes of Home: how eager the processor is and, where the machine has a power limit, how much it
+/// may draw. Each is a set of ordinary settings, sent through the helper and recorded like any other change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerMode {
+    Quiet,
+    Balanced,
+    Boost,
+}
+
+impl PowerMode {
+    pub const ALL: [PowerMode; 3] = [PowerMode::Quiet, PowerMode::Balanced, PowerMode::Boost];
+    pub fn title(self) -> &'static str {
+        match self {
+            PowerMode::Quiet => "Quiet",
+            PowerMode::Balanced => "Balanced",
+            PowerMode::Boost => "Boost",
+        }
+    }
+    /// What the mode is for, in a few words.
+    pub fn line(self) -> &'static str {
+        match self {
+            PowerMode::Quiet => "Cool and quiet, the battery lasts longest.",
+            PowerMode::Balanced => "A middle way for most games.",
+            PowerMode::Boost => "Everything the machine has, louder and warmer.",
+        }
+    }
+    /// The kernel's word for how eager the processor is in this mode, among the ones this processor offers.
+    pub fn preference(self, m: &Machine) -> Option<&'static str> {
+        let wanted: &[&'static str] = match self {
+            PowerMode::Quiet => &["power", "balance_power"],
+            PowerMode::Balanced => &["balance_performance", "default"],
+            PowerMode::Boost => &["performance"],
+        };
+        wanted.iter().copied().find(|w| m.cpu_epp.iter().any(|have| have == w))
+    }
+    /// The power limit in watts for this mode: a quarter, half and all of the way from the lowest to the highest
+    /// the machine allows. None without a power limit.
+    pub fn watts(self, m: &Machine) -> Option<u64> {
+        let p = m.power_limits.first()?;
+        let span = p.max.saturating_sub(p.min);
+        Some(match self {
+            PowerMode::Quiet => p.min + span / 4,
+            PowerMode::Balanced => p.min + span / 2,
+            PowerMode::Boost => p.max,
+        })
+    }
+}
+
+/// The files of the processor's speed policies that take a preference, in order.
+fn preference_files(root: &Path) -> Vec<String> {
+    game_boost(root, true).into_iter().map(|(path, _)| path).collect()
+}
+
+/// Does this machine have power modes? It needs a processor that takes a preference; the power limit is extra.
+pub fn has_power_modes(root: &Path, m: &Machine) -> bool {
+    !preference_files(root).is_empty() && PowerMode::ALL.iter().all(|x| x.preference(m).is_some())
+}
+
+/// The settings one power mode stands for: the preference for every processor policy, then the power limits.
+pub fn power_mode(root: &Path, m: &Machine, mode: PowerMode) -> Vec<Setting> {
+    let Some(word) = mode.preference(m) else { return Vec::new() };
+    let mut out: Vec<Setting> = preference_files(root).into_iter().map(|path| Setting::Sysfs { path, value: word.to_string() }).collect();
+    if out.is_empty() {
+        return out;
+    }
+    if let Some(w) = mode.watts(m) {
+        out.extend(tdp(m, w));
+    }
+    out
+}
+
+/// The mode the machine is in now: the one whose every setting is what the kernel holds. None when the values are
+/// somebody else's (Steam's slider, a plugin, a limit set by hand).
+pub fn power_mode_now(root: &Path, m: &Machine) -> Option<PowerMode> {
+    let live = |path: &str| std::fs::read_to_string(root.join(path.trim_start_matches('/'))).map(|t| t.trim().to_string()).unwrap_or_default();
+    PowerMode::ALL.into_iter().find(|mode| {
+        let settings = power_mode(root, m, *mode);
+        !settings.is_empty() && settings.iter().all(|x| matches!(x, Setting::Sysfs { path, value } if live(path) == *value))
+    })
+}
+
+#[cfg(test)]
+mod power_mode_tests {
+    use super::*;
+    use crate::fake::{self, Preset};
+
+    fn made(name: &str, preset: Preset) -> (std::path::PathBuf, Machine) {
+        let dir = std::env::temp_dir().join(format!("turbinehub-modes-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        fake::machine(&dir, preset);
+        let m = Machine::read(&dir, fake::EFI_WITH_WINDOWS, fake::HOME_DEV);
+        (dir, m)
+    }
+
+    #[test]
+    fn a_handheld_gets_three_modes_with_a_limit_each() {
+        let (root, m) = made("handheld", Preset::Handheld);
+        assert!(has_power_modes(&root, &m));
+        // The made-up handheld allows 7 to 35 W.
+        assert_eq!(PowerMode::ALL.map(|x| x.watts(&m)), [Some(14), Some(21), Some(35)]);
+        assert_eq!(PowerMode::ALL.map(|x| x.preference(&m)), [Some("power"), Some("balance_performance"), Some("performance")]);
+        let quiet = power_mode(&root, &m, PowerMode::Quiet);
+        // Two processor policies, then the three firmware limits, each kept inside its own range.
+        assert_eq!(quiet.len(), 5);
+        assert!(matches!(&quiet[0], Setting::Sysfs { path, value } if path.ends_with("policy0/energy_performance_preference") && value == "power"));
+        assert!(quiet[2..].iter().all(|x| matches!(x, Setting::Sysfs { value, .. } if value == "14")));
+        // Every one of them is a setting the helper takes.
+        for mode in PowerMode::ALL {
+            for x in power_mode(&root, &m, mode) {
+                assert!(x.check().is_ok(), "{x:?}");
+            }
+        }
+        // Nothing is in a mode until its values are the kernel's.
+        assert_eq!(power_mode_now(&root, &m), None);
+        for x in &quiet {
+            if let Setting::Sysfs { path, value } = x {
+                std::fs::write(root.join(path.trim_start_matches('/')), format!("{value}\n")).unwrap();
+            }
+        }
+        let m = Machine::read(&root, fake::EFI_WITH_WINDOWS, fake::HOME_DEV);
+        assert_eq!(power_mode_now(&root, &m), Some(PowerMode::Quiet));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_desktop_gets_the_preference_alone_and_a_processor_without_one_gets_nothing() {
+        let (root, m) = made("desktop", Preset::Desktop);
+        assert!(has_power_modes(&root, &m));
+        assert_eq!(PowerMode::Boost.watts(&m), None);
+        let boost = power_mode(&root, &m, PowerMode::Boost);
+        assert!(!boost.is_empty() && boost.iter().all(|x| matches!(x, Setting::Sysfs { path, value } if path.ends_with("energy_performance_preference") && value == "performance")));
+        // The made-up machines start on balance_performance, which is Balanced where there is no limit to match.
+        assert_eq!(power_mode_now(&root, &m), Some(PowerMode::Balanced));
+        let mut bare = m.clone();
+        bare.cpu_epp.clear();
+        assert!(!has_power_modes(&root, &bare) && power_mode(&root, &bare, PowerMode::Quiet).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

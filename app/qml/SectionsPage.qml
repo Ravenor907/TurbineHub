@@ -1,7 +1,10 @@
 import QtQuick
 import QtQuick.Layouts
 
-// A page whose sections are chips across its top, with the picked section's rows under them: the Store. LT and RT
+// A page whose sections are chips across its top, with the picked section's rows under them: the Store, and My
+// machine (whose first section, Overview, is a grid of cards instead of rows: `cards` in the model, each with its
+// part's state and its main switch or button on it; and where B on another section goes back to that first one
+// before it leaves the tab: `backTo`). LT and RT
 // (or [ and ] on a keyboard) go to the section before and the next from anywhere on the page, round and round;
 // a chip can also be highlighted and picked, clicked or tapped. Every row carries its own state and button, so
 // nothing has to be opened first.
@@ -12,7 +15,8 @@ import QtQuick.Layouts
 // matches come from every section). B empties the box before it leaves the page. The page's main button (Update
 // all) and its own actions sit at the end of the same line.
 //
-// app (required): Main.qml's window (its model is the page: chips, index, search, header, sections, primary).
+// app (required): Main.qml's window (its model is the page: chips, index, search, header, sections or cards,
+// primary, backTo, and `focus` for where the highlight starts).
 Item {
     id: page
     required property var app
@@ -24,13 +28,23 @@ Item {
     readonly property string searchValue: search ? (search.value || "") : ""
     // The engine's words win whenever they differ from the box (a page opened again, a letter it didn't keep).
     onSearchValueChanged: if (input.text !== searchValue) input.text = searchValue
+    // The section B goes back to first (My machine: Overview), while the page is the tab itself. Opened on top of
+    // another page (a link from Home), B goes back to that page.
+    readonly property var backTo: (model.backTo || "") !== "" && app.stack.length === 0 ? chips.find(c => c.id === model.backTo) || null : null
     // B empties the search box before it leaves the page.
-    readonly property string bLabel: search && searchValue !== "" ? "Clear search" : ""
+    readonly property string bLabel: search && searchValue !== "" ? "Clear search" : backTo ? backTo.title : ""
+    readonly property var cards: model.cards || []
+    readonly property real gap: app.px(16)
     // The search box moves under the section's line where the two don't fit side by side.
     readonly property bool stacked: width < app.px(900)
 
     function press(k) {
         if (k === "b" && search && searchValue !== "") { input.text = ""; app.doAct("search", search.arg, ""); return true }
+        if (k === "b" && backTo) {
+            app.lastFid = app.focusItem && app.focusItem.sectionChip === true ? "chip:" + backTo.id : ""
+            app.setArg(backTo.id)
+            return true
+        }
         return app.pageKey(model, k)
     }
     // LT and RT, [ and ]: the section before or the next. False where there are none (a search is on).
@@ -58,7 +72,39 @@ Item {
         id: rows
         app: page.app
         anchors { top: head.bottom; bottom: parent.bottom; left: parent.left; right: parent.right; leftMargin: page.app.px(32); rightMargin: page.app.px(36); topMargin: page.app.px(12); bottomMargin: page.app.px(10) }
-        sections: page.model.sections || []
+        visible: page.cards.length === 0
+        sections: page.cards.length === 0 ? (page.model.sections || []) : []
+    }
+    // A section of cards (My machine's Overview), in as many columns as fit at a readable width.
+    Flickable {
+        id: flick
+        visible: page.cards.length > 0
+        anchors.fill: rows
+        clip: true
+        contentHeight: grid.implicitHeight + page.app.px(12)
+        boundsBehavior: Flickable.StopAtBounds
+        Behavior on contentY { enabled: page.app.motion.moves; NumberAnimation { duration: page.app.motion.moveStandard; easing.type: page.app.motion.ease } }
+        GridLayout {
+            id: grid
+            // Room for the highlight's ring at the edges.
+            x: page.app.px(4); y: page.app.px(4)
+            width: flick.width - page.app.px(8)
+            columns: Math.max(1, Math.min(page.model.columns || 4, Math.floor((width + page.gap) / (page.app.px(250) + page.gap))))
+            columnSpacing: page.gap
+            rowSpacing: page.gap
+            Repeater {
+                model: page.cards
+                CardTile {
+                    required property var modelData
+                    app: page.app
+                    m: modelData
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: 1
+                }
+            }
+        }
+        ScrollFade { app: page.app; view: flick }
     }
     ColumnLayout {
         id: head

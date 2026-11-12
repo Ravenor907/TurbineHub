@@ -58,6 +58,10 @@ import TurbineHub
 //           last, and R closes it again; a right-click opens them for the row under the mouse and for the page
 //           beside every row; F and a typed letter start Find; Tab opens the menu and moves through it; F1 is
 //           Help; RT jumps further than Down; Space is A and Space held plays; Ctrl+Enter is Start
+//   sections  My machine's sections: RT and the ] key go to the next one with the highlight on its first control,
+//           [ goes back; a click on a chip opens its section and leaves the highlight on the chip; Left and
+//           Enter walk the chips; Down leaves them and Up comes back to them; Esc goes back to Overview and not
+//           out of the tab; a finger on a card's switch turns it; LT on the first section goes round to the last
 //   store-row  A (Enter) on a Store row presses its button: Install asks first, then runs with no cover while
 //           the bar and the row say Working; the same thing can't be asked for twice; the highlight moves and
 //           the tabs turn meanwhile; a second install waits its turn; the end says "installed (12 s)" and a
@@ -578,6 +582,79 @@ Item {
                     app.padPress("b")
                 }],
                 [ready, () => { if (dialog.open) fail("pointer: B didn't close Options") }],
+            ]
+        }
+        if (name === "sections") {
+            const at = () => app.model.section
+            const chipsNow = () => every(app.parts.view.item).filter(x => x.sectionChip === true)
+            const on = () => app.focusItem ? app.focusItem.fid : "nothing"
+            return [
+                [ready, () => {
+                    if (at() !== "overview") fail("sections: the page doesn't start on Overview (" + at() + ")")
+                    if (on() !== app.model.focus) fail("sections: the highlight doesn't start on the first card (" + on() + ")")
+                    app.padPress("rt")
+                }],
+                [ready, () => {
+                    v.second = at()
+                    if (v.second === "overview") fail("sections: RT didn't go to the next section")
+                    if (on() !== app.model.focus) fail("sections: after RT the highlight isn't on the section's first control (" + on() + ", not " + app.model.focus + ")")
+                    key(Qt.Key_BracketRight)
+                }],
+                [ready, () => {
+                    if (at() === v.second || at() === "overview") fail("sections: ] didn't go to the next section")
+                    key(Qt.Key_BracketLeft)
+                }],
+                [ready, () => {
+                    if (at() !== v.second) fail("sections: [ didn't go back a section (" + at() + ")")
+                    const c = chipsNow()
+                    if (c.length < 3) { fail("sections: no chips to try"); return }
+                    v.lastId = c[c.length - 1].modelData.id
+                    v.beforeId = c[c.length - 2].modelData.id
+                    click(middle(c[c.length - 1]))
+                }],
+                [ready, () => {
+                    if (at() !== v.lastId) fail("sections: a click on a chip didn't open its section (" + at() + ", not " + v.lastId + ")")
+                    if (on() !== "chip:" + v.lastId) fail("sections: after the click the highlight isn't on the chip (" + on() + ")")
+                    key(Qt.Key_Left)
+                }],
+                [ready, () => {
+                    if (on() !== "chip:" + v.beforeId) fail("sections: Left didn't walk to the chip before (" + on() + ")")
+                    if (at() !== v.lastId) fail("sections: walking the chips changed the section before A")
+                    key(Qt.Key_Return)
+                }],
+                [ready, () => {
+                    if (at() !== v.beforeId) fail("sections: Enter on a chip didn't open its section (" + at() + ")")
+                    if (on() !== "chip:" + v.beforeId) fail("sections: after Enter the highlight left the chip (" + on() + ")")
+                    key(Qt.Key_Down)
+                }],
+                [ready, () => {
+                    if (!app.focusItem || app.focusItem.sectionChip === true) fail("sections: Down didn't leave the chips")
+                    key(Qt.Key_Up)
+                }],
+                [ready, () => {
+                    if (!app.focusItem || app.focusItem.sectionChip !== true) fail("sections: Up from the first control didn't come back to the chips (" + on() + ")")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => {
+                    if (at() !== "overview" || app.current.page !== "machine") fail("sections: Esc on a section didn't go back to Overview (" + app.current.page + ", " + at() + ")")
+                    if (dialog.open) fail("sections: Esc on a section asked to close")
+                    const card = every(app.parts.view.item).find(x => x.toggle === true && x.m.act === "light")
+                    if (!card) { fail("sections: no card with the lights' switch"); return }
+                    v.lit = card.m.on === true
+                    tap(middle(card))
+                }],
+                [ready, () => {
+                    if (dialog.open) fail("sections: the lights' switch opened a dialog")
+                    const card = every(app.parts.view.item).find(x => x.toggle === true && x.m.act === "light")
+                    if (!card || (card.m.on === true) === v.lit) fail("sections: a tap on a card's switch didn't turn it")
+                    else tap(middle(card))
+                }],
+                [ready, () => {
+                    const card = every(app.parts.view.item).find(x => x.toggle === true && x.m.act === "light")
+                    if (!card || (card.m.on === true) !== v.lit) fail("sections: a second tap didn't turn the switch back")
+                    app.padPress("lt")
+                }],
+                [ready, () => { if (at() !== v.lastId) fail("sections: LT on the first section didn't go round to the last (" + at() + ")") }],
             ]
         }
         // The Store with real keys: a row's own button, the line of work, browsing while it runs.

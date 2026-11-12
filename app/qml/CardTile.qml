@@ -2,21 +2,26 @@ import QtQuick
 import QtQuick.Layouts
 
 // A card in a grid: an icon in its own square, a title, the state in a few words, one line of what it is for, and
-// at the bottom where it stands ("Done", "Not done yet") beside its button. The whole card takes the highlight
-// and the press.
+// at the bottom where it stands ("Done", "Not done yet") beside its button, or the name of its switch beside the
+// switch (My machine's Overview: Game Boost, Lights, Stop at 80%). The whole card takes the highlight and the
+// press: A presses the button or turns the switch.
 //
-// app (required): Main.qml's window. m (required): the card {id, icon, title, value, line, badge, status, done,
-// button, act, arg}.
+// app (required): Main.qml's window. m (required): the card {id, icon, title, value, line, badge, tone, status,
+// done, button, toggle, on, act, arg}.
 Focusable {
     id: card
     required property var m
     fid: "card:" + m.id
     offers: m.offers || []
     optionsTitle: m.title || ""
-    optionLabel: m.act === "open" && aLabel === "Open" ? "Open its page" : ""
-    aLabel: m.act === "none" ? "" : (m.button || "Open")
-    sayName: [m.title || "", m.value || "", m.badge || "", m.status || "", m.button || ""].filter(x => x !== "").join(", ")
+    readonly property bool toggle: m.toggle === true
+    optionLabel: toggle ? (m.status || m.title || "") + ": turn " + (m.on ? "off" : "on") : m.act === "open" && aLabel === "Open" ? (String(m.arg || "").startsWith("module:") ? "Go to " + (m.title || "it") : "Open its page") : ""
+    aLabel: m.act === "none" ? "" : toggle ? (m.on ? "Turn off" : "Turn on") : (m.button || "Open")
+    sayRole: toggle ? Accessible.CheckBox : Accessible.Button
+    sayName: [m.title || "", m.value || "", m.badge || "", toggle ? (m.status || "") + (m.on ? " on" : " off") : (m.status || ""), m.button || ""].filter(x => x !== "").join(", ")
     sayMore: m.line || ""
+    Accessible.checkable: toggle
+    Accessible.checked: toggle && m.on === true
     implicitHeight: body.implicitHeight + app.px(36)
     onActivated: app.doAct(m.act, m.arg, "")
     Rectangle {
@@ -48,15 +53,16 @@ Focusable {
             }
         }
         Label { app: card.app; Layout.fillWidth: true; text: card.m.line; color: card.app.colors.soft; font.pixelSize: card.app.fpx(15) }
-        Chip { app: card.app; text: card.m.badge || ""; tone: "warn" }
+        Chip { app: card.app; text: card.m.badge || ""; tone: card.m.tone !== undefined ? card.m.tone : "warn" }
         RowLayout {
             visible: (card.m.status || "") !== "" || (card.m.button || "") !== ""
             Layout.fillWidth: true
             spacing: card.app.px(10)
             Chip { app: card.app; visible: card.m.done === true; text: card.m.status || ""; tone: "ok" }
-            Label { app: card.app; Layout.fillWidth: true; visible: card.m.done !== true; text: card.m.status || ""; color: card.app.colors.muted; font.pixelSize: card.app.fpx(15) }
+            Label { app: card.app; Layout.fillWidth: true; visible: card.m.done !== true; text: card.m.status || ""; color: card.toggle ? card.app.colors.text : card.app.colors.muted; font.pixelSize: card.app.fpx(card.toggle ? 16 : 15); font.weight: card.toggle ? Font.DemiBold : Font.Normal }
             Item { Layout.fillWidth: true; visible: card.m.done === true }
             ActionButton { app: card.app; visible: (card.m.button || "") !== ""; plain: true; label: card.m.button || ""; primary: card.focused; cap: card.focused ? "a" : "" }
+            Toggle { app: card.app; visible: card.toggle; on: card.m.on === true }
         }
     }
 }

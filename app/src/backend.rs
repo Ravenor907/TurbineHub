@@ -319,6 +319,13 @@ fn make_ui() -> Ui {
     if option("no-tool").is_some() {
         ui.sample_without_tool();
     }
+    // Decky Loader gone after a SteamOS update, and the machine in one of Home's power modes.
+    if option("decky-stopped").is_some() {
+        ui.sample_decky_stopped();
+    }
+    if let Some(mode) = option("power-mode") {
+        ui.sample_power_mode(&mode);
+    }
     // NonSteamLaunchers set up, with two launchers ticked.
     if option("nsl").is_some() {
         ui.sample_with_nsl();

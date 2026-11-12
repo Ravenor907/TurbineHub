@@ -41,10 +41,25 @@ or feels off; that's the list to tweak from.
    - Layouts re-flow; no text is cut off.
 
 ## 4. My machine
+- The sections are chips across the top. LT and RT go from one to the next and the highlight lands on the section's first control; Up from there reaches the chips, and A on a chip opens it. B on a section goes back to Overview, B on Overview goes Home.
+- **Overview**: every part has its state on its card. A on Processor turns Game Boost on (the first time it asks for the password in its dialog); X on a card lists what its section holds.
+- **Processor**: pick Quiet, then Boost. Each asks first, shows the exact change, and Settings, Review changes can undo it. The one in effect is filled.
 - **Monitors**: your AW2726DM, up to 240 Hz.
 - **Drives**: the empty Samsung 990 PRO is "not set up"; the steps lead to Steam's Storage settings.
 - **Sleep and wake**: your two wireless receivers can wake the PC. Block one, sleep the PC, check it stays asleep. Undo.
 - **Graphics card**: power limit with a safe reset (try a change and Undo).
+
+On a handheld also:
+- **Power**: drag the power limit with a finger and let go: the dialog shows the old and the new watts. The three modes set 14, 21 and 35 W on a 7 to 35 W machine (yours may differ).
+- **Battery**: the two charts fill in after the background helper has run for a while; a sleep shows as a gap. On Overview, "Stop at 80%" is one press, and one more for 100% before a trip.
+- **Lighting**: on Overview the Lights switch turns the lights off and back on at the brightness they had.
+
+## 4b. Home
+- The quick switches are there in Guided and in Veteran. Guided: "More switches" shows the rest on the same page.
+- Before the helper is set up, the switches that change the system say "Needs your password"; afterwards none does. Nothing else on Home mentions a password.
+- The battery tile draws the last twelve hours once there are readings.
+- **Show all checks** lists what was looked at, greyed with a tick. With more than one thing to fix, Start says "Fix all" and its dialog lists each.
+- After a SteamOS update that removed Decky Loader: the checkup says so, and Repair brings it back with your plugins.
 
 ## 5. Background helper
 1. Settings, General, **Background helper**: turn it on (no password).

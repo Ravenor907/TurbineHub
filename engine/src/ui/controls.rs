@@ -31,7 +31,7 @@ pub const SCHEME: &[Control] = &[
     Control { name: "Main button", pad: "Start", keys: "Ctrl+Enter", mouse: "Click the button", does: "Presses the page's main button (Continue, Apply, Copy). Without one it opens Settings." },
     Control { name: "Play", pad: "Hold Start", keys: "Hold Space", mouse: "Click Play", does: "Starts the highlighted game, from the Games tab." },
     Control { name: "Jump", pad: "LT / RT", keys: "Home / End", mouse: "Wheel", does: "LT and RT jump a screenful up and down; Home and End go to the first and the last; the wheel scrolls." },
-    Control { name: "Sections", pad: "LT / RT on a page with sections", keys: "[ / ]", mouse: "Click a section", does: "Where a page has sections across its top (the Store), LT and RT go to the one before and the next instead of jumping." },
+    Control { name: "Sections", pad: "LT / RT on a page with sections", keys: "[ / ]", mouse: "Click a section", does: "Where a page has sections across its top (the Store, My machine), LT and RT go to the one before and the next instead of jumping." },
     Control { name: "Pointer", pad: "Right stick", keys: "", mouse: "", does: "Moves a pointer drawn by Turbine Hub. It hides after a moment and when the D-pad is used." },
     Control { name: "Click", pad: "R3", keys: "", mouse: "Click", does: "Presses what is under the pointer. With the pointer hidden it is A." },
     Control { name: "Pointer options", pad: "Hold R3", keys: "", mouse: "Right-click", does: "Options for what is under the pointer. LT does the same while the pointer shows, and RT holds the button down to drag a slider." },
@@ -138,9 +138,12 @@ fn with_item_options(ui: &mut Ui, j: Json) -> Json {
         if inside.is_empty() { item } else { with(item, "offers", arr(inside)) }
     };
     let mut j = j;
-    if j.get("cards").is_some() {
-        let cards: Vec<Json> = list(&j, "cards").into_iter().map(|c| give(ui, c)).collect();
-        j = with(j, "cards", arr(cards));
+    // Cards, and Home's quick switches (rows outside a section).
+    for key in ["cards", "switches", "extra"] {
+        if j.get(key).is_some() {
+            let items: Vec<Json> = list(&j, key).into_iter().map(|c| give(ui, c)).collect();
+            j = with(j, key, arr(items));
+        }
     }
     if j.get("sections").is_some() {
         let sections: Vec<Json> = list(&j, "sections")

@@ -191,7 +191,7 @@ fn battery_and_sleep_pages_list_the_history() {
     let page = parse(&u.page("module:battery", "")).unwrap();
     let left = row_titled(&page, "Time left");
     assert_eq!(left.str_at("value"), Some("About 3 h 15 min"));
-    let games = page.get("sections").unwrap().as_array()[1].clone();
+    let games = page.get("sections").unwrap().as_array()[2].clone();
     assert_eq!(games.str_at("title"), Some("Battery use by game"));
     let list = games.get("rows").unwrap().as_array();
     assert_eq!(list.iter().map(|r| (r.str_at("title").unwrap(), r.str_at("value").unwrap())).collect::<Vec<_>>(), vec![("Cyberpunk 2077", "44% an hour"), ("Baldur's Gate 3", "34% an hour"), ("Hollow Knight", "18% an hour"), ("Balatro", "12% an hour")]);

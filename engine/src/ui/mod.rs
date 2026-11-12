@@ -141,6 +141,8 @@ pub struct Ui {
     pub(crate) picked: BTreeMap<String, BTreeSet<String>>,
     pub(crate) pending: Option<Plan>,
     pub(crate) home_all: bool,
+    /// Guided's Home shows the switches it otherwise folds under "More".
+    pub(crate) home_more: bool,
     pub(crate) filter: BTreeMap<String, String>,
     /// The file explorer: its tabs, its view and what it is doing.
     pub(crate) files: files::Explorer,
@@ -152,7 +154,7 @@ impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { queue: queue::Queue::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new(), files: files::Explorer::default() }
+        Ui { queue: queue::Queue::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, home_more: false, filter: BTreeMap::new(), files: files::Explorer::default() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -229,7 +231,11 @@ impl Ui {
         let l = lighting::Lighting::load(&self.folder());
         // Another app setting the lights only matters once Turbine Hub drives them too.
         let rival = if lighting::Lighting::saved(&self.folder()) && l.left_to().is_none() { lighting::rivals(&self.host_lights, &self.ctx.home).first().map(|r| r.name.to_string()) } else { None };
-        Facts { app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, tiles_without_art: crate::tile_art::to_fix(&self.ctx.home).len(), ..self.facts.clone() }
+        // Decky Loader's files are there and the player didn't turn it off here, yet the host says it isn't running.
+        let decky_there = store::decky_installed(self);
+        let decky_off = self.ledger().settings().iter().any(|x| matches!(x, crate::helper::Setting::Service { unit, enabled: false } if unit == "plugin_loader.service"));
+        let decky_stopped = self.host_lights.asked && decky_there && !decky_off && !self.host_lights.decky_running;
+        Facts { decky_stopped, decky_running: decky_there && self.host_lights.decky_running, app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, tiles_without_art: crate::tile_art::to_fix(&self.ctx.home).len(), ..self.facts.clone() }
     }
 
     /// Is the helper on this machine older than the one this Turbine Hub came with? Its file differs then. The
@@ -281,7 +287,7 @@ impl Ui {
     pub(crate) fn raw(&mut self, name: &str, arg: &str) -> Json {
         match name {
             "home" => home::page(self),
-            "machine" => machine::cards_page(self),
+            "machine" => machine::page(self, arg),
             "games" => games::page(self, arg),
             "files" => files::page(self, arg),
             "library" => games::library(self),
@@ -301,7 +307,8 @@ impl Ui {
             "setup" => setup::page(self, arg),
             "quick" => setup::quick(self),
             _ => match name.strip_prefix("module:") {
-                Some(id) => machine::module(self, id),
+                // One part of the machine: My machine, opened on that section.
+                Some(id) => machine::page(self, if arg.is_empty() { id } else { arg }),
                 None => obj! {"title": s("Not found"), "sections": arr([])},
             },
         }
@@ -456,3 +463,5 @@ mod tests_files;
 mod tests_onepress;
 #[cfg(test)]
 mod tests_store;
+#[cfg(test)]
+mod tests_upfront;

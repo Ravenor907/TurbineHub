@@ -25,7 +25,7 @@ fn strings(j: &Json, out: &mut Vec<String>) {
     match j {
         Json::Str(t) => out.push(t.clone()),
         Json::Arr(a) => a.iter().for_each(|x| strings(x, out)),
-        Json::Obj(o) => o.iter().filter(|(k, _)| !["id", "act", "arg", "icon", "kind"].contains(&k.as_str())).for_each(|(_, v)| strings(v, out)),
+        Json::Obj(o) => o.iter().filter(|(k, _)| !["id", "act", "arg", "icon", "kind", "focus", "section"].contains(&k.as_str())).for_each(|(_, v)| strings(v, out)),
         _ => {}
     }
 }
@@ -141,9 +141,11 @@ fn home_shows_problems_first_and_setup_until_done() {
     let mut v = ui("home", HANDHELD, Mode::Veteran);
     let j = parse(&v.page("home", "")).unwrap();
     assert_eq!(j.str_at("view"), Some("veteran"));
+    // Veteran shows every quick switch at once: the mode, Game Boost, the lights, the charge limit, then the way
+    // to each other section.
     let sw = j.get("switches").unwrap().as_array();
-    assert_eq!(sw.len(), 8);
-    assert_eq!(sw[0].str_at("id"), Some("boost"));
+    assert_eq!(sw.iter().take(4).map(|r| r.str_at("id").unwrap()).collect::<Vec<_>>(), vec!["power-mode", "boost", "light:power", "charge-quick"]);
+    assert!(sw.iter().any(|r| r.str_at("id") == Some("open:module:tuneup")));
     assert!(!j.get("activity").unwrap().as_array().is_empty());
     // A desktop window gets the mouse tip, and a desktop has no battery tile.
     let mut d = ui("home", Preset::Desktop, Mode::Guided);
@@ -904,13 +906,15 @@ fn setup_has_four_steps_and_none_of_them_is_a_password() {
         assert!(parse(&u.act("checkup", "password", "")).unwrap().entries().is_empty());
         assert!(parse(&u.act("setup-next", "password", "")).unwrap().get("root").is_none());
         assert!(u.settings().setup_done.is_empty());
-        // Home's card counts four, and nothing on Home or in the checkup is about a password.
+        // Home's card counts four, and nothing on Home or in the checkup asks for a password or reminds of one:
+        // the only word about it is the mark on a switch whose press will ask ("Needs your password").
         let home = parse(&u.page("home", "")).unwrap();
         assert_eq!(home.get("setup").unwrap().get("total").and_then(Json::as_f64), Some(4.0));
         u.act("home-all", "", "");
         let mut all = Vec::new();
         strings(&parse(&u.page("home", "")).unwrap(), &mut all);
-        assert!(all.iter().all(|t| !t.to_lowercase().contains("password")), "{all:?}");
+        assert!(all.iter().all(|t| !t.to_lowercase().contains("password") || t == "Needs your password"), "{all:?}");
+        assert!(home.get("items").unwrap().as_array().iter().all(|i| !i.to_text().to_lowercase().contains("password")));
         assert!(crate::checkup::items(&u.machine(), &u.facts_now()).iter().all(|i| i.id != "password" && !i.title.to_lowercase().contains("password")));
         done("nopw-steps");
     }

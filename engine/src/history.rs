@@ -55,16 +55,18 @@ pub struct Sample {
     pub charging: bool,
     /// The game running then ("steam:1145360"), or empty.
     pub game: String,
+    /// The processor's temperature then, in degrees Celsius, where it could be read.
+    pub temp: Option<f64>,
 }
 
 pub fn add_sample(data: &Path, x: &Sample) {
-    let line = obj! {"t": n(x.at as f64), "pct": n(x.pct as f64), "w": x.watts.map(|w| n((w * 10.0).round() / 10.0)).unwrap_or(Json::Null), "charging": b(x.charging), "game": s(&x.game)};
+    let line = obj! {"t": n(x.at as f64), "pct": n(x.pct as f64), "w": x.watts.map(|w| n((w * 10.0).round() / 10.0)).unwrap_or(Json::Null), "charging": b(x.charging), "game": s(&x.game), "c": x.temp.map(|c| n(c.round())).unwrap_or(Json::Null)};
     append(&file(data, "battery.jsonl"), &line.to_text(), KEEP_SAMPLES);
 }
 
 /// The readings taken at or after `since`, oldest first.
 pub fn samples(data: &Path, since: u64) -> Vec<Sample> {
-    read(&file(data, "battery.jsonl")).iter().filter_map(|j| Some(Sample { at: num(j, "t")? as u64, pct: num(j, "pct")?.clamp(0.0, 100.0) as u32, watts: num(j, "w"), charging: j.get("charging").and_then(Json::as_bool).unwrap_or(false), game: j.str_at("game").unwrap_or("").to_string() })).filter(|x| x.at >= since).collect()
+    read(&file(data, "battery.jsonl")).iter().filter_map(|j| Some(Sample { at: num(j, "t")? as u64, pct: num(j, "pct")?.clamp(0.0, 100.0) as u32, watts: num(j, "w"), charging: j.get("charging").and_then(Json::as_bool).unwrap_or(false), game: j.str_at("game").unwrap_or("").to_string(), temp: num(j, "c") })).filter(|x| x.at >= since).collect()
 }
 
 /// Seconds of battery left, from readings that end now (oldest first). With the energy left in the battery
@@ -91,6 +93,29 @@ pub fn time_left(samples: &[Sample], now: u64, wh_now: Option<f64>) -> Option<u6
         }
     };
     Some((secs as u64).min(48 * 3600))
+}
+
+/// One line of a chart: the last `span` seconds cut into `buckets` equal parts, oldest first, each the average of
+/// what `of` reads from the readings that fall into it. None where nothing was read (the machine slept or was off),
+/// so a chart shows a gap there and never a made-up line.
+pub fn trend(samples: &[Sample], now: u64, span: u64, buckets: usize, of: impl Fn(&Sample) -> Option<f64>) -> Vec<Option<f64>> {
+    let mut sums = vec![(0.0, 0u32); buckets];
+    let from = now.saturating_sub(span);
+    for x in samples.iter().filter(|x| x.at > from && x.at <= now) {
+        if let Some(v) = of(x) {
+            let at = (((x.at - from - 1) as u128 * buckets as u128) / span.max(1) as u128) as usize;
+            let slot = &mut sums[at.min(buckets.saturating_sub(1))];
+            *slot = (slot.0 + v, slot.1 + 1);
+        }
+    }
+    sums.into_iter().map(|(sum, count)| (count > 0).then(|| sum / count as f64)).collect()
+}
+
+/// The lowest and highest value of a chart line, when it has any.
+pub fn range(line: &[Option<f64>]) -> Option<(f64, f64)> {
+    let mut seen = line.iter().flatten().copied();
+    let first = seen.next()?;
+    Some(seen.fold((first, first), |(lo, hi), v| (lo.min(v), hi.max(v))))
 }
 
 /// A length of time in a few words: "45 min", "3 h 20 min", "2 days".
@@ -254,7 +279,23 @@ mod tests {
     }
 
     fn sample(at: u64, pct: u32, watts: f64) -> Sample {
-        Sample { at, pct, watts: Some(watts), charging: false, game: String::new() }
+        Sample { at, pct, watts: Some(watts), charging: false, game: String::new(), temp: None }
+    }
+
+    #[test]
+    fn a_chart_line_averages_each_part_and_leaves_gaps_empty() {
+        // Four hours in four parts: readings in the first and the last hour only.
+        let now = 4 * 3600;
+        let run = vec![sample(600, 90, 10.0), sample(1800, 80, 10.0), Sample { temp: Some(60.0), ..sample(now - 60, 50, 10.0) }, Sample { temp: Some(70.0), ..sample(now, 40, 10.0) }];
+        let pct = trend(&run, now, 4 * 3600, 4, |x| Some(x.pct as f64));
+        assert_eq!(pct, vec![Some(85.0), None, None, Some(45.0)]);
+        // Only the readings that have the value count.
+        assert_eq!(trend(&run, now, 4 * 3600, 4, |x| x.temp), vec![None, None, None, Some(65.0)]);
+        // A reading older than the span, or from the future, is left out.
+        assert_eq!(trend(&run, now, 3600, 2, |x| Some(x.pct as f64)), vec![None, Some(45.0)]);
+        assert_eq!(trend(&run, 1000, 1000, 1, |x| Some(x.pct as f64)), vec![Some(90.0)]);
+        assert_eq!(range(&pct), Some((45.0, 85.0)));
+        assert_eq!(range(&[None, None]), None);
     }
 
     #[test]
@@ -292,15 +333,15 @@ mod tests {
         fs::create_dir_all(d.join("history")).unwrap();
         fs::write(file(&d, "battery.jsonl"), text).unwrap();
         for i in 0..5 {
-            add_sample(&d, &Sample { at: (full + i) as u64, pct: 77, watts: Some(14.24), charging: false, game: "steam:1".into() });
+            add_sample(&d, &Sample { at: (full + i) as u64, pct: 77, watts: Some(14.24), charging: false, game: "steam:1".into(), temp: Some(61.4) });
         }
         let all = samples(&d, 0);
         assert!(all.len() <= KEEP_SAMPLES + 5, "{}", all.len());
-        assert_eq!(all.last().unwrap(), &Sample { at: (full + 4) as u64, pct: 77, watts: Some(14.2), charging: false, game: "steam:1".into() });
+        assert_eq!(all.last().unwrap(), &Sample { at: (full + 4) as u64, pct: 77, watts: Some(14.2), charging: false, game: "steam:1".into(), temp: Some(61.0) });
         assert_eq!(samples(&d, all.last().unwrap().at).len(), 1);
         // A damaged line is skipped, the rest still reads.
         fs::write(file(&d, "battery.jsonl"), "garbage\n{\"t\":5,\"pct\":40}\n{\"pct\":1}\n").unwrap();
-        assert_eq!(samples(&d, 0), vec![Sample { at: 5, pct: 40, watts: None, charging: false, game: String::new() }]);
+        assert_eq!(samples(&d, 0), vec![Sample { at: 5, pct: 40, watts: None, charging: false, game: String::new(), temp: None }]);
         let _ = fs::remove_dir_all(&d);
         assert!(samples(&d, 0).is_empty());
     }

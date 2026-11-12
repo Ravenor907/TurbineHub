@@ -9,8 +9,11 @@ import QtQuick.Layouts
 // moves when the row says `live`), choice (Left and Right move among the options, A picks), button (A presses it),
 // info (words only; it still takes the highlight so a long page scrolls with the D-pad), preview (a live picture of
 // the lights: `frames` of one color per part, `step` milliseconds apart, drawn as `rings` rings at `level`; it
-// takes no highlight, and it plays only with Animations at Full: at Reduced and Off it shows its first frame). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up and Down
-// move between the lines of cards.
+// takes no highlight, and it plays only with Animations at Full: at Reduced and Off it shows its first frame),
+// chart (a small line over time: `points` from oldest to newest on a scale from `min` to `max`, null where nothing
+// was read, with the scale's ends in words as `low` and `high` and the time's as `from` and `to`; its title, its
+// newest value and its line say in words what the picture shows). A choice with `cards` shows its options as cards
+// with a strip of their `palettes`; Up and Down move between the lines of cards.
 //
 // app (required): Main.qml's window. m (required): the row.
 Focusable {
@@ -27,7 +30,7 @@ Focusable {
     implicitHeight: Math.max(body.implicitHeight + app.px(26), aLabel !== "" || kind === "slider" ? app.touchFloor : 0)
     tapActivates: kind !== "choice" && kind !== "slider"
     // For a screen reader: the kind of control, then its title with its state in words, then the line under it.
-    sayRole: kind === "toggle" || kind === "check" ? Accessible.CheckBox : kind === "slider" ? Accessible.Slider : kind === "choice" ? Accessible.ComboBox : kind === "button" ? Accessible.Button : kind === "preview" ? Accessible.Graphic : Accessible.StaticText
+    sayRole: kind === "toggle" || kind === "check" ? Accessible.CheckBox : kind === "slider" ? Accessible.Slider : kind === "choice" ? Accessible.ComboBox : kind === "button" ? Accessible.Button : kind === "preview" || kind === "chart" ? Accessible.Graphic : Accessible.StaticText
     readonly property string sayState: kind === "toggle" ? (m.on ? "on" : "off") : kind === "check" ? (m.on ? "ticked" : "not ticked")
         : kind === "slider" ? val + (m.unit || "")
         : kind === "choice" ? (options.length > 0 ? String(options[Math.max(0, Math.min(options.length - 1, m.index))]) + (cur !== m.index && cur < options.length ? ", highlight on " + options[cur] : "") : "")
@@ -171,6 +174,41 @@ Focusable {
                 }
             }
             Label { app: r.app; visible: text !== ""; text: r.m.high || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }
+        }
+        // A small chart: one line over time, the area under it tinted, a gap where nothing was read. The scale's two
+        // ends are named at the left and the time's two ends underneath, so no value has to be guessed.
+        RowLayout {
+            visible: r.kind === "chart"
+            Layout.fillWidth: true
+            spacing: r.app.px(10)
+            ColumnLayout {
+                Layout.fillHeight: true
+                Layout.bottomMargin: chartEnds.height + r.app.px(4)
+                spacing: 0
+                Label { app: r.app; text: r.m.high || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted; Layout.alignment: Qt.AlignRight }
+                Item { Layout.fillHeight: true }
+                Label { app: r.app; text: r.m.low || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted; Layout.alignment: Qt.AlignRight }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: r.app.px(4)
+                Sparkline {
+                    app: r.app
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: r.app.px(88)
+                    points: r.kind === "chart" ? (r.m.points || []) : []
+                    min: r.m.min !== undefined ? r.m.min : 0
+                    max: r.m.max !== undefined ? r.m.max : 100
+                    framed: true
+                }
+                RowLayout {
+                    id: chartEnds
+                    Layout.fillWidth: true
+                    Label { app: r.app; text: r.m.from || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }
+                    Item { Layout.fillWidth: true }
+                    Label { app: r.app; text: r.m.to || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }
+                }
+            }
         }
         // The live picture of the lights: each ring split into its parts, glowing in the frame's colors.
         Item {

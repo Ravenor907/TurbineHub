@@ -1,6 +1,10 @@
-//! My machine: the cards for what this machine has, and one page of controls per card. Every control that changes
-//! the system becomes a dialog with the exact settings the helper will write.
-use super::plan::{Plan, Step, change_item, dialog, guide, helper_plan, refresh, toast, with_helper};
+//! My machine: one page with a section for each thing this machine has, picked with the chips across its top (the
+//! Store's sections page draws it). The
+//! first section, Overview, shows every part's state with its main switch on its card; every other section holds
+//! that part's controls, on the page. Every control that changes the system becomes a dialog with the exact
+//! settings the helper will write. `module:<id>` is the same page opened on that section.
+use super::plan::{Plan, Step, asks_password, change_item, dialog, guide, helper_plan, refresh, toast, with_helper};
+use super::setup::NEEDS_PASSWORD;
 use super::{Ui, arr, b, cpu_short, gpu_name, kind_word, n, obj, row, s, section, size_words, with};
 use crate::hardware::{Display, DriveRole, GpuVendor, Kind, Machine};
 use crate::helper::{self, Setting};
@@ -46,29 +50,283 @@ pub(crate) fn machine_line(m: &Machine) -> String {
     spec(m)
 }
 
-pub(crate) fn cards_page(ui: &mut Ui) -> Json {
+/// A section's name on its chip and at the top of its page.
+pub(crate) fn section_title(id: &str, m: &Machine) -> &'static str {
+    match id {
+        "overview" => "Overview",
+        "power" => "Power",
+        "cpu" => "Processor",
+        "display" => "Screen",
+        "monitors" if m.on_tv() => "TV",
+        "monitors" => "Monitors",
+        "lighting" => "Lighting",
+        "battery" => "Battery",
+        "sleep" => "Sleep and wake",
+        "gpu" => "Graphics card",
+        "drives" => "Drives",
+        "sound" => "Sound",
+        "dock" => "Dock",
+        "tuneup" => "Tune-up",
+        "windows" => "Windows",
+        _ => "My machine",
+    }
+}
+
+/// The long explanation of a section, one press away (Options, "About ..."): what it is, then what each control
+/// does and what stays as it is.
+pub(crate) fn about(id: &str) -> (&'static str, Vec<(&'static str, &'static str)>) {
+    match id {
+        "power" | "cpu" => (
+            "How hard the processor may work. More power is faster, louder and warmer, and on a battery it empties sooner.",
+            vec![
+                ("Mode", "Quiet, Balanced and Boost set how eager the processor is and, where this machine has a power limit, the limit too. The same three are on Home."),
+                ("Power limit", "The most the processor may draw, in watts (TDP). Shown only where the machine lets it be set, and not while Steam's own slider or a plugin sets it."),
+                ("Game Boost", "The background helper sets the processor to full speed when a game starts and puts it back when the game ends. It changes no game, so it works with every game."),
+                ("Undo", "Every limit and mode is recorded first. Settings, Review changes puts the old values back."),
+            ],
+        ),
+        "display" => (
+            "The built-in screen and how fast it can redraw.",
+            vec![("Refresh range", "What the screen itself says it can do. A higher rate is smoother, a lower one saves battery."), ("In Game Mode", "Steam sets the rate for each game: its quick menu, Performance."), ("In Desktop Mode", "The choices here set the screen for the desktop.")],
+        ),
+        "monitors" => (
+            "Your screens: refresh rate, variable refresh (VRR) and HDR.",
+            vec![("Desktop Mode", "The choices here set the screens for the desktop, at once."), ("Game Mode", "Steam shows one screen and sets it itself: Steam's Settings, Display."), ("VRR", "The screen follows the game's frame rate, so motion stays smooth when it drops."), ("HDR", "Brighter highlights in games made for it, on screens that have it.")],
+        ),
+        "lighting" => (
+            "The lights on this machine: a look, its brightness and its colors. The background helper plays the look.",
+            vec![("Looks", "Ready-made effects with their colors. Pick one with A; it shows in the preview first."), ("Effect and colors", "Make your own from an effect, its speed and up to two colors."), ("A look per game", "Pick a look while a game runs and that game keeps it."), ("Test lights", "Run once: the lights turn red one way after another and you say when they do."), ("Other apps", "When HueSync or Ally Hub sets the lights too, pick who runs them. Turbine Hub never changes another app's settings.")],
+        ),
+        "battery" => (
+            "The battery: where charging stops, how long the charge lasts and what used it.",
+            vec![("Charge limit", "A battery that sits at 100% on the charger ages faster. Stopping at 80% keeps it healthy; charge to 100% before a trip."), ("The last day", "The charge and the processor's temperature over 24 hours, from the background helper's readings. A gap is a sleep."), ("Time left", "The energy left over the average draw of the last ten minutes."), ("Battery use by game", "From the sessions that ran on battery from start to end.")],
+        ),
+        "sleep" => (
+            "Which devices may wake the machine, and what each sleep used.",
+            vec![("Wake from", "Turn a device off when it wakes the machine by accident. Leave a controller's receiver on to wake it from the couch."), ("When it counts", "A change takes effect the next time the device is plugged in or the machine starts."), ("Last sleeps", "How long each sleep was, what it used and what woke the machine.")],
+        ),
+        "gpu" => (
+            "The graphics card and how much power it may draw.",
+            vec![("Power limit", "Lower is cooler and quieter and costs a little speed. The card's own range is the slider's."), ("Safe reset", "Puts the limit back to what it was before Turbine Hub changed it."), ("Nvidia", "Nvidia support on SteamOS is experimental, so its controls are few.")],
+        ),
+        "drives" => (
+            "Every drive in this machine and what it is used for.",
+            vec![("Game library", "Steam installs games there."), ("Ready to set up", "An empty drive. Steam formats it and adds it as a library; Turbine Hub shows the steps and never formats anything itself."), ("Windows drive", "Read only here. Games can't run from it, but they can be copied.")],
+        ),
+        "sound" => ("Where sound goes: the speakers, a headset or the TV.", vec![("Output", "Picked at once, no restart. Steam's quick menu has the same choice.")]),
+        "dock" => (
+            "What changes when a TV or monitor is connected to the handheld.",
+            vec![("Lights off while docked", "No lights across the room while you play on the TV."), ("Sound to the TV", "Sound switches to the TV when it is connected, and back when it is gone."), ("How", "The background helper sees the screen come and go and does the switching.")],
+        ),
+        "tuneup" => (
+            "Memory and kernel settings that make games smoother, the ones gaming systems like Bazzite and CachyOS ship with.",
+            vec![("Each switch", "One setting, or a few that belong together. Its dialog shows the exact values before anything changes."), ("Turn on all", "Everything that is off, in one go. Start does it."), ("SteamOS does it", "Marked on a setting that SteamOS has made its own default."), ("Undo", "Turning a switch off puts back what was there before. The settings stay through SteamOS updates.")],
+        ),
+        "windows" => (
+            "Windows is on this machine too. This starts it once.",
+            vec![("Restart to Windows", "The next start only. The start after that is SteamOS again, and the boot order stays as it is."), ("Before", "Close your game first: the machine restarts right away.")],
+        ),
+        _ => (
+            "Everything this machine has that Turbine Hub can set, a section each. Only what is really there is shown.",
+            vec![("Overview", "Every part with its state and its main switch."), ("Sections", "The chips across the top, or LT and RT, go from one to the next."), ("System changes", "Each shows its exact changes first, is recorded and can be undone in Settings, Review changes.")],
+        ),
+    }
+}
+
+/// Marks a control whose press changes a system setting, while that still asks for the password (Turbine Hub's
+/// helper isn't set up, or is an older one). A row that has something else to say keeps its own mark.
+pub(crate) fn marked(ui: &Ui, r: Json) -> Json {
+    if asks_password(ui) && r.str_at("badge").unwrap_or("").is_empty() { with(with(r, "badge", s(NEEDS_PASSWORD)), "tone", s("")) } else { r }
+}
+
+/// The first control of a section: where the highlight starts when the section opens.
+fn first_control(page: &Json) -> String {
+    let rows = || page.get("sections").map(Json::as_array).unwrap_or(&[]).iter().flat_map(|sec| sec.get("rows").map(Json::as_array).unwrap_or(&[]).iter());
+    let press = |r: &&Json| !matches!(r.str_at("kind"), Some("info" | "preview" | "chart")) && r.str_at("act") != Some("none");
+    // A thing to fix comes before the controls (a drive to set up, lights to open).
+    rows().find(|r| press(r) && r.str_at("tone") == Some("warn")).or_else(|| rows().find(press)).or_else(|| rows().next()).and_then(|r| r.str_at("id")).unwrap_or("").to_string()
+}
+
+/// My machine. `arg` is the section ("" for Overview).
+pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let m = ui.machine();
     let st = ui.settings();
     let ledger = ui.ledger();
     let cards = modules::cards(&ui.ctx.root, &m, &ledger, st.game_boost);
+    let id = cards.iter().map(|c| c.id).find(|c| *c == arg).unwrap_or("overview");
+    let mut chips = vec![obj! {"id": s("overview"), "title": s("Overview"), "icon": s("machine"), "on": b(id == "overview")}];
+    chips.extend(cards.iter().map(|c| obj! {"id": s(c.id), "title": s(section_title(c.id, &m)), "icon": s(c.icon), "on": b(c.id == id)}));
+    let mut j = if id == "overview" { overview(ui, &m, &cards) } else { module(ui, id) };
+    let mut options: Vec<Json> = j.get("options").map(Json::as_array).unwrap_or(&[]).to_vec();
+    if id == "overview" && !ledger.entries.is_empty() {
+        options.push(super::controls::page_button("Undo all", "undo-all", ""));
+    }
+    options.push(super::controls::option(&if id == "overview" { "About My machine".to_string() } else { format!("About {}", section_title(id, &m)) }, "about", id));
+    let focus = if id == "overview" { cards.first().map(|c| format!("card:{}", c.id)).unwrap_or_default() } else { first_control(&j) };
+    // The line under the chips: what the section is (Overview: which machine this is).
+    let line = j.str_at("intro").unwrap_or("").to_string();
+    let at = if id == "overview" { 0 } else { cards.iter().position(|c| c.id == id).map(|i| i + 1).unwrap_or(0) };
+    for (k, v) in [("chips", arr(chips)), ("index", n(at as f64)), ("section", s(id)), ("header", obj! {"title": s(""), "line": s(line)}), ("options", arr(options)), ("focus", s(focus))] {
+        j = with(j, k, v);
+    }
+    // B on a section goes back to Overview before it leaves the tab.
+    if id != "overview" {
+        j = with(j, "backTo", s("overview"));
+    }
+    j
+}
+
+/// The Overview: every part of the machine as a card with its state, and its main switch or button on the card
+/// where it has one (Game Boost, the lights, the charge limit, the tune-up, Restart to Windows). The other cards
+/// open their section.
+fn overview(ui: &mut Ui, m: &Machine, cards: &[modules::Card]) -> Json {
+    let st = ui.settings();
     let lighting = Lighting::load(&ui.folder());
-    let undo = !ledger.entries.is_empty();
     let veteran = ui.veteran();
+    let needs = asks_password(ui);
+    let boost_waits = st.game_boost && !(helper::installed(&ui.ctx.root) && ui.agent_running());
+    let mut out = Vec::new();
+    for c in cards {
+        let title = section_title(c.id, m);
+        let mut value = c.value.clone();
+        let mut line = if veteran { c.line.to_string() } else { c.line.replace(" (TDP)", "") };
+        // (The switch's name; is it a switch, is it on; the button's words; the press; the mark.)
+        let mut own: Option<(&str, bool, bool, String, &str, String, &str)> = None;
+        match c.id {
+            "power" | "cpu" => {
+                let badge = if boost_waits { "Not active yet" } else if !st.game_boost && needs { NEEDS_PASSWORD } else { "" };
+                own = Some(("Game Boost", true, st.game_boost, String::new(), "boost", String::new(), badge));
+            }
+            "lighting" => {
+                line = "Effects, colors per game and the battery level.".into();
+                match lighting.left_to() {
+                    Some(name) => value = format!("{name} runs them"),
+                    None => {
+                        value = if lighting.brightness == 0 { "Off".to_string() } else { format!("{} \u{b7} {}%", lighting.label(), lighting.brightness) };
+                        own = Some(("Lights", true, lighting.brightness > 0, String::new(), "light", "power".into(), ""));
+                    }
+                }
+            }
+            "battery" => {
+                if let Some(limit) = m.battery().and_then(|b| b.charge_limit) {
+                    own = Some(("Stop at 80%", true, limit < 100, String::new(), "charge-quick", String::new(), if needs { NEEDS_PASSWORD } else { "" }));
+                }
+            }
+            "tuneup" => {
+                let off = tuneup::plan(&ui.ctx.root, &ui.ledger()).iter().filter(|i| i.state == State::Off).count();
+                if off > 0 {
+                    own = Some(("", false, false, format!("Turn on all {off}"), "tuneup", "all".into(), if needs { NEEDS_PASSWORD } else { "" }));
+                }
+            }
+            "windows" => own = Some(("", false, false, "Restart".into(), "windows-boot", String::new(), if needs { NEEDS_PASSWORD } else { "" })),
+            "dock" => value = dock_words(&lighting),
+            "sound" => value = ui.sound.iter().find(|(name, _)| *name == ui.sound_now).map(|(_, words)| words.clone()).unwrap_or(value),
+            _ => {}
+        }
+        let target = format!("module:{}", c.id);
+        let mut card = obj! {"id": s(c.id), "title": s(title), "icon": s(c.icon), "value": s(value), "line": s(line), "badge": s(if c.experimental { "Experimental" } else { "" }), "tone": s("warn"), "act": s("open"), "arg": s(&target), "button": s("")};
+        if let Some((status, toggle, on, button, act, arg, badge)) = own {
+            for (k, v) in [("status", s(status)), ("toggle", b(toggle)), ("on", b(on)), ("button", s(button)), ("act", s(act)), ("arg", s(arg))] {
+                card = with(card, k, v);
+            }
+            if !badge.is_empty() {
+                card = with(with(card, "badge", s(badge)), "tone", s(if badge == NEEDS_PASSWORD { "" } else { "warn" }));
+            }
+            // Its own press is the switch, so going to its section and what is there are in its Options.
+            let mut offers = vec![super::controls::option(&format!("Go to {title}"), "open", &target)];
+            offers.extend(super::controls::actions_of(&module(ui, c.id)));
+            card = with(card, "offers", arr(offers));
+        }
+        out.push(card);
+    }
     obj! {
         "title": s(m.name()),
-        "line": s(spec(&m)),
-        "note": s(format!("Only what this {} has is shown.", kind_word(&m))),
+        "intro": s(format!("{} \u{b7} {}. Only what this {} has is shown.", m.name(), spec(m), kind_word(m))),
         "columns": n(4.0),
-        "cards": arr(cards.iter().map(|c| {
-            let value = match c.id {
-                "lighting" => format!("{} \u{b7} {}%", lighting.effect, lighting.brightness),
-                "dock" => dock_words(&lighting),
-                _ => c.value.clone(),
-            };
-            obj! {"id": s(c.id), "title": s(c.title), "icon": s(c.icon), "value": s(value), "line": s(if c.id == "lighting" { "Effects, colors per game and the battery level.".to_string() } else if veteran { c.line.to_string() } else { c.line.replace(" (TDP)", "") }), "badge": s(if c.experimental { "Experimental" } else { "" }), "act": s("open"), "arg": s(format!("module:{}", c.id)), "button": s("")}
-        })),
-        "options": arr(if undo { vec![super::controls::page_button("Undo all", "undo-all", "")] } else { vec![] }),
+        "cards": arr(out),
+        "sections": arr([]),
     }
+}
+
+/// One screen's choices for Desktop Mode: refresh rate, variable refresh and HDR.
+fn screen_rows(ui: &Ui, d: &Display, first: bool) -> Vec<Json> {
+    let Some(e) = &d.edid else { return Vec::new() };
+    let name = output_name(&d.connector).to_string();
+    // What Desktop Mode has this screen set to now, when it could be asked.
+    let now = ui.facts.screens.iter().find(|x| x.name == name);
+    let mut rows = Vec::new();
+    let list = rates(d);
+    if list.len() > 1 {
+        rows.push(with(with(with(row("monitor", &format!("hz|{name}"), "choice", "Refresh rate", &format!("This screen goes up to {} Hz", e.max_hz)), "options", arr(list.iter().map(|r| s(r.to_string())))), "index", n(now.and_then(|x| x.hz).or(ui.facts.current_hz.filter(|_| first)).and_then(|h| list.iter().position(|r| *r == h)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
+    }
+    if e.range_hz.is_some() {
+        rows.push(with(with(with(row("monitor", &format!("vrr|{name}"), "choice", "Variable refresh (VRR)", "Smooth motion when fps drops"), "options", arr(VRR.iter().map(|(t, _)| s(*t)))), "index", n(now.and_then(|x| VRR.iter().position(|(_, k)| *k == x.vrr)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
+    }
+    rows.push(with(with(with(row("monitor", &format!("hdr|{name}"), "choice", "HDR", "For HDR games, on screens that have it"), "options", arr([s("Off"), s("On")])), "index", n(now.and_then(|x| x.hdr).map(|on| if on { 1.0 } else { 0.0 }).unwrap_or(-1.0))), "apply", b(true)));
+    rows
+}
+
+/// The three power modes as one choice, where this machine has them.
+pub(crate) fn mode_row(ui: &Ui, m: &Machine) -> Option<Json> {
+    if !modules::has_power_modes(&ui.ctx.root, m) {
+        return None;
+    }
+    let now = modules::power_mode_now(&ui.ctx.root, m);
+    let words: Vec<String> = modules::PowerMode::ALL
+        .iter()
+        .map(|x| match x.watts(m) {
+            Some(w) if ui.veteran() => format!("{} \u{b7} {w} W", x.title()),
+            _ => x.title().to_string(),
+        })
+        .collect();
+    let line = match now {
+        Some(x) => x.line().to_string(),
+        None => "Quiet lasts longest, Boost is fastest.".to_string(),
+    };
+    let r = with(with(row("power-mode", "", "choice", "Mode", &line), "options", arr(words.into_iter().map(s))), "index", n(now.and_then(|x| modules::PowerMode::ALL.iter().position(|y| *y == x)).map(|i| i as f64).unwrap_or(-1.0)));
+    Some(marked(ui, r))
+}
+
+/// How much of the past a chart shows, and in how many parts.
+const DAY: u64 = 24 * 3600;
+const PARTS: usize = 48;
+
+/// A chart's line as the page gets it: a number for each part, null where nothing was read.
+pub(crate) fn chart_line(values: &[Option<f64>]) -> Json {
+    arr(values.iter().map(|v| v.map(|x| n((x * 10.0).round() / 10.0)).unwrap_or(Json::Null)))
+}
+
+/// The charge and the processor's temperature over the last day as two small charts, from the background helper's
+/// readings. Nothing where there are no readings to draw.
+fn history_rows(ui: &Ui) -> Vec<Json> {
+    let now = crate::now();
+    let run = crate::history::samples(&ui.data, now.saturating_sub(DAY));
+    let mut out = Vec::new();
+    let pct = crate::history::trend(&run, now, DAY, PARTS, |x| Some(x.pct as f64));
+    if let Some((lo, hi)) = crate::history::range(&pct) {
+        // (The newest reading itself, not its half hour's average.)
+        let last = run.last().map(|x| x.pct as f64).unwrap_or(hi);
+        let r = with(row("none", "chart-charge", "chart", "Charge, last 24 hours", &format!("Between {lo:.0}% and {hi:.0}%. A gap is a sleep.")), "value", s(format!("{last:.0}%")));
+        out.push(chart(r, chart_line(&pct), 0.0, 100.0, "0%", "100%"));
+    }
+    let temp = crate::history::trend(&run, now, DAY, PARTS, |x| x.temp);
+    if let Some((lo, hi)) = crate::history::range(&temp) {
+        let last = run.iter().rev().find_map(|x| x.temp).unwrap_or(hi);
+        // The scale has room above and below what was read, in steps of ten.
+        let (floor, top) = (((lo - 5.0) / 10.0).floor() * 10.0, ((hi + 5.0) / 10.0).ceil() * 10.0);
+        let r = with(row("none", "chart-temp", "chart", "Processor temperature, last 24 hours", &format!("Between {lo:.0}\u{b0}C and {hi:.0}\u{b0}C.")), "value", s(format!("{last:.0}\u{b0}C")));
+        out.push(chart(r, chart_line(&temp), floor, top, &format!("{floor:.0}\u{b0}C"), &format!("{top:.0}\u{b0}C")));
+    }
+    out
+}
+
+/// A chart row: its line, the scale's ends as numbers and as words, and the ends of its time.
+fn chart(r: Json, points: Json, min: f64, max: f64, low: &str, high: &str) -> Json {
+    let mut r = r;
+    for (k, v) in [("points", points), ("min", n(min)), ("max", n(max)), ("low", s(low)), ("high", s(high)), ("from", s("24 hours ago")), ("to", s("Now"))] {
+        r = with(r, k, v);
+    }
+    r
 }
 
 fn inches(d: &Display) -> String {
@@ -114,7 +372,7 @@ fn tuneup_rows(ui: &Ui) -> (Vec<Json>, usize) {
         .map(|i| (i, if guided { (i.plain_title, i.plain_why) } else { (i.title, i.why) }))
         .map(|(i, (title, why))| match i.state {
             State::SteamOsDoes => with(with(row("none", "", "info", title, why), "badge", s("SteamOS does it")), "tone", s("ok")),
-            st => with(with(row("tuneup", i.id, "toggle", title, why), "on", b(st == State::On)), "badge", s(if i.restart && st == State::Off { "Next restart" } else { "" })),
+            st => marked(ui, with(with(row("tuneup", i.id, "toggle", title, why), "on", b(st == State::On)), "badge", s(if i.restart && st == State::Off { "Next restart" } else { "" }))),
         })
         .collect();
     (rows, off)
@@ -127,7 +385,8 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
     let veteran = ui.veteran();
     // Game Boost only happens with Turbine Hub's helper installed and the background helper running.
     let boost_waits = st.game_boost && !(helper::installed(&ui.ctx.root) && ui.agent_running());
-    let boost = with(with(with(row("boost", "", "toggle", "Game Boost", "Full processor speed while a game runs, quiet the rest of the time."), "on", b(st.game_boost)), "badge", s(if boost_waits { "Not active yet" } else { "" })), "tone", s("warn"));
+    let boost_asks = !st.game_boost && asks_password(ui);
+    let boost = with(with(with(row("boost", "", "toggle", "Game Boost", "Full processor speed while a game runs, quiet the rest of the time."), "on", b(st.game_boost)), "badge", s(if boost_waits { "Not active yet" } else if boost_asks { NEEDS_PASSWORD } else { "" })), "tone", s(if boost_waits { "warn" } else { "" }));
     let mut extra: Vec<(&str, Json)> = Vec::new();
     let (title, intro, sections): (String, String, Vec<Json>) = match id {
         "power" => {
@@ -137,19 +396,33 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 for (k, v) in [("min", p.min), ("max", p.max), ("value", p.current), ("step", 1)] {
                     r = with(r, k, n(v as f64));
                 }
-                rows.push(with(r, "unit", s(" W")));
+                rows.push(marked(ui, with(r, "unit", s(" W"))));
             }
             rows.push(boost);
+            rows.extend(mode_row(ui, &m));
             ("Power".into(), "How much power the processor may use.".into(), vec![section("", rows)])
         }
-        "cpu" => ("Processor".into(), String::new(), vec![section("", vec![boost])]),
+        "cpu" => {
+            let mut rows = vec![boost];
+            rows.extend(mode_row(ui, &m));
+            ("Processor".into(), "How eager the processor is.".into(), vec![section("", rows)])
+        }
         "display" => {
             let mut rows = Vec::new();
             match panel_range(&m) {
                 Some((low, high)) => rows.push(with(row("none", "", "info", "Refresh range", "Steam's quick menu, Performance, sets the refresh rate for each game."), "value", s(format!("{low} to {high} Hz")))),
                 None => rows.push(row("none", "", "info", "Refresh rate", "Steam's quick menu, Performance, sets the refresh rate for each game.")),
             }
-            ("Display".into(), String::new(), vec![section("", rows)])
+            // In a Desktop Mode window the built-in screen takes the same choices a monitor does; in Game Mode
+            // Steam sets it, and the row says where.
+            if ui.window {
+                if let Some(d) = m.connected_displays().find(|d| d.internal) {
+                    rows.extend(screen_rows(ui, d, true));
+                }
+            } else {
+                rows.push(with(row("checkup", "refresh-rate", "button", "In Game Mode, Steam sets the screen", "Steam's Settings, Display. In Desktop Mode the choices are here."), "button", s("How")));
+            }
+            ("Screen".into(), "The built-in screen.".into(), vec![section("", rows)])
         }
         "lighting" => return super::lighting::page(ui, &m),
         "battery" => {
@@ -157,7 +430,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
             if let Some(bat) = m.battery() {
                 if let Some(limit) = bat.charge_limit {
                     let idx = CHARGE.iter().position(|c| *c == limit).map(|i| i as f64).unwrap_or(-1.0);
-                    rows.push(with(with(row("charge", "", "choice", "Charge limit", "Stopping at 80% keeps the battery healthy when it's mostly plugged in."), "options", arr(CHARGE.iter().map(|c| s(format!("{c}%"))))), "index", n(idx)));
+                    rows.push(marked(ui, with(with(row("charge", "", "choice", "Charge limit", "Stopping at 80% keeps the battery healthy when it's mostly plugged in."), "options", arr(CHARGE.iter().map(|c| s(format!("{c}%"))))), "index", n(idx))));
                 }
                 if let Some(c) = bat.capacity {
                     rows.push(with(row("none", "", "info", "Charge now", ""), "value", s(format!("{c}%"))));
@@ -179,7 +452,12 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 .map(|g| with(row("none", "", "info", if g.name.is_empty() { "A game" } else { &g.name }, &format!("{} on battery, {}", crate::history::time_words(g.secs), if g.sessions == 1 { "1 session".to_string() } else { format!("{} sessions", g.sessions) })), "value", s(format!("{} an hour", crate::history::percent(g.per_hour)))))
                 .collect();
             let empty = if !by_game.is_empty() { "" } else if ui.agent_running() { "Nothing yet. It fills in as you play on battery." } else { "The background helper keeps this history. Settings, General turns it on." };
-            ("Battery".into(), String::new(), vec![section("", rows), with(section("Battery use by game", by_game), "empty", s(empty))])
+            let mut sections = vec![section("", rows), with(section("Battery use by game", by_game), "empty", s(empty))];
+            let charts = history_rows(ui);
+            if !charts.is_empty() {
+                sections.insert(1, with(section("The last day", charts), "columns", n(2.0)));
+            }
+            ("Battery".into(), "Where charging stops, how long the charge lasts and what used it.".into(), sections)
         }
         "sleep" => {
             let ledger = ui.ledger();
@@ -188,7 +466,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 .iter()
                 .map(|d| {
                     let blocked = ledger.settings().iter().any(|x| matches!(x, Setting::Wake { vendor, product, wake: false } if *vendor == d.vendor && *product == d.product));
-                    with(row("wake", &format!("{}:{}", d.vendor, d.product), "toggle", if d.name.is_empty() { "USB device" } else { &d.name }, if blocked { "Can't wake the machine" } else { "Can wake the machine" }), "on", b(d.enabled && !blocked))
+                    marked(ui, with(row("wake", &format!("{}:{}", d.vendor, d.product), "toggle", if d.name.is_empty() { "USB device" } else { &d.name }, if blocked { "Can't wake the machine" } else { "Can wake the machine" }), "on", b(d.enabled && !blocked)))
                 })
                 .collect();
             let empty = if rows.is_empty() { "No USB device can wake this machine." } else { "" };
@@ -199,7 +477,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 let empty = if !last.is_empty() { "" } else if ui.agent_running() { "Nothing yet. Each sleep shows here once the machine wakes." } else { "The background helper keeps this history. Settings, General turns it on." };
                 sections.push(with(section("Last sleeps", last), "empty", s(empty)));
             }
-            (if m.kind == Kind::Desktop { "Sleep and wake" } else { "Sleep" }.into(), "Which devices may wake the machine. Turn one off when it wakes it by accident, leave a controller's receiver on to wake from the couch.".into(), sections)
+("Sleep and wake".into(), "Which devices may wake the machine. Turn one off when it wakes it by accident, leave a controller's receiver on to wake from the couch.".into(), sections)
         }
         "tuneup" => {
             let (rows, off) = tuneup_rows(ui);
@@ -228,7 +506,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                     for (k, v) in [("min", min.div_ceil(1_000_000)), ("max", max / 1_000_000), ("value", (now + 500_000) / 1_000_000), ("step", 5)] {
                         r = with(r, k, n(v as f64));
                     }
-                    rows.push(with(r, "unit", s(" W")));
+                    rows.push(marked(ui, with(r, "unit", s(" W"))));
                     rows.push(with(with(row("gpu-reset", "", "button", "Safe reset", "Back to the card's own limit"), "button", s("Reset")), "icon", s("restore")));
                 }
             }
@@ -242,18 +520,8 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
             }
             for (i, d) in m.connected_displays().enumerate() {
                 let Some(e) = &d.edid else { continue };
-                let name = output_name(&d.connector).to_string();
-                // What Desktop Mode has this screen set to now, when it could be asked.
-                let now = ui.facts.screens.iter().find(|x| x.name == name);
                 let mut rows = vec![with(row("none", "", "info", &format!("{} \u{b7} {}x{}", inches(d), e.best_mode.0, e.best_mode.1), if d.hdmi { "Connected over HDMI" } else { "Connected over DisplayPort" }), "value", s(format!("up to {} Hz", e.max_hz)))];
-                let list = rates(d);
-                if list.len() > 1 {
-                    rows.push(with(with(with(row("monitor", &format!("hz|{name}"), "choice", "Refresh rate", &format!("This screen goes up to {} Hz", e.max_hz)), "options", arr(list.iter().map(|r| s(r.to_string())))), "index", n(now.and_then(|x| x.hz).or(ui.facts.current_hz.filter(|_| i == 0)).and_then(|h| list.iter().position(|r| *r == h)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
-                }
-                if e.range_hz.is_some() {
-                    rows.push(with(with(with(row("monitor", &format!("vrr|{name}"), "choice", "Variable refresh (VRR)", "Smooth motion when fps drops"), "options", arr(VRR.iter().map(|(t, _)| s(*t)))), "index", n(now.and_then(|x| VRR.iter().position(|(_, k)| *k == x.vrr)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
-                }
-                rows.push(with(with(with(row("monitor", &format!("hdr|{name}"), "choice", "HDR", "For HDR games, on screens that have it"), "options", arr([s("Off"), s("On")])), "index", n(now.and_then(|x| x.hdr).map(|on| if on { 1.0 } else { 0.0 }).unwrap_or(-1.0))), "apply", b(true)));
+                rows.extend(screen_rows(ui, d, i == 0));
                 out.push(section(&format!("{} {}", if m.on_tv() { "TV" } else { "Monitor" }, i + 1), rows));
             }
             if ui.window {
@@ -272,12 +540,12 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
             ("Sound".into(), String::new(), vec![section("", rows)])
         }
         "windows" => {
-            let rows = vec![with(with(row("windows-boot", "", "button", "Restart to Windows", "The next start only. After that the machine starts SteamOS again."), "button", s("Restart")), "icon", s("reboot"))];
-            ("Restart to Windows".into(), "For games that only run there.".into(), vec![section("", rows)])
+            let rows = vec![marked(ui, with(with(row("windows-boot", "", "button", "Restart to Windows", "The next start only. After that the machine starts SteamOS again."), "button", s("Restart")), "icon", s("reboot")))];
+            ("Windows".into(), "For games that only run there.".into(), vec![section("", rows)])
         }
         _ => ("Not found".into(), String::new(), Vec::new()),
     };
-    let mut j = obj! {"crumb": s("My machine"), "title": s(title), "intro": s(intro), "sections": arr(sections)};
+    let mut j = obj! {"title": s(title), "intro": s(intro), "sections": arr(sections)};
     for (k, v) in extra {
         j = with(j, k, v);
     }
@@ -367,6 +635,44 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             } else {
                 refresh()
             })
+        }
+        "about" => {
+            let (text, items) = about(arg);
+            let title = if arg == "overview" || arg.is_empty() { "My machine".to_string() } else { section_title(arg, &m).to_string() };
+            Some(guide(&title, text, &items))
+        }
+        // The charge limit's one switch on Overview and Home: 80%, or back to 100%.
+        "charge-quick" => {
+            let limit = m.battery().and_then(|b| b.charge_limit)?;
+            let to = if limit < 100 { 100 } else { 80 };
+            act(ui, "charge", "", &CHARGE.iter().position(|c| *c == to)?.to_string())
+        }
+        "power-mode" => {
+            let mode = *modules::PowerMode::ALL.get(num? as usize)?;
+            let settings = modules::power_mode(&ui.ctx.root, &m, mode);
+            if settings.is_empty() {
+                return Some(toast("This machine has no power modes."));
+            }
+            if modules::power_mode_now(&ui.ctx.root, &m) == Some(mode) {
+                return Some(toast("That's already set."));
+            }
+            let mut p = Plan::new(&format!("Switch to {}?", mode.title()), &format!("{} Turbine Hub saves the current values first, and Undo puts them back. It stays this way after restarts.", mode.line()), "Switch");
+            // One line for the processor, however many groups of cores it has, then the power limit's lines.
+            let prefs: Vec<&Setting> = settings.iter().filter(|x| matches!(x, Setting::Sysfs { path, .. } if path.ends_with("energy_performance_preference"))).collect();
+            if let Some(first) = prefs.first() {
+                let (title, exact) = change_item(ui, first);
+                let title = title.replace(" (core group 0)", "");
+                let more = match prefs.len() - 1 {
+                    0 => String::new(),
+                    n => format!(", and the same for {n} more"),
+                };
+                p.items.push((title, if ui.veteran() { format!("{exact}{more}") } else { "How eager the processor is to speed up.".into() }));
+            }
+            if let Some(w) = mode.watts(&m) {
+                p.items.extend(tdp_items(&m, w, ui.veteran()));
+            }
+            p.done = format!("{} mode on", mode.title());
+            Some(helper_plan(ui, p, &settings))
         }
         "tdp" => {
             let w = num?;

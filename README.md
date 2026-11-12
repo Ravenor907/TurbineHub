@@ -30,13 +30,13 @@ Made for people coming from Windows, with a mode for people who already know the
 |   |   |
 |---|---|
 | 🧭 **Two ways in** | **Guided** walks a newcomer through four short steps in plain words. **Veteran** ("I know more than you.") is one screen of switches with the exact values |
-| 🩺 **Home at a glance** | Battery, temperatures, power and fan, and a checkup that shows only what needs you, each with its fix |
+| 🩺 **Home at a glance** | Battery (with its charge over the last hours), temperatures, power and fan, a checkup that shows only what needs you, each with its fix, and the quick switches one press away: Quiet, Balanced or Boost, Game Boost, the lights, the charge limit |
 | 🎮 **Games** | Will my games run? for your whole library, per-game switches instead of typing launch options (FSR 4 on Radeon RX 9000, frame generation, Proton log), Try another Proton with Undo, and help when a game won't start. Games with online anti-cheat are never touched |
 | 🕰️ **Save time machine** | A snapshot of a game's saves every time it starts, restore in one press, and Undo. Saves from your Windows drive come along too |
 | 📁 **Files** | A file explorer laid out like the one on Windows, in Game Mode too: This PC, C:, Users, Games, Program Files and the Recycle Bin over the real SteamOS folders, each game's own Windows C: drive one press away, and a True Linux view of the same disk. No password, ever |
 | 🧩 **Store** | Hand-picked apps from Flathub, launchers through [NonSteamLaunchers](https://github.com/moraroy/NonSteamLaunchers-On-Steam-Deck), Decky Loader from its official release, TV and streaming tiles, emulation |
 | 🪟 **Bring it over** | Copy Steam games from your Windows drive instead of downloading them again, and find the SteamOS version of the Windows apps you use. The Windows drive is only ever read |
-| 🖥️ **My machine** | Power limit, Game Boost, screen and refresh range, battery charge limit, sleep and wake, graphics card power, drives, sound, dock and a system tune-up, shown only when your machine has them |
+| 🖥️ **My machine** | One page, a section for each part, every control right on it: power modes, power limit, Game Boost, screen and refresh range, lighting, battery charge limit with a chart of the last day, sleep and wake, graphics card power, drives, sound, dock and a system tune-up, shown only when your machine has them |
 | 🌈 **Lighting** | Animated effects and presets (RGB Spiral, Neon Vortex, Aurora and more) with a live preview, battery and per-game colors, and Test lights. Works with any RGB lights SteamOS exposes, including the ROG Ally rings |
 | ❓ **Where's my...?** | Task Manager, the C: drive, installing programs: where the things you knew from Windows are on SteamOS, plus a glossary of every word the app uses |
 | ↩️ **Undo everything** | Every change is shown before it's made and listed afterwards, each with Undo, and Undo all puts the machine back |
@@ -69,11 +69,11 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
     <td><img src="docs/screenshots/store.png" alt="Store launchers"><br><sub>Store: launchers through NonSteamLaunchers</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/machine.png" alt="My machine"><br><sub>My machine: only what this handheld has</sub></td>
+    <td><img src="docs/screenshots/machine.png" alt="My machine"><br><sub>My machine: every part with its switch, a section each</sub></td>
     <td><img src="docs/screenshots/lighting.png" alt="Lighting"><br><sub>Lighting: live preview and presets</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/home-veteran.png" alt="Home in Veteran mode"><br><sub>Veteran Home: quick switches and activity</sub></td>
+    <td><img src="docs/screenshots/home-veteran.png" alt="Home in Veteran mode"><br><sub>Veteran Home: every quick switch and activity</sub></td>
     <td><img src="docs/screenshots/dialog.png" alt="A change shown before it is made"><br><sub>Every change is shown first, then can be undone</sub></td>
   </tr>
   <tr>
@@ -86,11 +86,11 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
 
 | Tab | What you find there |
 |---|---|
-| **Home** | Readings, the checkup with a fix for each item, Finish setting up, updates. Veteran adds quick switches and recent activity |
+| **Home** | Readings (the battery with a small line of its last twelve hours), the checkup with a fix for each item, Finish setting up, updates, and the quick switches in both modes: the power mode (Quiet, Balanced, Boost), Game Boost, the lights, the charge limit, FSR 4 for every game where the graphics card runs it. Guided keeps the ones used less under More, Veteran shows them all and adds recent activity. Show all checks lists what the checkup looked at and found in order; Start fixes what needs nothing but a yes (updates, settings a SteamOS update reset, Decky Loader gone after a SteamOS update) |
 | **Games** | Every Steam and Heroic game with how well it runs here, Play, switches, Proton choice, saves and "Won't start?" help, plus a library check |
 | **Store** | Essentials, Apps, Decky plugins, Launchers, TV and streaming, Emulation, Installed, as sections across the top (LT and RT). Every row says how it stands (Not installed, Installed with its version, Update from one version to the next, Working) and has its button: A installs, opens or updates it, after showing what will happen. Options has Remove, Details and where it comes from. Installs and updates run while you keep browsing |
 | **Files** | The file explorer: tabs, back, forward and up, an address that takes Windows-style and real paths, search, New, Cut, Copy, Paste, Rename, Delete, sorting and grouping, a details pane, the Recycle Bin with Undo. Also opens from its own icon, Turbine Files |
-| **My machine** | Cards for what this machine has: Power, Display or Monitors, Lighting, Battery, Sleep and wake, Graphics card, Drives, Sound, Dock, Tune-up, Restart to Windows (only when Windows is really there) |
+| **My machine** | One page with a section for each thing this machine has, picked with the chips across the top (LT and RT, or [ and ]): Overview (every part with its state and its main switch on its card), Power, Screen or Monitors, Lighting, Battery, Sleep and wake, Graphics card, Drives, Sound, Dock, Tune-up, Windows (only when Windows is really there). Each section has its controls on the page: sliders, switches, choices, and its long explanation under Options, About |
 | **Settings** | Mode, interface size (50 to 150%), themes and accents, colors for red-weak, green-weak and blue-weak eyes (or no color), animations (Full, Reduced, Off), the background helper, the save time machine, updates, My setup (save and apply), Help, Review changes, remove completely |
 
 <details>

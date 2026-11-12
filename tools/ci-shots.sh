@@ -52,6 +52,12 @@ if ! app 60 --shots > "$list" 2> "$out/shots.list.log" || ! [ -s "$list" ]; then
   cat "$out/shots.list.log"
   exit 1
 fi
+# Which build is installed. Every picture of a run must come from the same one: a build installed over it halfway
+# (another tools/dev-build.sh, an update) gives pictures and checks of two different apps, and failures that are
+# nobody's bug. Looked at again after each size.
+build() { flatpak info --show-commit "$APP" 2> /dev/null || echo unknown; }
+first=$(build)
+swapped=0
 total=0
 missing=0
 failed=0
@@ -146,7 +152,14 @@ for size in $sizes; do
     # Three pictures that never came: stop here rather than wait a minute for every other one.
     if [ $hung -ge 3 ]; then echo "::error title=Turbine Hub hangs::three pictures timed out"; exit 1; fi
   done < "$list"
+  now=$(build)
+  if [ "$now" != "$first" ]; then
+    echo "::error title=Turbine Hub was installed again during the run::$size: the run began with build $first and now $now is installed, so its pictures come from two builds. Take them again with nothing else installing Turbine Hub."
+    swapped=1
+    break
+  fi
 done
 echo "Pictures: $total taken in $out ($sizes), $missing missing, checks: $passed ok, $failed failed, input checks: $inputs ok, motion checks: $motions ok"
+if [ $swapped -ne 0 ]; then exit 1; fi
 if [ $missing -gt 0 ] || [ $failed -gt 0 ] || [ $total -eq 0 ]; then exit 1; fi
 exit 0

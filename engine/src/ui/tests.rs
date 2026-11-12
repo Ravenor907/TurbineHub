@@ -497,13 +497,14 @@ fn store_shows_each_apps_state_and_tiles_bring_their_browser() {
     let mut u = ui("store", HANDHELD, Mode::Guided);
     let page = parse(&u.page("store", "launchers")).unwrap();
     let heroic = rows(&page).into_iter().find(|r| r.str_at("title") == Some("Heroic Games Launcher")).unwrap();
-    // A row shows the app's state and opens the app's own page.
-    assert_eq!((heroic.str_at("badge"), heroic.str_at("act"), heroic.str_at("arg")), (Some("Update ready"), Some("open"), Some("store-item|com.heroicgameslauncher.hgl")));
-    // Update all is the page's own action: in its Options menu, and a button on the page.
-    assert!(page.get("options").unwrap().as_array().iter().any(|o| o.str_at("title") == Some("Update all") && o.get("button").and_then(Json::as_bool) == Some(true)));
-    // X on the row offers what its page does, without going in first.
+    // A row shows the app's state and carries its own button: A updates it, without opening its page first.
+    assert_eq!((heroic.str_at("badge"), heroic.str_at("button"), heroic.str_at("act"), heroic.str_at("arg")), (Some("Update from 2.17.2 to 2.18.0"), Some("Update"), Some("store-update"), Some("com.heroicgameslauncher.hgl")));
+    // Update all is the page's main button (Start), and so in its Options menu.
+    assert_eq!(page.get("primary").unwrap().str_at("label"), Some("Update all"));
+    assert!(page.get("options").unwrap().as_array().iter().any(|o| o.str_at("title") == Some("Update all") && o.str_at("key") == Some("start")));
+    // X on the row offers the rest: Open, Remove, its page, where it comes from.
     let offered: Vec<&str> = heroic.get("offers").unwrap().as_array().iter().filter_map(|o| o.str_at("title")).collect();
-    assert!(offered.contains(&"Update") && offered.iter().any(|t| t.contains("Remove")), "{offered:?}");
+    assert_eq!(offered, ["Open Heroic Games Launcher", "Remove", "Details", "Where it comes from"]);
     let j = parse(&u.act("store", "com.spotify.Client", "")).unwrap();
     assert_eq!(j.get("dialog").unwrap().str_at("confirm"), Some("Install"));
     assert_eq!(u.confirm().unwrap().steps, vec![Step::Host(["flatpak-spawn", "--host", "flatpak", "install", "-y", "--noninteractive", "flathub", "com.spotify.Client"].iter().map(|x| x.to_string()).collect())]);
@@ -838,11 +839,12 @@ fn a_game_a_store_row_and_a_card_say_what_they_can_do() {
         let r = parse(&u.act(o.str_at("act").unwrap(), o.str_at("arg").unwrap(), "")).unwrap();
         assert!(!r.entries().is_empty(), "{o:?} does nothing");
     }
-    // A Store row: what its own page offers.
+    // A Store row: its own button is its press, and its Options list the rest.
     let store = parse(&u.page("store", "apps")).unwrap();
-    let row = rows(&store).into_iter().find(|r| r.str_at("arg").is_some_and(|a| a.starts_with("store-item|")) && r.str_at("badge") != Some("Installed")).unwrap();
+    let row = rows(&store).into_iter().find(|r| r.str_at("badge") == Some("Not installed")).unwrap();
+    assert_eq!((row.str_at("button"), row.str_at("act")), (Some("Install"), Some("store")));
     let offered = titles(row.get("offers").unwrap());
-    assert!(offered.iter().any(|t| t.contains("Install")), "{offered:?}");
+    assert!(offered.iter().any(|t| t == "Details"), "{offered:?}");
     // A card of My machine: the switches and buttons of its page.
     let machine = parse(&u.page("machine", "")).unwrap();
     let cards = machine.get("cards").unwrap().as_array();

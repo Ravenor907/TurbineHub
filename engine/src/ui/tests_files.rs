@@ -478,6 +478,65 @@ fn a_long_copy_runs_in_the_background_and_reports_to_the_status_bar() {
 }
 
 #[test]
+fn a_long_copy_waits_in_the_same_line_as_every_other_job() {
+    let mut u = ui("line", Mode::Guided);
+    u.files.always_background = true;
+    // An install is being worked on (the app took it to run it).
+    u.act("store", "com.spotify.Client", "");
+    let plan = u.confirm().unwrap();
+    u.enqueue(plan);
+    let (install, _) = u.queue_next().unwrap();
+    // A copy asked for meanwhile waits behind it, and nothing is copied yet.
+    go(&mut u, DOCUMENTS);
+    act(&mut u, "files-copy", "/home/deck/Downloads/ProtonGE-notes.txt", "");
+    let a = act(&mut u, "files-paste", "", "");
+    assert!(toast(&a).starts_with("It starts once the thing being worked on has finished"), "{}", toast(&a));
+    assert!(!u.files_working() && !u.ctx.home.join("Documents/ProtonGE-notes.txt").exists());
+    let st = parse(&u.status()).unwrap();
+    assert_eq!(st.str_at("work"), Some("Working: Spotify (1 more waiting)"));
+    // The status bar says it waits, and what for; Options can take it out of the line again.
+    let j = page(&mut u);
+    assert_eq!(j.get("job").unwrap().str_at("words"), Some("Waiting for its turn: Spotify is being worked on first"));
+    assert!(j.get("options").unwrap().as_array().iter().any(|o| o.str_at("title") == Some("Take the copy out of the line")));
+    // The same files can't be asked for twice: into the same folder, or the copied file itself again.
+    let again = act(&mut u, "files-paste", "", "");
+    assert!(toast(&again).contains("is waiting for its turn already"), "{}", toast(&again));
+    // Another folder is another job.
+    go(&mut u, "/home/deck/Music");
+    assert!(toast(&act(&mut u, "files-drop", "copy|/home/deck/Music", &list(&["/home/deck/Downloads/wallpaper-jade.png"]))).starts_with("It starts once the 2 things ahead"));
+    // The install ends: the copy's turn comes with the app's next look, and it runs to its end.
+    u.queue_done(install, Ok(())).unwrap();
+    assert!(u.queue_next().is_none());
+    assert!(u.files_working());
+    assert_eq!(parse(&u.status()).unwrap().str_at("work"), Some("Working: ProtonGE-notes.txt to Documents (1 more waiting)"));
+    let mut ended = 0;
+    for _ in 0..4000 {
+        match u.files_tick() {
+            Some(news) if news.contains("\"done\"") => ended += 1,
+            _ => std::thread::sleep(std::time::Duration::from_millis(2)),
+        }
+        // The next copy starts when the app looks again.
+        let _ = u.queue_next();
+        if ended == 2 {
+            break;
+        }
+    }
+    assert_eq!(ended, 2, "the copies never ended");
+    assert!(u.ctx.home.join("Documents/ProtonGE-notes.txt").exists() && u.ctx.home.join("Music/wallpaper-jade.png").exists());
+    assert_eq!(parse(&u.status()).unwrap().str_at("work"), Some(""));
+    // A copy that waits can be taken out of the line before it starts.
+    u.act("store", "com.obsproject.Studio", "");
+    let plan = u.confirm().unwrap();
+    u.enqueue(plan);
+    u.queue_next().unwrap();
+    go(&mut u, "/home/deck/Pictures");
+    act(&mut u, "files-drop", "copy|/home/deck/Pictures", &list(&["/home/deck/Downloads/ProtonGE-notes.txt"]));
+    assert_eq!(toast(&act(&mut u, "files-job-stop", "", "")), "Taken out of the line. Nothing was copied.");
+    assert_eq!(parse(&u.status()).unwrap().str_at("work"), Some("Working: OBS Studio"));
+    done("line");
+}
+
+#[test]
 fn turbine_files_is_a_library_entry_of_its_own() {
     use super::plan::Step;
     use super::selftile::{self, State};

@@ -3,6 +3,11 @@
 //! QML asks for a page and gets JSON, sends a press and gets what to show next. Anything slow (the steps of a
 //! confirmed dialog, questions to the host or the internet) runs on its own thread and comes back through `poll`,
 //! which QML calls on a timer together with the controller.
+//!
+//! A confirmed dialog runs one of two ways, and the engine says which (ui/queue.rs): behind the cover, alone and
+//! with nothing else to press (`busy`: anything with the password, the helper, Steam's files, Turbine Hub's own
+//! update), or in the line of work, one job at a time while the player keeps browsing (installs, updates,
+//! removals, copies). `status` carries the line to the top bar, and `poll` hands each job's ending to the window.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -21,6 +26,9 @@ pub mod qobject {
         /// A confirmed dialog's steps are running.
         #[qproperty(bool, busy)]
         #[qproperty(QString, busy_words, cxx_name = "busyWords")]
+        /// What the top bar shows beside the tabs, as JSON (the engine's `Ui::status`): the battery, the clock,
+        /// the work in the line, the updates that are ready.
+        #[qproperty(QString, status)]
         /// Where the fonts and pictures are.
         #[qproperty(QString, share)]
         /// A controller is there, and its name (the footer's glyphs follow it).
@@ -47,6 +55,12 @@ pub mod qobject {
         /// Controller presses and finished work since the last call, as JSON ("" when nothing happened).
         #[qinvokable]
         fn poll(self: Pin<&mut Self>) -> QString;
+
+        /// Turbine Hub is closing: what waits in the line of work is dropped and the job being worked on is
+        /// stopped cleanly. Comes back once it has stopped, or after a few seconds at most.
+        #[qinvokable]
+        #[cxx_name = "stopWork"]
+        fn stop_work(self: Pin<&mut Self>);
 
         /// The value of a `--name=value` argument ("" when not given); "1" for a bare `--name`.
         #[qinvokable]
@@ -130,6 +144,8 @@ use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 use turbinehub_engine::cli::Ctx;
@@ -145,6 +161,7 @@ pub struct HubRust {
     gamemode: bool,
     busy: bool,
     busy_words: QString,
+    status: QString,
     share: QString,
     pads: bool,
     pad_name: QString,
@@ -164,8 +181,14 @@ pub struct HubRust {
     pointer_paused: bool,
     tx: Sender<Event>,
     rx: Receiver<Event>,
-    /// The plan whose steps are running.
+    /// The plan whose steps are running behind the cover.
     running: Option<Plan>,
+    /// Stops the job of the line of work that is running now (set when Turbine Hub closes).
+    stop: Arc<AtomicBool>,
+    /// When the top bar's status was last worked out.
+    status_at: std::time::Instant,
+    /// When a made-up machine's job started (a trial run ends it after a moment).
+    pretend: Option<std::time::Instant>,
     /// When the background helper's files were last looked at.
     looked: std::time::Instant,
 }
@@ -300,6 +323,14 @@ fn make_ui() -> Ui {
     if option("nsl").is_some() {
         ui.sample_with_nsl();
     }
+    // Work in the line: Discord being installed and this many more waiting ("--queue=2").
+    if let Some(waiting) = option("queue") {
+        ui.sample_queue(waiting.parse().unwrap_or(0));
+    }
+    // Just updated, with the new version's notes fetched.
+    if option("whats-new").is_some() {
+        ui.sample_whats_new();
+    }
     // An app the made-up machine has as well ("--installed=<app id>").
     if let Some(id) = option("installed") {
         ui.installed.push(id);
@@ -335,7 +366,7 @@ impl Default for HubRust {
         let ui = make_ui();
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), pads: false, pad_name: QString::default(), ui, reader: None, asked_pads: None, said_no_pad: false, in_front: true, let_go: Vec::new(), pointer: crate::pointer::Pointer::default(), pointer_at: None, pointer_paused: false, tx, rx, running: None, looked: std::time::Instant::now() };
+        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), status: QString::from(ui.status().as_str()), stop: Arc::new(AtomicBool::new(false)), status_at: std::time::Instant::now(), pretend: None, share: QString::from(share.as_str()), pads: false, pad_name: QString::default(), ui, reader: None, asked_pads: None, said_no_pad: false, in_front: true, let_go: Vec::new(), pointer: crate::pointer::Pointer::default(), pointer_at: None, pointer_paused: false, tx, rx, running: None, looked: std::time::Instant::now() };
         hub.gather(false);
         hub
     }
@@ -348,7 +379,7 @@ impl HubRust {
             return;
         }
         let st = self.ui.settings();
-        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root), check_now };
+        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, want_notes: self.ui.whats_new_wanted(), helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root), check_now };
         run::gather(g, self.tx.clone());
     }
 
@@ -419,7 +450,33 @@ impl HubRust {
     fn finish(&mut self, plan: &Plan) -> Result<(), String> {
         self.ui.finish(plan)
     }
+
+    /// What a plan's steps need to run, as job number `id` (0: behind the cover).
+    fn job(&self, id: u64, plan: &Plan, password: String, stop: Arc<AtomicBool>) -> Job {
+        let st = self.ui.settings();
+        Job { id, stop, steps: plan.steps.clone(), password, home: self.ui.ctx.home.clone(), folder: self.ui.folder(), data: self.ui.data.clone(), version: self.ui.ctx.version.clone(), cache: self.ui.cache.clone(), test_builds: st.test_builds }
+    }
+
+    /// The next job of the line of work starts, when nothing of it runs. On a made-up machine it only counts as
+    /// running: nothing is ever run there.
+    fn pump(&mut self) {
+        let Some((id, plan)) = self.ui.queue_next() else { return };
+        crate::log::line("queue", &format!("Started: {} ({} steps)", plan.title, plan.steps.len()));
+        if self.ui.sample {
+            self.pretend = Some(std::time::Instant::now());
+            return;
+        }
+        self.stop = Arc::new(AtomicBool::new(false));
+        run::start(self.job(id, &plan, String::new(), self.stop.clone()), self.tx.clone());
+    }
 }
+
+/// How long a job of the line takes on a made-up machine that is tried by hand (pictures end it themselves).
+const PRETEND_FOR: Duration = Duration::from_secs(4);
+/// How often the top bar's battery and clock are looked at again.
+const STATUS_EVERY: Duration = Duration::from_secs(5);
+/// How long closing waits for the job being worked on to stop.
+const STOP_WITHIN: Duration = Duration::from_secs(8);
 
 /// How long the controller's presses are ignored after the window comes back to the front.
 const QUIET_AFTER_BACK: Duration = Duration::from_millis(250);
@@ -484,6 +541,42 @@ impl qobject::Hub {
     fn refresh_state(mut self: Pin<&mut Self>) {
         let text = self.rust().ui.state();
         self.as_mut().set_state(QString::from(text.as_str()));
+    }
+
+    /// The top bar's status again, when it changed.
+    fn refresh_status(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().status_at = std::time::Instant::now();
+        let text = self.rust().ui.status();
+        if self.status().to_string() != text {
+            self.as_mut().set_status(QString::from(text.as_str()));
+        }
+    }
+
+    pub fn stop_work(mut self: Pin<&mut Self>) {
+        let running = self.as_mut().rust_mut().ui.queue_stop();
+        self.rust().stop.store(true, Ordering::SeqCst);
+        if self.rust().ui.sample {
+            return;
+        }
+        crate::log::line("queue", "Closing: what waited was dropped, what ran is being stopped");
+        let started = std::time::Instant::now();
+        // The running plan's thread says when it has stopped; a copy of Files says so through its own look.
+        let mut plan_left = running.is_some();
+        let mut copy_left = true;
+        while (plan_left || copy_left) && started.elapsed() < STOP_WITHIN {
+            while let Ok(e) = self.rust().rx.try_recv() {
+                if matches!(e, Event::Done(id, _) if Some(id) == running) {
+                    plan_left = false;
+                }
+            }
+            copy_left = match self.as_mut().rust_mut().ui.files_tick() {
+                Some(news) => !news.contains("\"done\""),
+                None => self.rust().ui.files_working(),
+            };
+            if plan_left || copy_left {
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        }
     }
 
     pub fn page(mut self: Pin<&mut Self>, name: &QString, arg: &QString) -> QString {
@@ -635,6 +728,9 @@ impl qobject::Hub {
                 run::quick(line);
             }
         }
+        // A press may have put a copy of Files into the line, or ended a made-up machine's job.
+        self.as_mut().rust_mut().pump();
+        self.as_mut().refresh_status();
         QString::from(text.as_str())
     }
 
@@ -657,6 +753,18 @@ impl qobject::Hub {
             self.as_mut().rust_mut().ui.put_back(plan);
             return answer(&[("error", quote(p))]);
         }
+        // Work that may run while the player browses joins the line; the engine says what that is, and refuses
+        // what touches the same thing as a job already there.
+        if !self.rust().ui.runs_covered(&plan) {
+            crate::log::line("plan", &format!("Confirmed for the line of work: {} ({} steps)", plan.title, plan.steps.len()));
+            let text = self.as_mut().rust_mut().ui.enqueue(plan).to_text();
+            self.as_mut().rust_mut().pump();
+            self.as_mut().refresh_status();
+            return QString::from(text.as_str());
+        }
+        if let Some(why) = self.rust().ui.work_refusal(&plan) {
+            return answer(&[("toast", quote(&why))]);
+        }
         if self.rust().ui.sample {
             // A made-up machine: only what touches its own folders runs, and the screens carry on from there.
             let result = self.as_mut().rust_mut().ui.play_sample(&plan);
@@ -666,11 +774,12 @@ impl qobject::Hub {
                 Err(why) => answer(&[("toast", quote(&why)), ("refresh", "true".into())]),
             };
         }
-        let st = self.rust().ui.settings();
-        let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), folder: self.rust().ui.folder(), data: self.rust().ui.data.clone(), version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };
+        // Behind the cover nothing stops it: it runs to its end or to its time limit.
+        let job = self.rust().job(0, &plan, password, Arc::new(AtomicBool::new(false)));
         crate::log::line("plan", &format!("Confirmed: {} ({} steps)", plan.title, plan.steps.len()));
         run::start(job, self.rust().tx.clone());
         self.as_mut().rust_mut().running = Some(plan);
+        self.as_mut().refresh_status();
         self.as_mut().set_busy_words(QString::from("Working"));
         self.as_mut().set_busy(true);
         answer(&[("busy", "true".into())])
@@ -766,18 +875,41 @@ impl qobject::Hub {
             self.as_mut().rust_mut().looked = std::time::Instant::now();
             tick |= self.as_mut().rust_mut().ui.absorb();
         }
+        let mut status = false;
         let mut events = Vec::new();
         while let Ok(e) = self.rust().rx.try_recv() {
             events.push(e);
         }
         for e in events {
             match e {
-                Event::Progress(words) => self.as_mut().set_busy_words(QString::from(words.as_str())),
+                Event::Progress(0, words, _) => {
+                    if !words.is_empty() {
+                        self.as_mut().set_busy_words(QString::from(words.as_str()));
+                    }
+                }
+                Event::Progress(id, words, part) => {
+                    self.as_mut().rust_mut().ui.queue_say(id, &words, part);
+                    status = true;
+                }
+                // What's new can show now (the window asks when it has no dialog open).
+                Event::Notes => out.push(("whatsnew", "true".into())),
+                // A job of the line of work ended: its note, the engine's lists brought up to date, the next one.
+                Event::Done(id, result) if id != 0 => {
+                    crate::log::line("queue", &match &result {
+                        Ok(()) => format!("Job {id} done"),
+                        Err(why) => format!("Job {id} stopped: {why}"),
+                    });
+                    if let Some(j) = self.as_mut().rust_mut().ui.queue_done(id, result) {
+                        out.push(("job", j.to_text()));
+                    }
+                    self.rust().gather(false);
+                    status = true;
+                }
                 Event::Facts(f) => {
                     self.as_mut().rust_mut().take(*f);
                     tick = true;
                 }
-                Event::Done(result) => {
+                Event::Done(_, result) => {
                     let plan = self.as_mut().rust_mut().running.take();
                     let result = match (&plan, result) {
                         (Some(p), Ok(())) => self.as_mut().rust_mut().finish(p),
@@ -799,6 +931,22 @@ impl qobject::Hub {
                     }));
                 }
             }
+        }
+        // A made-up machine tried by hand: its job ends after a moment, as a real one's would (also one that was
+        // in the line from the start: --queue).
+        if self.rust().ui.sample && self.rust().pretend.is_none() && self.rust().ui.queue_working() {
+            self.as_mut().rust_mut().pretend = Some(std::time::Instant::now());
+        }
+        if self.rust().ui.sample && self.rust().pretend.is_some_and(|t| t.elapsed() >= PRETEND_FOR) {
+            self.as_mut().rust_mut().pretend = None;
+            let text = self.as_mut().rust_mut().ui.act("queue-finish", "", "");
+            out.push(("job", text));
+            status = true;
+        }
+        // The next job's turn, and the top bar: at once when the line changed, else every few seconds.
+        self.as_mut().rust_mut().pump();
+        if status || tick || self.rust().status_at.elapsed() >= STATUS_EVERY || out.iter().any(|(k, _)| *k == "files") {
+            self.as_mut().refresh_status();
         }
         if tick {
             out.push(("tick", "true".into()));

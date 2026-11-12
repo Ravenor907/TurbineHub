@@ -99,6 +99,8 @@ Item {
     Component.onCompleted: { rebuild(); if ((model.focus || "") !== "") wantFid = model.focus; Qt.callLater(fixFocus) }
     // Runs once the new list is in, before the window puts the highlight back.
     function fixFocus() {
+        // (The window has gone on to another page already: nothing of this one is left to fix.)
+        if (model.seq === undefined) return
         const fresh = model.seq !== seenSeq
         seenSeq = model.seq
         reading = false

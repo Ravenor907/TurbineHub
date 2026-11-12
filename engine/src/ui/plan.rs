@@ -99,11 +99,13 @@ pub struct Plan {
     pub done: String,
     /// The page to show afterwards, when not the current one.
     pub then_open: String,
+    /// The name of the thing it is about ("Discord"), for the line of work in the top bar. "" takes the title.
+    pub what: String,
 }
 
 impl Plan {
     pub fn new(title: &str, text: &str, confirm: &str) -> Plan {
-        Plan { title: title.into(), text: text.into(), items: Vec::new(), confirm: confirm.into(), ask: Ask::None, danger: false, steps: Vec::new(), done: String::new(), then_open: String::new() }
+        Plan { title: title.into(), text: text.into(), items: Vec::new(), confirm: confirm.into(), ask: Ask::None, danger: false, steps: Vec::new(), done: String::new(), then_open: String::new(), what: String::new() }
     }
     pub fn to_json(&self) -> Json {
         obj! {
@@ -383,6 +385,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
         .or_else(|| super::nsl::act(ui, action, arg, value))
         .or_else(|| super::bring::act(ui, action, arg, value))
         .or_else(|| super::setup::act(ui, action, arg, value))
-        .or_else(|| super::help::act(ui, action, arg, value));
+        .or_else(|| super::help::act(ui, action, arg, value))
+        .or_else(|| super::queue::act(ui, action, arg, value))
+        .or_else(|| super::whatsnew::act(ui, action, arg, value));
     found.unwrap_or_else(|| obj! {})
 }

@@ -6,6 +6,8 @@ use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use turbinehub_engine::agent::{self, Found};
 use turbinehub_engine::json::Json;
@@ -16,13 +18,16 @@ use turbinehub_engine::sources::{self, Origin};
 use turbinehub_engine::ui::{self, Step};
 use turbinehub_engine::{Store, helper};
 
-/// What a worker sends back to the interface thread.
+/// What a worker sends back to the interface thread. A job's number is 0 for the one that runs behind the cover,
+/// and its number in the line of work (the engine's ui/queue.rs) for one that runs while the player browses.
 pub enum Event {
-    /// What the job is doing now, for the busy line.
-    Progress(String),
+    /// What the job is doing now (the busy line, or the top bar), and how far it is when it has several steps.
+    Progress(u64, String, Option<f64>),
     /// The job ended: Ok, or the first step's problem in plain words.
-    Done(Result<(), String>),
+    Done(u64, Result<(), String>),
     Facts(Box<Facts>),
+    /// The notes of the running version arrived (What's new).
+    Notes,
 }
 
 /// Facts gathered from the host and the internet.
@@ -99,6 +104,15 @@ fn time_limit(line: &[String]) -> Duration {
 /// That is why the helper keeps its own, shorter limits (its wait for the lock and every program it starts), and
 /// ends by itself well inside this one.
 pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
+    run_until(line, stdin, None)
+}
+
+/// What a job says when it was stopped because Turbine Hub is closing.
+pub const STOPPED: &str = "Stopped, because Turbine Hub was closed.";
+
+/// The same, for a job of the line of work: it is also stopped (TERM, then KILL) the moment `stop` is set, which
+/// closing Turbine Hub does. flatpak ends a transaction it is told to end without leaving half of it behind.
+pub fn run_until(line: &[String], stdin: Option<&str>, stop: Option<&AtomicBool>) -> Result<Output, String> {
     let limit = time_limit(line);
     let mut c = command(line).ok_or("Nothing to run")?;
     c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -118,10 +132,11 @@ pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
     let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let start = Instant::now();
+    let stopped = || stop.is_some_and(|s| s.load(Ordering::SeqCst));
     let status = loop {
         match child.try_wait().map_err(|e| e.to_string())? {
             Some(st) => break Some(st),
-            None if start.elapsed() > limit => break None,
+            None if start.elapsed() > limit || stopped() => break None,
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     };
@@ -134,7 +149,7 @@ pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
         }
         let _ = child.kill();
         let _ = child.wait();
-        return Err("It took too long, so Turbine Hub stopped it and skipped the rest.".into());
+        return Err(if stopped() { STOPPED.into() } else { "It took too long, so Turbine Hub stopped it and skipped the rest.".to_string() });
     };
     Ok(Output { code: status.code().unwrap_or(-1), stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default() })
 }
@@ -176,6 +191,10 @@ pub fn share_dir() -> PathBuf {
 
 /// What the steps of a plan need besides themselves.
 pub struct Job {
+    /// 0 behind the cover; its number in the line of work otherwise.
+    pub id: u64,
+    /// Set when Turbine Hub closes: a job of the line of work stops then.
+    pub stop: Arc<AtomicBool>,
     pub steps: Vec<Step>,
     pub password: String,
     pub home: PathBuf,
@@ -239,7 +258,8 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
             if line.iter().any(|a| a == "flathub") {
                 say(format!("Installing {}", line.last().map(String::as_str).unwrap_or("")));
             }
-            let o = run(line, None)?;
+            // A helper job is never cut short: it runs as root and ends by itself.
+            let o = run_until(line, None, if is_helper { None } else { Some(&job.stop) })?;
             if is_helper {
                 helper_result(&o)
             } else if o.code == 0 {
@@ -377,11 +397,22 @@ fn start_nsl(job: &Job, tag: &str, plugin: bool) -> Result<(), String> {
 /// Runs the steps in order on a new thread, stopping at the first that fails.
 pub fn start(job: Job, tx: Sender<Event>) {
     std::thread::spawn(move || {
+        let id = job.id;
         let say = |words: String| {
-            let _ = tx.send(Event::Progress(words));
+            let _ = tx.send(Event::Progress(id, words, None));
         };
-        let result = job.steps.iter().try_for_each(|st| step(&job, st, &say));
-        let _ = tx.send(Event::Done(result));
+        let count = job.steps.len();
+        let result = job.steps.iter().enumerate().try_for_each(|(i, st)| {
+            if job.stop.load(Ordering::SeqCst) {
+                return Err(STOPPED.to_string());
+            }
+            // With several steps, how many are through is how far it is.
+            if count > 1 {
+                let _ = tx.send(Event::Progress(id, String::new(), Some(i as f64 / count as f64)));
+            }
+            step(&job, st, &say)
+        });
+        let _ = tx.send(Event::Done(id, result));
     });
 }
 
@@ -500,6 +531,8 @@ pub struct Gather {
     pub cache: PathBuf,
     pub version: String,
     pub test_builds: bool,
+    /// After an update: this version's notes aren't kept yet, so they are fetched (What's new).
+    pub want_notes: bool,
     pub helper_there: bool,
     /// The player pressed Check now: Turbine Hub's own update is asked for even within six hours of the last time.
     pub check_now: bool,
@@ -539,12 +572,74 @@ pub fn gather(g: Gather, tx: Sender<Event>) {
             ..Facts::default()
         };
         let _ = tx.send(Event::Facts(Box::new(f)));
+        // The notes of the version that runs now, once after an update, from the releases feed.
+        if g.want_notes
+            && let Ok(feed) = client.get_text(selfupdate::FEED_URL, &[])
+            && let Some(lines) = ui::whatsnew::notes_from_feed(&feed, &format!("v{}", g.version))
+        {
+            ui::whatsnew::keep(&g.cache, &g.version, &lines);
+            let _ = tx.send(Event::Notes);
+        }
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn job(id: u64, steps: Vec<Step>, stop: Arc<AtomicBool>) -> Job {
+        Job { id, stop, steps, password: String::new(), home: PathBuf::new(), folder: PathBuf::new(), data: PathBuf::new(), version: "0.1".into(), cache: PathBuf::new(), test_builds: false }
+    }
+
+    /// A job reports with its own number, so the window knows the line's job from the one behind the cover, and
+    /// says how far it is when it has several steps.
+    #[test]
+    fn a_job_reports_with_its_number_and_how_far_it_is() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let note = || Step::Done { setup: None, brought: None };
+        start(job(7, vec![note(), note()], Arc::new(AtomicBool::new(false))), tx);
+        let mut parts = Vec::new();
+        loop {
+            match rx.recv_timeout(Duration::from_secs(10)).expect("the job never ended") {
+                Event::Progress(id, _, part) => {
+                    assert_eq!(id, 7);
+                    parts.extend(part);
+                }
+                Event::Done(id, result) => {
+                    assert_eq!((id, result), (7, Ok(())));
+                    break;
+                }
+                _ => panic!("a job sends only its progress and its end"),
+            }
+        }
+        assert_eq!(parts, [0.0, 0.5]);
+    }
+
+    /// Closing Turbine Hub sets the job's stop: the step that runs is ended and the rest never start.
+    #[test]
+    fn a_job_of_the_line_stops_when_turbine_hub_closes() {
+        // Told to stop before it started: nothing runs.
+        let (tx, rx) = std::sync::mpsc::channel();
+        start(job(3, vec![Step::Done { setup: None, brought: None }], Arc::new(AtomicBool::new(true))), tx);
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(10)), Ok(Event::Done(3, Err(why))) if why == STOPPED));
+        // Only meaningful where the test itself isn't sandboxed.
+        if in_flatpak() {
+            return;
+        }
+        // Told to stop while a command runs: the command is ended at once, long before its own end.
+        let stop = Arc::new(AtomicBool::new(false));
+        let teller = stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            teller.store(true, Ordering::SeqCst);
+        });
+        let began = Instant::now();
+        let result = run_until(&host(&["sleep", "30"]), None, Some(&stop));
+        assert_eq!(result.err().as_deref(), Some(STOPPED));
+        assert!(began.elapsed() < Duration::from_secs(10));
+        // Without a stop the same call runs to its end.
+        assert_eq!(run_until(&host(&["true"]), None, Some(&AtomicBool::new(false))).map(|o| o.code), Ok(0));
+    }
 
     #[test]
     fn commands_run_directly_outside_the_flatpak() {

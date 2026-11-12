@@ -101,11 +101,20 @@ struct Asking {
 
 /// A copy, a move or an emptying that runs on its own thread.
 struct Job {
+    /// Its number in the line of work (ui/queue.rs).
+    id: u64,
     verb: &'static str,
     progress: Arc<Mutex<Progress>>,
     stop: Arc<AtomicBool>,
     rx: Receiver<Result<fx::Done, String>>,
     told: (u64, u64),
+}
+
+/// A copy, a move or an emptying that waits for its turn in the line of work: everything it needs to start.
+pub struct Waiting {
+    plan: fx::Plan,
+    answers: Answers,
+    verb: &'static str,
 }
 
 /// Everything the explorer remembers between presses.
@@ -127,6 +136,8 @@ pub struct Explorer {
     places: Option<(Places, u64)>,
     asking: Option<Asking>,
     job: Option<Job>,
+    /// A copy that couldn't be started when its turn came: why, said at the next look.
+    failed: Option<String>,
     /// The page argument that was last taken in (a link into Files, a picture's setup): taken in once.
     applied: String,
     zone: Option<i32>,
@@ -140,7 +151,7 @@ pub struct Explorer {
 
 impl Default for Explorer {
     fn default() -> Explorer {
-        Explorer { tabs: Vec::new(), at: 0, view: None, layout: Layout::Details, pane: false, sort: None, group: None, hidden: None, clip: Vec::new(), cut: false, history: History::default(), places: None, asking: None, job: None, applied: String::new(), zone: None, demo: false, seq: 0, always_background: false }
+        Explorer { tabs: Vec::new(), at: 0, view: None, layout: Layout::Details, pane: false, sort: None, group: None, hidden: None, clip: Vec::new(), cut: false, history: History::default(), places: None, asking: None, job: None, failed: None, applied: String::new(), zone: None, demo: false, seq: 0, always_background: false }
     }
 }
 
@@ -655,8 +666,11 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
 
     // What the page itself offers (the Options menu lists these after the highlighted thing's own).
     let mut options: Vec<Json> = Vec::new();
+    let waits = ui.files.job.is_none() && ui.queue.waiting_files().is_some();
     if ui.files.job.is_some() || ui.files.demo {
         options.push(option("Stop the copy", "files-job-stop", ""));
+    } else if waits {
+        options.push(option("Take the copy out of the line", "files-job-stop", ""));
     }
     if in_bin {
         options.push(page_button("Restore all", "files-restore-all", ""));
@@ -690,6 +704,8 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     } else {
         match &ui.files.job {
             Some(j) => job_json(j.verb, &j.progress.lock().map(|p| p.clone()).unwrap_or_default()),
+            // A copy that waits for its turn in the line of work says what it waits for.
+            None if waits => obj! {"words": s(match ui.queue.running_what() { Some(x) => format!("Waiting for its turn: {x} is being worked on first"), None => "Waiting for its turn".to_string() }), "part": n(0.0), "detail": s("")},
             None => Json::Null,
         }
     };
@@ -887,6 +903,66 @@ fn run_plan(ui: &mut Ui, plan: fx::Plan, answers: Answers) -> Json {
         let words = finished(ui, result);
         return obj! {"refresh": b(true), "toast": s(words)};
     }
+    let verb = match kind {
+        OpKind::Move => "Moving",
+        OpKind::Empty => "Emptying",
+        _ => "Copying",
+    };
+    // It joins the line of work (ui/queue.rs): it starts at once when nothing is ahead of it, and is refused when
+    // another job reads or writes the same files.
+    let keys = job_keys(&plan);
+    let what = job_what(&plan);
+    let ahead = ui.queue.count();
+    if let Err(why) = ui.queue.add(&what, keys, super::queue::Work::Files(Box::new(Waiting { plan, answers, verb }))) {
+        return toast(&why);
+    }
+    if kind == OpKind::Move && ui.files.cut {
+        ui.files.clip.clear();
+        ui.files.cut = false;
+    }
+    ui.queue_kick();
+    if let Some(why) = ui.files.failed.take() {
+        return toast(&why);
+    }
+    let words = match ahead {
+        0 => format!("{verb} in the background. The status bar shows how far it is."),
+        1 => "It starts once the thing being worked on has finished. The top bar shows the line.".to_string(),
+        c => format!("It starts once the {c} things ahead of it have finished. The top bar shows the line."),
+    };
+    obj! {"refresh": b(true), "toast": s(words)}
+}
+
+/// What a long copy reads and writes, as the line of work's keys: every item it takes and the folder it fills.
+fn job_keys(plan: &fx::Plan) -> Vec<String> {
+    let key = |p: &PathBuf| super::queue::path_key(p);
+    match &plan.op {
+        Op::Copy { items, into } | Op::Move { items, into } => items.iter().map(key).chain([key(into)]).collect(),
+        Op::EmptyBin => vec!["bin".to_string()],
+        Op::Delete { items } | Op::Restore { items } => items.iter().map(key).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// What the top bar calls a long copy: "wallpaper.png to Pictures", "12 items to Pictures", "the Recycle Bin".
+fn job_what(plan: &fx::Plan) -> String {
+    let name = |p: &PathBuf| p.file_name().map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|| p.display().to_string());
+    match &plan.op {
+        Op::Copy { items, into } | Op::Move { items, into } => match items.as_slice() {
+            [one] => format!("{} to {}", name(one), name(into)),
+            many => format!("{} items to {}", many.len(), name(into)),
+        },
+        Op::EmptyBin => "the Recycle Bin".into(),
+        _ => plan.title.trim_end_matches('?').to_string(),
+    }
+}
+
+/// A waiting copy's turn has come: it starts on its own thread, with its progress for the status bar and the top
+/// bar. An error when the thread couldn't be made.
+pub(crate) fn start_waiting(ui: &mut Ui, id: u64, w: Waiting) -> Result<(), String> {
+    let Waiting { plan, answers, verb } = w;
+    let d = disk(ui);
+    let p = places(ui);
+    let now = when(ui);
     let progress = Arc::new(Mutex::new(Progress { files: plan.files, bytes: plan.bytes, ..Progress::default() }));
     let stop = Arc::new(AtomicBool::new(false));
     let (tx, rx) = channel();
@@ -901,27 +977,38 @@ fn run_plan(ui: &mut Ui, plan: fx::Plan, answers: Answers) -> Json {
         let _ = tx.send(result);
     });
     if made.is_err() {
-        return toast("That couldn't be started just now. Try again.");
+        return Err("That couldn't be started just now. Try again.".into());
     }
-    if kind == OpKind::Move && ui.files.cut {
-        ui.files.clip.clear();
-        ui.files.cut = false;
+    ui.files.job = Some(Job { id, verb, progress, stop, rx, told: (u64::MAX, 0) });
+    Ok(())
+}
+
+/// Tells a running copy to stop (Turbine Hub is closing, or Stop was pressed). What was half copied is removed.
+pub(crate) fn stop_job(ui: &mut Ui) -> bool {
+    match &ui.files.job {
+        Some(j) => {
+            j.stop.store(true, Ordering::SeqCst);
+            true
+        }
+        None => false,
     }
-    let verb = match kind {
-        OpKind::Move => "Moving",
-        OpKind::Empty => "Emptying",
-        _ => "Copying",
-    };
-    ui.files.job = Some(Job { verb, progress, stop, rx, told: (u64::MAX, 0) });
-    obj! {"refresh": b(true), "toast": s(format!("{verb} in the background. The status bar shows how far it is."))}
+}
+
+impl Ui {
+    /// Is a copy of Files running on its own thread right now?
+    pub fn files_working(&self) -> bool {
+        self.files.job.is_some()
+    }
+
+    /// A copy whose turn came couldn't be started: Files says why at its next look.
+    pub(crate) fn files_failed(&mut self, why: String) {
+        self.files.failed = Some(why);
+    }
 }
 
 /// One thing to do: looked at first (the engine's plan), asked about where a name is taken or something is erased
 /// for good, then done. What may not be done is said in the engine's own plain words.
 fn start_op(ui: &mut Ui, op: Op) -> Json {
-    if ui.files.job.is_some() {
-        return toast("Something is still being copied. Wait for it, or stop it from the status bar.");
-    }
     let d = disk(ui);
     let p = places(ui);
     let plan = match fx::plan(&d, &p, op) {
@@ -1119,15 +1206,24 @@ fn search_below(ui: &mut Ui) {
 pub fn tick(ui: &mut Ui) -> Option<String> {
     if let Some(j) = ui.files.job.as_mut() {
         if let Ok(result) = j.rx.try_recv() {
+            let id = j.id;
             ui.files.job = None;
+            let worked = result.is_ok();
             let words = finished(ui, result);
+            // It leaves the line of work; the next job's turn comes with the app's next look.
+            let took = ui.queue_files_done(id);
+            let words = if worked { format!("{}{took}", words.trim_end_matches('.')) } else { words };
             return Some(obj! {"done": b(true), "toast": s(words)}.to_text());
         }
         let p = j.progress.lock().map(|p| p.clone()).unwrap_or_default();
         if j.told != (p.files_done, p.bytes_done >> 20) {
             j.told = (p.files_done, p.bytes_done >> 20);
-            return Some(obj! {"job": job_json(j.verb, &p)}.to_text());
+            let (id, json) = (j.id, job_json(j.verb, &p));
+            ui.queue.say(id, json.str_at("words").unwrap_or(""), json.get("part").and_then(Json::as_f64));
+            return Some(obj! {"job": json}.to_text());
         }
+    } else if let Some(why) = ui.files.failed.take() {
+        return Some(obj! {"done": b(true), "toast": s(why)}.to_text());
     }
     for t in ui.files.tabs.iter_mut() {
         if let Some(dp) = t.deep.as_mut() {
@@ -1406,9 +1502,12 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         }
         "job-stop" => {
             ui.files.demo = false;
-            if let Some(j) = &ui.files.job {
-                j.stop.store(true, Ordering::SeqCst);
+            if stop_job(ui) {
                 toast("Stopping. What was half copied is removed.")
+            } else if let Some(id) = ui.queue.waiting_files() {
+                // It hadn't started yet: it only leaves the line.
+                ui.queue.drop_waiting(id);
+                obj! {"refresh": b(true), "toast": s("Taken out of the line. Nothing was copied.")}
             } else {
                 refresh()
             }

@@ -371,7 +371,7 @@ fn the_store_search_looks_everywhere_and_names_come_first() {
     assert!(!names.contains(&"Discord"));
     assert_eq!(j.get("header").unwrap().str_at("title"), Some("Search"));
     // The sections step aside while the matches come from all of them.
-    assert!(side(&j).is_empty());
+    assert!(j.get("chips").unwrap().as_array().is_empty());
     assert_eq!(j.get("header").unwrap().str_at("line"), Some(format!("{} matches for \"stream\"", found.len()).as_str()));
     // A name that matches comes before words that match; every row opens its own page or its guide.
     u.act("search", "store", "decky");
@@ -388,7 +388,7 @@ fn the_store_search_looks_everywhere_and_names_come_first() {
     assert_eq!(side(&parse(&u.page("games", "")).unwrap()).len(), 9);
     u.act("search", "store", "");
     let j = parse(&u.page("store", "tv")).unwrap();
-    assert_eq!((j.get("header").unwrap().str_at("title"), side(&j).len()), (Some("TV and streaming"), 7));
+    assert_eq!((j.get("header").unwrap().str_at("title"), j.get("chips").unwrap().as_array().len()), (Some("TV and streaming"), 7));
     done("find");
 }
 

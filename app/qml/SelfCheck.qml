@@ -17,6 +17,7 @@ import TurbineHub
 //   on a surface, or states that the eyes the mode is for can't tell apart (Palette.qml, checked by `palettes`);
 //   words are squeezed into a column so narrow that each line holds about one word;
 //   words are drawn over other words (except what is drawn over the page on purpose: `cover: true`);
+//   the top bar's status (the work, the battery, the clock) reaches into the tabs;
 //   the footer lacks B, lacks A where the highlighted thing takes A, offers A where it doesn't, or shows a hint
 //   with no words;
 //   nothing holds the highlight, or the highlighted thing isn't fully in view;
@@ -57,6 +58,12 @@ import TurbineHub
 //           last, and R closes it again; a right-click opens them for the row under the mouse and for the page
 //           beside every row; F and a typed letter start Find; Tab opens the menu and moves through it; F1 is
 //           Help; RT jumps further than Down; Space is A and Space held plays; Ctrl+Enter is Start
+//   store-row  A (Enter) on a Store row presses its button: Install asks first, then runs with no cover while
+//           the bar and the row say Working; the same thing can't be asked for twice; the highlight moves and
+//           the tabs turn meanwhile; a second install waits its turn; the end says "installed (12 s)" and a
+//           failure says why; R lists Remove, Details and the source; [ and ], LT and RT change the section
+//   queue   with three jobs in the line everything still works (highlight, tabs, the menu); closing asks first
+//           ("3 things are still running. Close anyway?"); the jobs end one after the other
 //   files-mouse, files-keys, files-pad   Files worked the way Explorer is: see them in `script`
 // Each prints "INPUTCHECK ok: <name>" when nothing failed.
 //
@@ -573,6 +580,177 @@ Item {
                 [ready, () => { if (dialog.open) fail("pointer: B didn't close Options") }],
             ]
         }
+        // The Store with real keys: a row's own button, the line of work, browsing while it runs.
+        if (name === "store-row" || name === "queue") {
+            const rowOf = (id) => { for (const sec of app.model.sections || []) for (const r of sec.rows || []) if (r.id === id) return r; return null }
+            const moon = "app:com.moonlight_stream.Moonlight", spot = "app:com.spotify.Client"
+            const toastSays = (what, words) => { const t = app.parts.toast; if (!t.up || t.text.indexOf(words) < 0) fail(name + ": " + what + " should say \"" + words + "\" (it says \"" + (t.up ? t.text : "") + "\")") }
+            const free = (what) => {
+                if (Hub.busy) fail(name + ": the cover is up " + what)
+                if (!app.parts.view.enabled) fail(name + ": the page takes nothing " + what)
+            }
+            if (name === "store-row") return [
+                // The page opens with the highlight on its first row, and every row says its state and its button.
+                [ready, () => {
+                    const it = app.focusItem
+                    if (!it || it.fid !== "app:com.discordapp.Discord") fail("store-row: the highlight doesn't start on the first row (" + (it ? it.fid : "nothing") + ")")
+                    else if (it.aLabel !== "Open") fail("store-row: an installed app's button isn't Open (" + it.aLabel + ")")
+                    const r = rowOf(moon)
+                    if (!r || r.badge !== "Not installed" || r.button !== "Install") fail("store-row: an app that isn't installed doesn't say so with Install on its row")
+                    key(Qt.Key_Right)
+                }],
+                // A (Enter) on the row is its button: Install, through the dialog that shows what will happen.
+                [ready, () => {
+                    const it = app.focusItem
+                    if (!it || it.fid !== moon || it.aLabel !== "Install") { fail("store-row: Right didn't reach Moonlight's row (" + (it ? it.fid : "nothing") + ")"); return }
+                    key(Qt.Key_Return)
+                }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.title !== "Install Moonlight?") { fail("store-row: A on the row didn't ask to install it (" + (dialog.open ? dialog.d.title : "no dialog") + ")"); return }
+                    if (app.status.work !== "") fail("store-row: work started before the dialog was answered")
+                    key(Qt.Key_Return)
+                }],
+                // Confirmed: no cover, the bar and the row say Working, a note says it started.
+                [ready, () => {
+                    if (dialog.open) fail("store-row: the dialog stayed open after Install")
+                    free("after an install was confirmed")
+                    if (app.status.work !== "Working: Moonlight") fail("store-row: the top bar doesn't say what is being worked on (" + app.status.work + ")")
+                    const r = rowOf(moon)
+                    if (!r || r.badge !== "Working") fail("store-row: the row being worked on doesn't say Working (" + (r ? r.badge : "gone") + ")")
+                    if (!app.focusItem || app.focusItem.fid !== moon) fail("store-row: the highlight left the row that was installed (" + (app.focusItem ? app.focusItem.fid : "nothing") + ")")
+                    toastSays("the note", "Moonlight")
+                    // Asked for a second time: refused in plain words, with no dialog.
+                    app.doAct("store", "com.moonlight_stream.Moonlight", "")
+                }],
+                [ready, () => {
+                    if (dialog.open) { fail("store-row: the same install could be asked for twice"); key(Qt.Key_Escape) }
+                    toastSays("asking for the same thing twice", "being worked on")
+                    // Keep browsing: the highlight moves, the tabs turn.
+                    v.fid = app.focusItem ? app.focusItem.fid : ""
+                    key(Qt.Key_Down)
+                }],
+                [ready, () => {
+                    if (!app.focusItem || app.focusItem.fid === v.fid) fail("store-row: the highlight doesn't move while work runs")
+                    if (!app.focusItem || app.focusItem.fid !== spot) { fail("store-row: Down from Moonlight didn't reach Spotify (" + (app.focusItem ? app.focusItem.fid : "nothing") + ")"); return }
+                    key(Qt.Key_Return)
+                }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.title !== "Install Spotify?") { fail("store-row: a second install couldn't be asked for while one runs"); return }
+                    key(Qt.Key_Return)
+                }],
+                [ready, () => {
+                    if (app.status.work !== "Working: Moonlight (1 more waiting)") fail("store-row: the bar doesn't count what waits (" + app.status.work + ")")
+                    const r = rowOf(spot)
+                    if (!r || r.badge !== "Waiting") fail("store-row: the row that waits doesn't say Waiting (" + (r ? r.badge : "gone") + ")")
+                    key(Qt.Key_E)
+                }],
+                [ready, () => {
+                    if (app.current.page !== "files") fail("store-row: the tabs don't turn while work runs (" + app.current.page + ")")
+                    free("on another tab")
+                    if (app.status.work === "") fail("store-row: the line of work was lost with the page")
+                    key(Qt.Key_Q)
+                }],
+                // Back on the Store the row still says so; then the job ends: a note with the time, the row's new
+                // state, the next job's turn.
+                [ready, () => {
+                    const r = rowOf(moon)
+                    if (app.current.page !== "store" || !r || r.badge !== "Working") fail("store-row: back on the Store the row doesn't say Working any more")
+                    app.doAct("queue-finish", "", "")
+                }],
+                [ready, () => {
+                    toastSays("the note at the end", "Moonlight installed (12 s)")
+                    const r = rowOf(moon)
+                    if (!r || r.badge.indexOf("Installed") !== 0 || r.button !== "Open") fail("store-row: the installed app's row doesn't say Installed with Open (" + (r ? r.badge + ", " + r.button : "gone") + ")")
+                    if (app.status.work !== "Working: Spotify") fail("store-row: the next job didn't get its turn (" + app.status.work + ")")
+                    // A job that fails says why, by name.
+                    app.doAct("queue-finish", "", "No internet.")
+                }],
+                [ready, () => {
+                    toastSays("the note of a job that failed", "Spotify didn't work: No internet.")
+                    const r = rowOf(spot)
+                    if (!r || r.badge !== "Not installed") fail("store-row: a failed install's row doesn't go back to Not installed")
+                    if (app.status.work !== "" || app.status.jobs !== 0) fail("store-row: the line isn't empty at the end (" + app.status.work + ")")
+                    // Options on a row: its own press first, then the rest (Remove, Details, the source).
+                    const it = byFid(moon)
+                    if (!it) { fail("store-row: Moonlight's row is gone"); return }
+                    app.setFocus(it, false)
+                    key(Qt.Key_R)
+                }],
+                [ready, () => {
+                    const rows = dialog.open && dialog.d.rows ? dialog.d.rows : []
+                    const titles = rows.map(r => r.title)
+                    if (!dialog.open || dialog.d.options !== true) { fail("store-row: R didn't open the row's Options"); return }
+                    if (rows[0].local !== "a" || rows[0].title !== "Open") fail("store-row: the row's own press isn't first in its Options (" + titles.join(", ") + ")")
+                    for (const want of ["Remove", "Details", "Where it comes from"]) if (titles.indexOf(want) < 0) fail("store-row: Options lacks " + want + " (" + titles.join(", ") + ")")
+                    key(Qt.Key_Escape)
+                }],
+                // The sections: ] and [ at a keyboard, RT and LT on the controller, from anywhere on the page.
+                [ready, () => { v.index = app.model.index; key(Qt.Key_BracketRight) }],
+                [ready, () => {
+                    if (app.model.index !== v.index + 1) fail("store-row: ] didn't go to the next section (" + v.index + " to " + app.model.index + ")")
+                    if (app.current.page !== "store") fail("store-row: ] turned the tabs on a page with sections")
+                    key(Qt.Key_BracketLeft)
+                }],
+                [ready, () => {
+                    if (app.model.index !== v.index) fail("store-row: [ didn't go back a section")
+                    app.padEvent("rt", true); app.padEvent("rt", false)
+                }],
+                [ready, () => {
+                    if (app.model.index !== v.index + 1) fail("store-row: RT didn't go to the next section")
+                    if (!app.focusItem || app.focusItem.sectionChip === true) fail("store-row: after RT the highlight isn't on the new section's rows")
+                    app.padEvent("lt", true); app.padEvent("lt", false)
+                }],
+                [ready, () => { if (app.model.index !== v.index) fail("store-row: LT didn't go back a section") }],
+            ]
+            // A line with two waiting (--queue=2): everything works meanwhile, and closing asks first.
+            return [
+                [ready, () => {
+                    if (app.status.work !== "Working: Discord (2 more waiting)") fail("queue: the bar doesn't say the line (" + app.status.work + ")")
+                    free("while the line runs")
+                    const bar = app.parts.topBar
+                    if (!bar.working) fail("queue: the top bar shows no work mark")
+                    v.fid = app.focusItem ? app.focusItem.fid : ""
+                    key(Qt.Key_Down)
+                }],
+                [ready, () => {
+                    if (!app.focusItem || app.focusItem.fid === v.fid) fail("queue: the highlight doesn't move while the line runs")
+                    key(Qt.Key_Q)
+                }],
+                [ready, () => {
+                    if (app.current.page !== "games") fail("queue: the tabs don't turn while the line runs (" + app.current.page + ")")
+                    key(Qt.Key_Tab)
+                }],
+                [ready, () => {
+                    if (!dialog.open) { fail("queue: the menu doesn't open while the line runs"); return }
+                    key(Qt.Key_Escape)
+                }],
+                // Closing with work in the line asks, and says how much is running.
+                [ready, () => { app.doAct("quit", "", "") }],
+                [ready, () => {
+                    if (!dialog.open || (dialog.d.text || "").indexOf("3 things are still running. Close anyway?") !== 0) { fail("queue: closing with work in the line doesn't ask (" + (dialog.open ? dialog.d.text : "no dialog") + ")"); return }
+                    if (dialog.d.confirm !== "Close anyway") fail("queue: the question's button isn't Close anyway")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => {
+                    if (dialog.open) fail("queue: Esc didn't close the question")
+                    if (app.status.jobs !== 3) fail("queue: cancelling the question changed the line")
+                    // The jobs end one after the other; each says so, and the bar counts down.
+                    app.doAct("queue-finish", "", "")
+                }],
+                [ready, () => {
+                    toastSays("the first job's end", "Discord installed (12 s)")
+                    if (app.status.work !== "Working: Spotify (1 more waiting)") fail("queue: the bar doesn't move on (" + app.status.work + ")")
+                    app.doAct("queue-finish", "", "")
+                }],
+                [ready, () => { app.doAct("queue-finish", "", "") }],
+                [ready, () => {
+                    if (app.status.work !== "" || app.status.jobs !== 0) fail("queue: the line isn't empty once every job ended")
+                    if (app.parts.topBar.working) fail("queue: the top bar still shows the work mark")
+                    key(Qt.Key_E)
+                }],
+                [ready, () => { if (app.current.page !== "store") fail("queue: E didn't come back to the Store") }],
+            ]
+        }
         if (name === "options") {
             const mid = (it) => middle(it)
             const rowsOf = () => dialog.open && dialog.d.rows ? dialog.d.rows : []
@@ -1060,6 +1238,11 @@ Item {
     function measure() {
         const counts = { texts: 0, controls: 0, boxes: [], covered: false, contrast: 21, chips: 0, named: 0, palettes: 0 }
         look(app.contentItem, counts)
+        // The top bar's status (the work, the battery, the clock) never crowds the tabs, whatever the width.
+        const bar = app.parts.topBar
+        if (bar.visible && bar.statusStart < bar.tabsEnd + 8) fail("the top bar's status crowds the tabs: it starts at " + Math.round(bar.statusStart) + " and the tabs end at " + Math.round(bar.tabsEnd))
+        // While work is in the line the bar shows its mark, and nothing of the page is covered for it.
+        if (bar.visible && (app.status.work || "") !== "" && !bar.working) fail("work is in the line and the top bar shows no mark for it")
         counts.palettes = palettes()
         // What a screen reader finds, asked the way it asks.
         counts.spoken = Hub.testSpoken(Hub.option("spoken") !== "" ? 4 : 0)

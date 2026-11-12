@@ -88,7 +88,7 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
 |---|---|
 | **Home** | Readings, the checkup with a fix for each item, Finish setting up, updates. Veteran adds quick switches and recent activity |
 | **Games** | Every Steam and Heroic game with how well it runs here, Play, switches, Proton choice, saves and "Won't start?" help, plus a library check |
-| **Store** | Essentials, Apps, Decky plugins, Launchers, TV and streaming, Emulation, Installed. Each item has its own page with Install, Open, Update and Remove |
+| **Store** | Essentials, Apps, Decky plugins, Launchers, TV and streaming, Emulation, Installed, as sections across the top (LT and RT). Every row says how it stands (Not installed, Installed with its version, Update from one version to the next, Working) and has its button: A installs, opens or updates it, after showing what will happen. Options has Remove, Details and where it comes from. Installs and updates run while you keep browsing |
 | **Files** | The file explorer: tabs, back, forward and up, an address that takes Windows-style and real paths, search, New, Cut, Copy, Paste, Rename, Delete, sorting and grouping, a details pane, the Recycle Bin with Undo. Also opens from its own icon, Turbine Files |
 | **My machine** | Cards for what this machine has: Power, Display or Monitors, Lighting, Battery, Sleep and wake, Graphics card, Drives, Sound, Dock, Tune-up, Restart to Windows (only when Windows is really there) |
 | **Settings** | Mode, interface size (50 to 150%), themes and accents, colors for red-weak, green-weak and blue-weak eyes (or no color), animations (Full, Reduced, Off), the background helper, the save time machine, updates, My setup (save and apply), Help, Review changes, remove completely |
@@ -193,6 +193,7 @@ Mode. Nothing opens a separate window. The controls are the same as in
 | Main button | Start | Ctrl+Enter | Click the button |
 | Play | Hold Start | Hold Space | Click Play |
 | Jump | LT / RT | Home / End | Wheel |
+| Sections | LT / RT on a page with sections | [ / ] | Click a section |
 | Pointer | Right stick |  |  |
 | Click | R3 |  | Click |
 | Pointer options | Hold R3 |  | Right-click |
@@ -202,7 +203,15 @@ Mode. Nothing opens a separate window. The controls are the same as in
 
 **Options** is a menu for whatever the highlight is on: what **A** does there first, then everything else that thing
 and the page can do, each with its own button where it has one. **Find** jumps to the search box of Games, the
-Store, Files and Where's my...?; in Game Mode Steam's keyboard opens for it.
+Store, Files and Where's my...?; in Game Mode Steam's keyboard opens for it. In the **Store**, LT and RT ([ and ] at
+a keyboard) go from one section to the next; everywhere else they jump a screenful, and [ and ] turn the tabs.
+
+**Work runs while you browse.** An install, an update, a removal, a copy from your Windows drive or a long copy in
+Files joins a line and runs one at a time. The top bar shows what is being worked on and how many wait ("Working:
+Discord (2 more waiting)"), the row of the thing says Working, and a note says how it ended and how long it took
+("Discord installed (12 s)"). Nothing is ever asked for twice, and closing Turbine Hub while work runs asks first.
+Only what needs the password or changes the system still takes the whole screen for a moment. The top bar also
+shows the battery (on a machine that has one) and the clock, and the menu (View) leads to Desktop Mode and back.
 
 In **Files**, Start ticks the highlighted line and B goes back a folder. At a keyboard a letter jumps to the name
 that starts with it, as on Windows, so there Options is Shift+F10 (or a right-click), Find is Ctrl+F and the tabs

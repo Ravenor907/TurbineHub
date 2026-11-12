@@ -81,6 +81,12 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.items.push(("Where it goes".into(), if ui.veteran() { crate::compat_tool::tools_dir(&root).to_string_lossy().into_owned() } else { "Steam's folder for tools, in a folder of its own".into() }));
             p.items.push(("Afterwards".into(), "It shows in this list at once. Steam lists it after its next start.".into()));
             p.steps.push(Step::ProtonGet { tag: tag.clone() });
+            // It runs in the line of work while the player browses: the top bar names it, and the same build is
+            // never fetched twice at once.
+            p.what = if tag.is_empty() { "GE-Proton".to_string() } else { tag.clone() };
+            if let Some(why) = ui.work_refusal(&p) {
+                return Some(toast(&why));
+            }
             p.done = format!("{} is installed. Steam lists it after its next start.", if tag.is_empty() { "The newest GE-Proton" } else { tag.as_str() });
             Some(dialog(ui, p))
         }

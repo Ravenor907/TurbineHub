@@ -1,6 +1,7 @@
-//! Store: what Turbine Hub offers to install, by section, with each thing's state on this machine, a search over
-//! all of it, and a page per thing (what it is, where it comes from, its size and version, install, update,
-//! remove). Apps come from Flathub through the host's flatpak, Decky Loader through the helper, NonSteamLaunchers
+//! Store: what Turbine Hub offers to install, by section, with each thing's state and its action on its own row
+//! (a status word and one button: Install, Open, Update), a search over all of it, and a page per thing for the
+//! rest (what it is, where it comes from, its size and version, remove). A on a row does what its button says,
+//! through the dialog that shows what will happen first; Options lists everything else. Apps come from Flathub through the host's flatpak, Decky Loader through the helper, NonSteamLaunchers
 //! from its own script (ui/nsl.rs), and TV and cloud services become library tiles.
 use super::games::{matches, query, search_box};
 use super::plan::{Plan, Step, dialog, guide, helper_plan, toast, with_helper};
@@ -73,7 +74,7 @@ fn panel_row(ui: &Ui) -> Json {
         with(with(row("none", "", "info", PANEL_TITLE, "Readings and this game's switches in Steam's quick menu"), "badge", s("Installed")), "tone", s("ok"))
     } else {
         let line = if decky_installed(ui) { "Readings and this game's switches in Steam's quick menu. Not installed yet: a few steps in Decky Loader's settings." } else { "Readings and this game's switches in Steam's quick menu. Not installed yet: needs Decky Loader first." };
-        with(row("panel-guide", "", "button", PANEL_TITLE, line), "button", s("How"))
+        with(with(row("panel-guide", "", "button", PANEL_TITLE, line), "button", s("How")), "badge", s("Not installed"))
     }
 }
 
@@ -169,24 +170,93 @@ pub(crate) fn tile_steps(ui: &Ui, t: &Tile) -> Vec<Step> {
     steps
 }
 
-/// An app's row in a list: its state as a badge. A press opens the app's own page.
-fn app_row(ui: &Ui, a: &App) -> Json {
-    let (badge, tone) = match (is_installed(ui, a.id), ui.updates.iter().any(|u| u == a.id)) {
-        (true, true) => ("Update ready", "warn"),
-        (true, false) => ("Installed", "ok"),
-        _ => ("", ""),
+/// An entry of a row's Options menu.
+fn offer(title: &str, act: &str, arg: &str) -> Json {
+    super::controls::option(title, act, arg)
+}
+
+/// A Store row: the thing's name and line, its state as a word (`badge`, with its `tone`), the button that A
+/// presses (`button`; "" shows an arrow: A opens its page) and what else it offers (`offers`, the Options menu).
+/// `id` names the thing whatever its state, so the highlight stays on it when the state changes.
+fn thing(id: &str, name: &str, line: &str, press: (&str, &str, &str), state: (&str, &str), offers: Vec<Json>) -> Json {
+    let (act, arg, button) = press;
+    let mut r = row(act, arg, "button", name, line);
+    for (k, v) in [("id", s(id)), ("badge", s(state.0)), ("tone", s(state.1)), ("button", s(button)), ("offers", arr(offers))] {
+        r = with(r, k, v);
+    }
+    r
+}
+
+/// Where a thing stands in the line of work, as its row says it: "Working" while it is the one, "Waiting" behind
+/// another. None when nothing touches it.
+fn in_line(ui: &Ui, key: &str) -> Option<&'static str> {
+    ui.queue.place(key).map(|p| match p {
+        super::queue::Place::Working => "Working",
+        super::queue::Place::Waiting => "Waiting",
+    })
+}
+
+/// An app's state in a few words: "Not installed", "Installed 0.0.98" (the version when the host told it),
+/// "Update from 0.0.98 to 0.0.99" (or "Update ready" when a version isn't known).
+pub(crate) fn app_state(ui: &Ui, a: &App, facts: &BTreeMap<String, AppFacts>) -> (String, &'static str) {
+    let f = facts.get(a.id).cloned().unwrap_or_default();
+    match (is_installed(ui, a.id), ui.updates.iter().any(|u| u == a.id)) {
+        (true, true) if !f.version.is_empty() && !f.newest.is_empty() && f.version != f.newest => (format!("Update from {} to {}", f.version, f.newest), "warn"),
+        (true, true) => ("Update ready".into(), "warn"),
+        (true, false) if !f.version.is_empty() => (format!("Installed {}", f.version), "ok"),
+        (true, false) => ("Installed".into(), "ok"),
+        _ => ("Not installed".into(), ""),
+    }
+}
+
+/// An app's row: its state, and the one button for it (Install, Update or Open). A does that; installing and
+/// updating show their dialog first. While it is in the line of work the row says so and A opens its page.
+fn app_row(ui: &Ui, a: &App, facts: &BTreeMap<String, AppFacts>) -> Json {
+    let id = format!("app:{}", a.id);
+    let details = format!("store-item|{}", a.id);
+    let source = offer("Where it comes from", "store-source", a.id);
+    if let Some(word) = in_line(ui, &id) {
+        return thing(&id, a.name, a.line, ("open", &details, ""), (word, ""), vec![offer("Details", "open", &details), source]);
+    }
+    let (installed, update) = (is_installed(ui, a.id), ui.updates.iter().any(|u| u == a.id));
+    let (state, tone) = app_state(ui, a, facts);
+    let mut offers = Vec::new();
+    let press = match (installed, update) {
+        (false, _) => ("store", "Install"),
+        (true, true) => {
+            offers.push(offer(&format!("Open {}", a.name), "store-open", a.id));
+            ("store-update", "Update")
+        }
+        (true, false) => ("store-open", "Open"),
     };
-    with(with(row("open", &format!("store-item|{}", a.id), "button", a.name, a.line), "badge", s(badge)), "tone", s(tone))
+    if installed {
+        offers.push(offer("Remove", "store-remove", a.id));
+    }
+    offers.push(offer("Details", "open", &details));
+    offers.push(source);
+    thing(&id, a.name, a.line, (press.0, a.id, press.1), (&state, tone), offers)
 }
 
 fn tile_row(ui: &Ui, t: &Tile) -> Json {
-    let added = tile_added(ui, t);
-    with(with(row("open", &format!("store-item|tile:{}", t.id), "button", t.name, t.line), "badge", s(if added { "In your library" } else { "" })), "tone", s("ok"))
+    let details = format!("store-item|tile:{}", t.id);
+    let more = [offer("Details", "open", &details), offer("Where it comes from", "store-source", &format!("tile:{}", t.id))];
+    if tile_added(ui, t) {
+        let offers = [offer("Remove from your library", "tile-remove", t.id)].into_iter().chain(more).collect();
+        thing(&format!("tile:{}", t.id), t.name, t.line, ("open", &details, ""), ("In your library", "ok"), offers)
+    } else {
+        thing(&format!("tile:{}", t.id), t.name, t.line, ("tile", t.id, "Add"), ("Not added", ""), more.into_iter().collect())
+    }
 }
 
 fn decky_row(ui: &Ui) -> Json {
-    let has = decky_installed(ui);
-    with(with(row("open", "store-item|decky", "button", "Decky Loader", DECKY_LINE), "badge", s(if has { "Installed" } else { "" })), "tone", s("ok"))
+    let details = "store-item|decky";
+    let more = [offer("Details", "open", details), offer("Where it comes from", "store-source", "decky")];
+    if !decky_installed(ui) {
+        return thing("decky", "Decky Loader", DECKY_LINE, ("decky", "", "Install"), ("Not installed", ""), more.into_iter().collect());
+    }
+    let off = plugins_off(ui);
+    let offers = [offer("Repair or update", "decky", ""), offer(if off { "Turn plugins back on" } else { "Turn all plugins off" }, "decky-off", "")].into_iter().chain(more).collect();
+    thing("decky", "Decky Loader", DECKY_LINE, ("open", details, ""), if off { ("Turned off", "warn") } else { ("Installed", "ok") }, offers)
 }
 
 pub(crate) fn decky_installed(ui: &Ui) -> bool {
@@ -206,14 +276,16 @@ fn plugins_off(ui: &Ui) -> bool {
 }
 
 fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
-    let mut out: Vec<Json> = APPS.iter().filter(|a| a.section == sec).map(|a| app_row(ui, a)).collect();
+    let (_, facts) = app_facts(&ui.cache);
+    let mut out: Vec<Json> = APPS.iter().filter(|a| a.section == sec).map(|a| app_row(ui, a, &facts)).collect();
     match sec {
         "decky" => {
             out.push(decky_row(ui));
             out.push(panel_row(ui));
             if decky_installed(ui) {
                 out.push(with(row("decky-off", "", "toggle", "Plugins on", "Turn every plugin off to see if one of them causes a problem"), "on", b(!plugins_off(ui))));
-                out.extend(plugins(ui).iter().map(|p| row("none", "", "info", p, "Plugin")));
+                let off = plugins_off(ui);
+                out.extend(plugins(ui).iter().map(|p| with(with(row("none", "", "info", p, "Plugin"), "badge", s(if off { "Turned off" } else { "On" })), "tone", s(if off { "warn" } else { "ok" }))));
             }
         }
         "launchers" => {
@@ -224,7 +296,7 @@ fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
         "tv" => out.extend(TILES.iter().map(|t| tile_row(ui, t))),
         "emulation" => out.push(row("none", "", "info", "EmuDeck", "Installs from emudeck.com in Desktop Mode. RetroDECK above needs no setup outside the app.")),
         "installed" => {
-            out = APPS.iter().filter(|a| is_installed(ui, a.id)).map(|a| app_row(ui, a)).collect();
+            out = APPS.iter().filter(|a| is_installed(ui, a.id) || in_line(ui, &format!("app:{}", a.id)).is_some()).map(|a| app_row(ui, a, &facts)).collect();
             if decky_installed(ui) {
                 out.push(decky_row(ui));
             }
@@ -250,8 +322,9 @@ fn found(ui: &Ui, q: &str) -> Vec<Json> {
             by_words.push(r);
         }
     };
+    let (_, facts) = app_facts(&ui.cache);
     for a in APPS {
-        put(a.name, &format!("{} {}", a.line, a.about), app_row(ui, a));
+        put(a.name, &format!("{} {}", a.line, a.about), app_row(ui, a, &facts));
     }
     put("Decky Loader", &format!("{DECKY_LINE} plugins"), decky_row(ui));
     put(PANEL_TITLE, "Decky plugin quick menu readings switches", panel_row(ui));
@@ -267,8 +340,9 @@ fn found(ui: &Ui, q: &str) -> Vec<Json> {
     by_name
 }
 
-/// The Store tab. `arg` is the section. While the search box holds something, the matches from every section show
-/// instead.
+/// The Store tab. `arg` is the section. The sections are chips across the top (LT and RT, or [ and ], go from one
+/// to the next); while the search box holds something, the matches from every section show instead and the chips
+/// step aside. With updates ready, Update all is the page's main button (Start) in every section.
 pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let index = SECTIONS.iter().position(|(id, _, _)| *id == arg).unwrap_or(0);
     let (id, title, line) = SECTIONS[index];
@@ -282,16 +356,20 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     };
     let updates = APPS.iter().filter(|a| ui.updates.iter().any(|u| u == a.id)).count();
     let (title, line) = if searching { ("Search", match list.len() { 1 => format!("1 match for \"{}\"", q.trim()), c => format!("{c} matches for \"{}\"", q.trim()) }) } else { (title, line.to_string()) };
-    obj! {
+    // Installed says how many updates wait in it.
+    let chip_of = |sec: &str| if sec == "installed" && updates > 0 { (match updates { 1 => "1 update".to_string(), c => format!("{c} updates") }, "warn") } else { (String::new(), "") };
+    let mut j = obj! {
         // While searching, the sections step aside: the matches come from all of them.
-        "side": arr(SECTIONS.iter().filter(|_| !searching).map(|(id, title, _)| obj! {"id": s(*id), "title": s(*title), "chip": s(""), "tone": s(""), "lock": b(false)})),
-        "sideTitle": s(if searching { "Every section" } else { "" }),
+        "chips": arr(SECTIONS.iter().filter(|_| !searching).map(|(id, title, _)| { let (chip, tone) = chip_of(id); obj! {"id": s(*id), "title": s(*title), "chip": s(chip), "tone": s(tone)} })),
         "index": n(index as f64),
         "search": search_box(ui, "store", "Search the Store"),
         "header": obj! {"title": s(title), "chips": arr(if ui.offline { vec![obj! {"text": s("Offline now. This is what was found last; installing needs the internet."), "tone": s("warn")}] } else { vec![] }), "line": s(line)},
         "sections": arr([with(with(section("", list), "columns", n(2.0)), "empty", s(empty))]),
-        "options": arr(if updates > 0 { vec![super::controls::page_button("Update all", "update-all", "")] } else { vec![] }),
+    };
+    if updates > 0 {
+        j = with(j, "primary", obj! {"label": s("Update all"), "act": s("update-all"), "arg": s("")});
     }
+    j
 }
 
 // ---- Versions and sizes, as the host's flatpak last told them ----
@@ -509,6 +587,11 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 }
             };
             p.items.push((a.name.to_string(), a.id.to_string()));
+            p.what = a.name.to_string();
+            // Asked for twice: said now, before the dialog, not after it.
+            if let Some(why) = ui.work_refusal(&p) {
+                return Some(toast(&why));
+            }
             Some(dialog(ui, p))
         }
         "tile-remove" => {
@@ -526,12 +609,30 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.done = format!("{} removed from your library", t.name);
             Some(dialog(ui, p))
         }
+        // Where a thing comes from, in a line (the row's Options menu; its page says more).
+        "store-source" => Some(toast(&match arg {
+            "decky" => "Decky Loader comes from its official release on github.com/SteamDeckHomebrew/decky-loader.".to_string(),
+            _ => match arg.strip_prefix("tile:").and_then(tile) {
+                Some(t) => format!("{} is a tile that opens {} in Chrome.", t.name, t.url),
+                None => {
+                    let a = APPS.iter().find(|a| a.id == arg)?;
+                    format!("{} comes from Flathub ({}).", a.name, a.id)
+                }
+            },
+        })),
         "update-all" => {
             let names: Vec<&str> = APPS.iter().filter(|a| ui.updates.iter().any(|u| u == a.id)).map(|a| a.name).collect();
+            if names.is_empty() {
+                return Some(toast("Everything is up to date."));
+            }
             let mut p = Plan::new("Update everything?", "Gets the newest version of every app with an update. No password needed.", "Update all");
             p.items = names.iter().map(|x| (x.to_string(), String::new())).collect();
             p.steps.push(Step::Host(flatpak(&["update", "-y", "--noninteractive"])));
             p.done = "Everything is up to date".into();
+            p.what = match names.len() { 1 => "1 update".to_string(), c => format!("{c} updates") };
+            if let Some(why) = ui.work_refusal(&p) {
+                return Some(toast(&why));
+            }
             Some(dialog(ui, p))
         }
         "tile" => {

@@ -33,7 +33,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("games", "Every installed game. Pick one to play it and see whether it runs here, with its switches, its Proton and its saves. Games that won't run here are at the end, with the other ways to play them."),
     ("library", "Will my games run? Each game checked against Valve's ratings, the anti-cheat lists and Turbine Hub's own fixes."),
     ("files", "A file explorer laid out like the one on Windows. Windows-like names the places as Windows does (This PC, C:, Users, Games, Program Files, Recycle Bin) and True Linux shows every real name; the switch is on the command bar and the real path is always in the status bar. A opens, B goes back a folder, Start ticks a line, and Options (X or a right-click) has Cut, Copy, Rename, Delete and the rest. At a keyboard a letter jumps to the name that starts with it, so Options is Shift+F10 and Find is Ctrl+F here; F2, Del, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+A, Ctrl+T, Ctrl+W, Ctrl+L and Alt+Up work as on Windows. Delete goes to the Recycle Bin and can be undone. SteamOS's own files are shown locked. No password is ever asked."),
-    ("store", "Apps, Decky plugins, launchers and TV tiles. Pick one for its own page with Install, Open, Update and Remove. Apps come from Flathub and keep themselves current."),
+    ("store", "Apps, Decky plugins, launchers and TV tiles. Every row says how it stands (Not installed, Installed, Update ready, Working) and has its button: A installs, opens or updates it, after showing what will happen. Options (X) has the rest: Remove, Details, where it comes from. LT and RT change the section. Installs and updates run while you keep browsing; the top bar shows what is being worked on and how many wait."),
     ("store-item", "One thing from the Store: what it is, where it comes from, and Open, Install, Update or Remove."),
     ("tool", "Turbine Hub's launch tool in Steam. Picked for a game in Steam, it carries that game's switches and Proton pick into the game."),
     ("proton", "Which Proton this game starts with. Proton is what runs Windows games here, and another version often fixes a game that won't start. Undo puts the last one back."),
@@ -77,6 +77,7 @@ pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
             "Find" => has("y"),
             "Play" => has("play"),
             "Tabs" | "Menu" => tabs,
+            "Sections" => shown.get("chips").is_some(),
             _ => true,
         })
         .map(|c| {

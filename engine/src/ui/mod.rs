@@ -17,12 +17,14 @@ pub mod machine;
 pub mod nsl;
 pub mod onepress;
 pub mod plan;
+pub mod queue;
 mod sample;
 pub mod saves;
 pub mod selftile;
 pub mod settings;
 mod setup;
 pub mod store;
+pub mod whatsnew;
 
 pub use activity::{ago, note as note_activity, read as read_activity};
 pub use games::Switches;
@@ -142,13 +144,15 @@ pub struct Ui {
     pub(crate) filter: BTreeMap<String, String>,
     /// The file explorer: its tabs, its view and what it is doing.
     pub(crate) files: files::Explorer,
+    /// The line of work that runs while the player browses (installs, updates, copies).
+    pub(crate) queue: queue::Queue,
 }
 
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new(), files: files::Explorer::default() }
+        Ui { queue: queue::Queue::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new(), files: files::Explorer::default() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -450,3 +454,5 @@ mod tests_app;
 mod tests_files;
 #[cfg(test)]
 mod tests_onepress;
+#[cfg(test)]
+mod tests_store;

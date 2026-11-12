@@ -75,7 +75,7 @@ Item {
         Hub.cancel(); close()
     }
     function confirm() {
-        if (d && d.local === "quit") { Qt.quit(); return }
+        if (d && d.local === "quit") { app.quit(); return }
         if (d && d.keep) { close(); return }
         // A press of the window's own making (Files): the dialog closes, then the press is made with what was typed.
         if (d && d.then) { const t = d.then, text = d.input ? typedBox.text : (t.value || ""); close(); app.doAct(t.act, t.arg || "", text); return }

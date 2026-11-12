@@ -62,7 +62,27 @@ or feels off; that's the list to tweak from.
 5. **Will my games run?** lists your games with Works, Needs a fix or Won't run here.
 
 ## 7. Store
-- Install a small app (VLC), open its page, remove it.
+- Every row says how it stands and has its button. On **VLC** press **A** (Install), confirm.
+  - No cover comes up. The top bar says "Working: VLC" with a turning mark, VLC's row says Working, and you can
+    keep moving, change the section with LT and RT, and turn the tabs.
+  - When it ends a note says "VLC installed" with the seconds it took, and the row says Installed with **Open**.
+- While one install runs, ask for two more (Spotify, OBS Studio).
+  - The bar counts them ("2 more waiting"), their rows say Waiting, and they run one after the other.
+  - Asking for VLC again while it is in the line is refused in a sentence, with no dialog.
+- With work running, press B on Home (or close the window in Desktop Mode).
+  - It asks: "... still running. Close anyway?". Cancel keeps everything going. Close anyway stops the running
+    install; afterwards `flatpak list` shows no half-installed app.
+- In Files, copy a large folder while an install runs.
+  - The copy waits ("Waiting for its turn" in the status bar), then runs with its progress in both bars.
+- X on an installed row lists Remove, Details and Where it comes from. Remove VLC that way.
+- With an update ready, **Start** is Update all in every section; Installed's chip counts the updates.
+- The top bar shows the battery percent (a bolt while charging) on a handheld and the clock in Game Mode; make the
+  Desktop Mode window narrow: the machine's name goes first, then the clock, then the percent, never the tabs.
+- The menu (View): **Switch to Desktop** in Game Mode asks, then SteamOS switches; in Desktop Mode it is
+  **Return to Gaming Mode**.
+- Games, a Steam game, Won't start?, **Check the game's files**: Steam opens its own check for that game.
+- After the next update of Turbine Hub, **What's new** shows once with the release's notes; Settings, Updates,
+  What's new shows it again.
 - Decky plugins: install Decky Loader from here (it comes from Decky's official release, checked by checksum).
 - The Turbine Hub quick panel needs a published release first (see the summary); then follow its steps.
 

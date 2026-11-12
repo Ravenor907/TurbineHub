@@ -194,7 +194,8 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("check-options", "--page=games --arg=steam:1086940 --check=options --machine=desktop --mode=guided"),
     // Options (X, R, a right-click, R3 held): a menu for one thing, with its own press first.
     ("options-game", "--page=games --arg=steam:1086940 --keys=x --machine=handheld --mode=guided"),
-    ("options-store-item", "--page=store --arg=apps --keys=right,x --machine=handheld --mode=guided"),
+    ("options-store-item", "--page=store --arg=apps --keys=x --machine=handheld --mode=guided"),
+    ("options-store-update", "--page=store --arg=installed --keys=down,down,x --machine=handheld --mode=guided"),
     ("options-machine-card", "--page=machine --keys=x --machine=handheld --mode=guided"),
     ("options-page", "--page=windrive --keys=x --machine=handheld --mode=guided"),
     ("options-keys", "--page=games --arg=steam:1086940 --keys=x --machine=desktop --mode=veteran --window"),
@@ -287,6 +288,50 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("check-files-mouse", "--page=files --arg=at=/home/deck/Downloads;sort=name --check=files-mouse --machine=desktop --mode=guided"),
     ("check-files-keys", "--page=files --arg=at=/home/deck/Downloads;sort=name --check=files-keys --machine=desktop --mode=guided"),
     ("check-files-pad", "--page=files --arg=at=/home/deck --check=files-pad --machine=handheld --mode=guided"),
+    // The Store: every row with its state and its button, each section, and the line of work that runs while the
+    // player browses (one being worked on, two waiting; the note when one ends; the question at closing).
+    ("store-essentials", "--page=store --machine=handheld --mode=guided"),
+    ("store-installed", "--page=store --arg=installed --machine=handheld --mode=guided"),
+    ("store-emulation", "--page=store --arg=emulation --machine=desktop --mode=veteran"),
+    ("store-working", "--page=store --arg=apps --machine=handheld --mode=guided --queue=0"),
+    ("store-queue", "--page=store --arg=apps --machine=handheld --mode=guided --queue=2"),
+    ("store-queue-installed", "--page=store --arg=installed --machine=handheld --mode=guided --queue=2"),
+    ("store-done", "--page=store --arg=apps --act=queue-finish: --machine=handheld --mode=guided --queue=2"),
+    ("store-failed", "--page=store --arg=apps --act=queue-finish: --value=You're offline. This needs the internet. --machine=handheld --mode=guided --queue=0"),
+    ("store-refused", "--page=store --arg=apps --act=store:com.spotify.Client --machine=handheld --mode=guided --queue=2"),
+    ("dialog-store-install", "--page=store --arg=apps --keys=right,a --machine=handheld --mode=guided"),
+    ("dialog-store-update-all", "--page=store --arg=installed --keys=start --machine=handheld --mode=guided"),
+    ("dialog-close-working", "--page=home --act=quit: --machine=handheld --mode=guided --queue=2"),
+    ("store-tv-queue", "--page=store --arg=tv --machine=tv --mode=guided --queue=1"),
+    ("store-pc-queue", "--page=store --arg=apps --machine=desktop --mode=veteran --queue=2"),
+    ("store-window-queue", "--page=store --arg=apps --machine=desktop --mode=guided --window --queue=2"),
+    ("store-size-150", "--page=store --arg=apps --machine=handheld --mode=guided --scale=150 --queue=2"),
+    ("store-narrow", "--page=store --arg=apps --half --machine=handheld --mode=guided --queue=2"),
+    ("store-light", "--page=store --arg=installed --machine=handheld --mode=guided --theme=light --queue=1"),
+    ("store-contrast", "--page=store --arg=apps --machine=handheld --mode=guided --theme=contrast --queue=1"),
+    ("store-vision-none", "--page=store --arg=installed --machine=handheld --mode=guided --vision=none --queue=1"),
+    ("store-dense", "--page=store --arg=apps --machine=handheld --mode=guided --finger=74"),
+    ("motion-store", "--page=store --keys=rt,down,right,rt --machine=handheld --mode=guided --motion=full"),
+    // The top bar's status: the battery (only where there is one), the clock, the work and the updates, on each
+    // kind of machine and where there is little room (the clock goes first, then the percent).
+    ("topbar-handheld", "--page=home --machine=handheld --mode=veteran --queue=2"),
+    ("topbar-tv", "--page=home --machine=tv --mode=guided --queue=2"),
+    ("topbar-pc", "--page=home --machine=desktop --mode=guided --queue=2"),
+    ("topbar-window", "--page=machine --machine=desktop --mode=guided --window --queue=2"),
+    ("topbar-narrow", "--page=home --half --machine=handheld --mode=guided --queue=2"),
+    ("topbar-size-150", "--page=machine --machine=handheld --mode=guided --scale=150 --queue=2"),
+    ("topbar-size-50", "--page=home --machine=handheld --mode=guided --scale=50 --queue=2"),
+    // What's new after an update, and the way to the other session in the menu.
+    ("whats-new", "--page=home --act=whats-new-due: --machine=handheld --mode=guided --whats-new"),
+    ("settings-whats-new", "--page=settings --arg=updates --machine=handheld --mode=guided --whats-new"),
+    ("dialog-session-desktop", "--page=home --act=session:desktop --machine=handheld --mode=guided"),
+    ("dialog-session-gamemode", "--page=home --act=session:gamemode --machine=desktop --mode=guided --window"),
+    ("menu-window", "--page=home --act=menu: --machine=desktop --mode=guided --window"),
+    ("dialog-validate", "--page=games --arg=steam:1086940 --act=game:validate|steam:1086940 --machine=handheld --mode=guided"),
+    ("help-store", "--page=help --arg=store@apps --machine=handheld --mode=guided"),
+    // The Store worked with real keys and the controller: a row's button, the line of work, the sections.
+    ("check-store-row", "--page=store --arg=apps --check=store-row --machine=handheld --mode=guided"),
+    ("check-queue", "--page=store --arg=apps --check=queue --machine=desktop --mode=guided --queue=2"),
 ];
 
 fn w(base: &Path, rel: &str, text: &str) {

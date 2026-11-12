@@ -46,6 +46,9 @@ Window {
     readonly property var st: JSON.parse(Hub.state)
     readonly property bool veteran: st.mode === "veteran"
     readonly property bool windowed: st.window || (!Hub.gamemode && !shot.on)
+    // What the top bar shows beside the tabs (the engine's `Ui::status`): the battery, the clock, the line of work
+    // that runs while the player browses, the updates that are ready.
+    readonly property var status: JSON.parse(Hub.status)
 
     // ---------------------------------------------------------------- sizes
     // Everything is drawn from a 1280 x 800 design, scaled to the window and by the player's interface size.
@@ -184,8 +187,9 @@ Window {
         if (keyboard && current.page === "files" && !dialog.open) { const own = { x: "Shift+F10", y: "Ctrl+F", lb: "PgUp", rb: "PgDn" }; if (own[k]) return own[k] }
         // (Start is called Start on every pad: Turbine Hub's own menu is on View, so "MENU" would name two things.
         // F1 and F5 have no button on a controller: no cap there.)
-        const names = keyboard ? { a: "Enter", b: "Esc", x: "R", y: "F", lb: "Q", rb: "E", lt: "Home", rt: "End", view: "Tab", start: "Ctrl+Enter", play: "Space", r3: "Click", f1: "F1", f5: "F5", move: "Arrows" }
-            : { view: oldPad ? "BACK" : "VIEW", start: "START", play: "START", move: "D-PAD", f1: "", f5: "" }
+        // (sprev and snext: the section before and the next, on a page with sections across its top.)
+        const names = keyboard ? { a: "Enter", b: "Esc", x: "R", y: "F", lb: "Q", rb: "E", lt: "Home", rt: "End", view: "Tab", start: "Ctrl+Enter", play: "Space", r3: "Click", f1: "F1", f5: "F5", move: "Arrows", sprev: "[", snext: "]" }
+            : { view: oldPad ? "BACK" : "VIEW", start: "START", play: "START", move: "D-PAD", f1: "", f5: "", sprev: "LT", snext: "RT" }
         return names[k] !== undefined ? names[k] : k.toUpperCase()
     }
     // When a key or the controller was last pressed, or the page last rebuilt: for a moment after, the mouse
@@ -231,7 +235,8 @@ Window {
     function fileFor(page) {
         if (page === "home") return "HomePage.qml"
         if (page === "files") return "FilesPage.qml"
-        if (page === "games" || page === "store" || page === "settings") return "SidePage.qml"
+        if (page === "games" || page === "settings") return "SidePage.qml"
+        if (page === "store") return "SectionsPage.qml"
         if (page === "machine" || page === "bring") return "CardsPage.qml"
         if (page === "pick") return "PickPage.qml"
         if (page === "setup") return "SetupPage.qml"
@@ -312,8 +317,18 @@ Window {
         loadPage()
     }
     // Back with nothing behind: a question, never a sudden exit.
+    // With work still in the line it says so: closing stops it.
     function askClose() {
-        dialog.show({ title: "Close Turbine Hub?", text: "Everything you set up stays as it is.", items: [], confirm: "Close", cancel: "Cancel", ask: "", danger: true, local: "quit" })
+        dialog.show({ title: "Close Turbine Hub?", text: status.closing !== "" ? status.closing : "Everything you set up stays as it is.", items: [], confirm: status.closing !== "" ? "Close anyway" : "Close", cancel: "Cancel", ask: "", danger: true, local: "quit" })
+    }
+    // Closing: what waits in the line of work is dropped and the job being worked on is stopped cleanly first.
+    property bool leaving: false
+    function quit() { leaving = true; Hub.stopWork(); Qt.quit() }
+    // The window's own close button asks too, while work runs.
+    onClosing: (c) => {
+        if (leaving) return
+        if (status.jobs > 0 && !Hub.busy) { c.accepted = false; if (!dialog.open) askClose() }
+        else Hub.stopWork()
     }
 
     // ---------------------------------------------------------------- presses wait for the page
@@ -411,7 +426,7 @@ Window {
     function doAct(act, arg, value) {
         if (act === "none" || act === "" || act === undefined) return
         if (act === "tab") { open(arg); return }
-        if (act === "quit") { Qt.quit(); return }
+        if (act === "quit") { if (status.jobs > 0) askClose(); else quit(); return }
         handle(JSON.parse(Hub.act(act, arg || "", value === undefined ? "" : String(value))))
     }
     function handle(r) {
@@ -585,8 +600,15 @@ Window {
         if (dialog.open && dialog.press(k)) return
         if (focusItem && focusItem.press && focusItem.press(k)) return
         if (k === "up" || k === "down" || k === "left" || k === "right") { step(k); return }
-        // LT and RT: a screenful up or down the list the highlight is in.
-        if (k === "lt" || k === "rt") { jumpBy(k === "rt"); return }
+        // LT and RT ([ and ] on a keyboard): the section before or the next where the page has sections across its
+        // top (the Store). Elsewhere LT and RT jump a screenful up or down the list the highlight is in, and [ and
+        // ] turn the tabs.
+        if (k === "lt" || k === "rt" || k === "sprev" || k === "snext") {
+            const next = k === "rt" || k === "snext"
+            if (!dialog.open && view.item && view.item.section && view.item.section(next ? 1 : -1)) return
+            if (k === "lt" || k === "rt") { jumpBy(next); return }
+            k = next ? "rb" : "lb"
+        }
         if (dialog.open) return
         if (view.item && view.item.press && view.item.press(k)) return
         if (k === "lb") switchTab(-1)
@@ -827,7 +849,7 @@ Window {
         map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
         map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
         map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_PageUp] = "lb"; map[Qt.Key_PageDown] = "rb"
-        map[Qt.Key_BracketLeft] = "lb"; map[Qt.Key_BracketRight] = "rb"
+        map[Qt.Key_BracketLeft] = "sprev"; map[Qt.Key_BracketRight] = "snext"
         map[Qt.Key_R] = "x"; map[Qt.Key_X] = "x"; map[Qt.Key_Menu] = "x"
         map[Qt.Key_F] = "y"; map[Qt.Key_Y] = "y"; map[Qt.Key_Slash] = "y"
         map[Qt.Key_Tab] = "tab"; map[Qt.Key_Backtab] = "backtab"; map[Qt.Key_V] = "view"; map[Qt.Key_F10] = "view"
@@ -997,11 +1019,31 @@ Window {
             }
             // Files: a copy's progress or its end, a search below a folder finding more.
             if (r.files) app.filesNews(r.files)
+            // A job of the line of work ended: its note, and the page again with the thing's new state.
+            if (r.job) app.jobNews(r.job)
+            // This version's notes arrived after an update: What's new, once.
+            if (r.whatsnew) app.whatsNew()
             if (r.done) {
                 if (r.done.ok && r.done.open) app.open(r.done.open); else app.reloadPage()
                 if (r.done.toast) toast.show(r.done.toast)
             } else if (r.tick && !dialog.open && !(view.item && view.item.busyTyping === true)) app.reloadPage()
         }
+    }
+    // The page shows a state that has changed since (a job ended under a dialog): read again once it can be.
+    property bool pageStale: false
+    function jobNews(n) {
+        if (dialog.open || typing || (view.item && view.item.busyTyping === true)) pageStale = true
+        else reloadPage()
+        if (n.toast) toast.show(n.toast)
+    }
+    function freshen() { if (pageStale && !dialog.open && !typing) { pageStale = false; reloadPage() } }
+    // What's new: asked once the window is free to show it; the engine answers with the screen only when it is due.
+    property bool whatsNewWaits: false
+    function whatsNew() {
+        if (shot.on || st.mode === "" || bare) return
+        if (dialog.open || Hub.busy || typing) { whatsNewWaits = true; return }
+        whatsNewWaits = false
+        doAct("whats-new-due", "", "")
     }
     function filesNews(n) {
         const here = current.page === "files" && view.item
@@ -1096,7 +1138,11 @@ Window {
         // Highlight and note overlapping at the bottom: the note goes up.
         toastHigh = at.y + it.height > low - px(8) && at.y < bottomBar.y
     }
-    DialogCard { id: dialog; app: app; enabled: !Hub.busy; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top } }
+    DialogCard {
+        id: dialog; app: app; enabled: !Hub.busy; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top }
+        // What waited for the dialog to go: a page that changed under it, What's new.
+        onOpenChanged: if (!open) Qt.callLater(function () { app.freshen(); if (app.whatsNewWaits) app.whatsNew() })
+    }
     // The controller's pointer and the ring of a held button, over everything.
     PointerLayer { app: app }
 
@@ -1144,6 +1190,8 @@ Window {
             // Started from its own icon (Turbine Files: --page=files), it opens on Files.
             if (Hub.option("page") === "files") tab = tabIndex("files")
             loadPage()
+            // After an update: What's new, once (when its notes are here already).
+            Qt.callLater(whatsNew)
         }
         if (shot.on) {
             selfCheck.setSource("SelfCheck.qml", { app: app, target: shot.path })

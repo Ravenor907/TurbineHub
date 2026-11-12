@@ -31,6 +31,7 @@ pub const SCHEME: &[Control] = &[
     Control { name: "Main button", pad: "Start", keys: "Ctrl+Enter", mouse: "Click the button", does: "Presses the page's main button (Continue, Apply, Copy). Without one it opens Settings." },
     Control { name: "Play", pad: "Hold Start", keys: "Hold Space", mouse: "Click Play", does: "Starts the highlighted game, from the Games tab." },
     Control { name: "Jump", pad: "LT / RT", keys: "Home / End", mouse: "Wheel", does: "LT and RT jump a screenful up and down; Home and End go to the first and the last; the wheel scrolls." },
+    Control { name: "Sections", pad: "LT / RT on a page with sections", keys: "[ / ]", mouse: "Click a section", does: "Where a page has sections across its top (the Store), LT and RT go to the one before and the next instead of jumping." },
     Control { name: "Pointer", pad: "Right stick", keys: "", mouse: "", does: "Moves a pointer drawn by Turbine Hub. It hides after a moment and when the D-pad is used." },
     Control { name: "Click", pad: "R3", keys: "", mouse: "Click", does: "Presses what is under the pointer. With the pointer hidden it is A." },
     Control { name: "Pointer options", pad: "Hold R3", keys: "", mouse: "Right-click", does: "Options for what is under the pointer. LT does the same while the pointer shows, and RT holds the button down to drag a slider." },
@@ -127,7 +128,8 @@ fn looks_into(target: &str) -> Option<(&str, &str)> {
 /// done there, so X on it offers Install or Turn on without going in first.
 fn with_item_options(ui: &mut Ui, j: Json) -> Json {
     let give = |ui: &mut Ui, item: Json| -> Json {
-        if item.str_at("act") != Some("open") {
+        // A row that says what it offers itself (a Store row) keeps its own list.
+        if item.str_at("act") != Some("open") || item.get("offers").is_some() {
             return item;
         }
         let Some((page, arg)) = item.str_at("arg").and_then(looks_into) else { return item };

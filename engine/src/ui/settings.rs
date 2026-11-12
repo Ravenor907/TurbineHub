@@ -107,6 +107,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             if ui.veteran() {
                 rows.push(with(row("testbuilds", "", "toggle", "Test builds", "Get builds before they are released. They can have rough edges."), "on", b(st.test_builds)));
             }
+            rows.push(super::whatsnew::row(ui));
             rows.push(row("none", "", "info", "Store apps", "Apps from the Store tab keep themselves current through Flathub."));
             if ui.agent_running() {
                 rows.push(row("none", "", "info", "Checked every day", "The background helper looks once a day and says so here and on Home. Nothing installs by itself."));
@@ -468,10 +469,24 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let d = obj! {"title": s(title), "text": s(text), "items": arr([]), "confirm": s(confirm), "cancel": s("Not now"), "ask": s(""), "danger": b(false), "local": s("quit")};
             return Some(if ui.window { obj! {"dialog": d, "restart": b(true)} } else { obj! {"dialog": d} });
         }
+        // Leaves for the other session through SteamOS's own switch, after a question: everything open closes.
+        "session" => {
+            let desktop = arg == "desktop";
+            if !ui.queue.is_empty() {
+                return Some(super::plan::toast("Something is still being worked on. Switch once it has finished, so nothing is cut short."));
+            }
+            let mut p = if desktop { Plan::new("Switch to Desktop?", "SteamOS leaves Game Mode and opens Desktop Mode. A game that is running closes, so save first. Return to Gaming Mode is on the desktop and in Turbine Hub's menu.", "Switch") } else { Plan::new("Return to Gaming Mode?", "SteamOS closes Desktop Mode and opens Game Mode. Every open window closes, so save your work first.", "Return") };
+            p.danger = true;
+            p.steps.push(Step::Host(["flatpak-spawn", "--host", "steamos-session-select", if desktop { "plasma" } else { "gamescope" }].iter().map(|x| x.to_string()).collect()));
+            p.done = if desktop { "Switching to Desktop" } else { "Returning to Gaming Mode" }.into();
+            return Some(dialog(ui, p));
+        }
         "menu" => {
             // `arg` is the page the menu was opened on ("page@its argument"): Help is about that page.
             let help = format!("help|{arg}");
-            let rows = [("Help for this page", "open", help.as_str(), "f1"), ("Where's my...?", "open", "wheres", ""), ("Bring it over", "open", "bring", ""), ("Review changes", "open", "changes", ""), ("Settings", "tab", "settings", ""), ("Close Turbine Hub", "quit", "", "")];
+            // The way to the other half of SteamOS: Desktop Mode from Game Mode, and back from a window.
+            let session = if ui.window { ("Return to Gaming Mode", "session", "gamemode", "") } else { ("Switch to Desktop", "session", "desktop", "") };
+            let rows = [("Help for this page", "open", help.as_str(), "f1"), ("Where's my...?", "open", "wheres", ""), ("Bring it over", "open", "bring", ""), ("Review changes", "open", "changes", ""), ("Settings", "tab", "settings", ""), session, ("Close Turbine Hub", "quit", "", "")];
             return Some(obj! {"dialog": obj! {"title": s("Menu"), "text": s(""), "items": arr([]), "confirm": s(""), "cancel": s("Close"), "ask": s(""), "danger": b(false), "rows": arr(rows.iter().map(|(t, a, g, k)| obj! {"title": s(*t), "act": s(*a), "arg": s(*g), "key": s(*k)}))}});
         }
         _ => return None,

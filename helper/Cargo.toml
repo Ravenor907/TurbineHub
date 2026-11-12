@@ -1,0 +1,9 @@
+[package]
+name = "turbinehub-helper"
+description = "Turbine Hub's privileged helper: a fixed list of recorded, undoable system changes"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

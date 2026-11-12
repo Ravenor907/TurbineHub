@@ -1,0 +1,22 @@
+/target
+/vendor
+/.cargo
+/fonts
+/.flatpak-builder
+/flatpak_app
+/repo
+*.flatpak
+/shots
+/build-dir
+/app/build-commit.txt
+# Left by tools/ci-shots.sh, the Decky job and local tools.
+/home
+/empty
+/data
+/samples
+/fh
+/lhome
+/decky/out
+/TurbineHub-Decky.zip*
+/build.log
+/app/.qmlls.ini

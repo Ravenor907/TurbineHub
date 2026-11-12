@@ -1,0 +1,10 @@
+[package]
+name = "turbinehub-engine"
+description = "Machine detection, setup, checks and the change ledger for Turbine Hub"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# No outside dependencies on purpose: fewer moving parts, nothing to audit, and it builds anywhere.
+[dependencies]

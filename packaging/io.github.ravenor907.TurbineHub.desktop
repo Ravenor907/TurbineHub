@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Turbine Hub
+Comment=Setup, checks and settings for SteamOS
+Exec=turbinehub
+Icon=io.github.ravenor907.TurbineHub
+Terminal=false
+StartupWMClass=io.github.ravenor907.TurbineHub
+Categories=Game;Utility;
+Keywords=steamos;setup;settings;handheld;checkup;

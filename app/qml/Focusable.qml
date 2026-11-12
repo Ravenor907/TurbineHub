@@ -1,0 +1,48 @@
+import QtQuick
+
+// Anything the highlight can land on. Main.qml finds these by `focusable`, moves between them by where they are on
+// screen, and sends the pressed button to `press`. A click or a tap lands the highlight and activates in one go;
+// the mouse resting on one moves the highlight there.
+//
+// The highlight is always a ring outside the item, never a fill, so it reads the same on a card, a row or a
+// button and can't be mistaken for "selected" (an accent mark) or "primary" (an accent fill).
+//
+// app (required): Main.qml's window. fid: a name that survives a reload, so the highlight comes back to the same
+// thing. aLabel: what A does here, for the footer ("" when A does nothing). hints: more footer hints while the
+// highlight is here. firstFocus: where the highlight starts on a page.
+Item {
+    id: f
+    required property var app
+    property bool focusable: true
+    property string fid: ""
+    property string aLabel: "Select"
+    property var hints: []
+    property bool firstFocus: false
+    // A click or tap anywhere on it presses it (off for rows whose inner parts take the tap themselves).
+    property bool tapActivates: true
+    property real ringRadius: app.px(10)
+    // The ring sits this far outside the item (negative draws it inside, for items at a clipped edge).
+    property real ringGap: app.px(3)
+    readonly property bool focused: app.focusItem === f
+    signal activated()
+
+    function press(k) {
+        if (k === "a" && aLabel !== "") { activated(); return true }
+        return false
+    }
+
+    Rectangle {
+        z: 20
+        anchors.fill: parent
+        anchors.margins: -f.ringGap
+        radius: f.ringRadius + f.ringGap
+        color: "transparent"
+        border.width: Math.max(2, f.app.px(3))
+        border.color: f.app.colors.accentHi
+        opacity: f.focused ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: f.app.motion.on; NumberAnimation { duration: f.app.motion.quick; easing.type: f.app.motion.ease } }
+    }
+    HoverHandler { id: hover; enabled: f.focusable; onHoveredChanged: if (hovered && hover.point.device.pointerType !== PointerDevice.Finger) f.app.setFocus(f, true) }
+    TapHandler { enabled: f.focusable; onTapped: { f.app.setFocus(f, true); if (f.tapActivates && f.aLabel !== "") f.activated() } }
+}

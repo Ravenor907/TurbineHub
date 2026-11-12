@@ -108,11 +108,14 @@ New:
 - `ledger`: the change record shared with the helper (see 4).
 - `settings`, `glossary`, `mode`.
 - `cli`: `--json` verbs for the Decky backend and scripts.
+- `ui`: what every screen shows and what every press does. Each page is one JSON object; each press answers with a note, a page to open, or the one dialog with its exact steps (`Plan`, `Step`). It also holds the per-game switches file, the lighting file, the Store's list, the setup file and the made-up machine used for pictures and tests.
 
 Every decision (filtering, sorting, what to warn about, what a check means) is Rust with tests. QML only shows what the engine says.
 
 ### app
-cxx-qt bridge objects expose engine state to QML. A `--screenshot <page> <size>` mode renders a page with fake data and loads SelfCheck.qml, which checks clipped text, overflow and missing footer hints.
+One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and takes presses (`Hub.act`, `Hub.confirm`). The steps of a confirmed dialog and the questions to the host and the internet run on their own threads and come back through `Hub.poll`, together with the controller (SDL). `app/qml/COMPONENTS.md` lists the parts.
+
+`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
 
 ### Background agent
 The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit in `~/.config/systemd/user/` (user-level, survives SteamOS updates). It watches game launches (Game Boost on/off, save snapshots), records battery and sleep history, animates lighting, checks for updates daily, and runs the after-update check (see 4.6).
@@ -154,7 +157,7 @@ SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced.
 The helper files are root-owned and not writable by the user, so the user account can't swap the binary that the rule allows.
 
 ### 4.3 How the app calls it
-1. **First install (the one password):** the in-app password dialog (works in Game Mode, where no system password prompt exists) runs `flatpak-spawn --host sudo -S -k <helper inside the Flatpak> install` with the password on stdin. The helper copies itself to `/var/lib/turbinehub/bin`, writes the polkit rule and the boot unit, and records which user it serves. The password is never stored.
+1. **First install (the one password):** the in-app password dialog (works in Game Mode, where the system has no password dialog of its own) runs `flatpak-spawn --host sudo -S -k <helper inside the Flatpak> install` with the password on stdin. The helper copies itself to `/var/lib/turbinehub/bin`, writes the polkit rule and the boot unit, and records which user it serves. The password is never stored.
 2. **After that:** `flatpak-spawn --host pkexec /var/lib/turbinehub/bin/turbinehub-helper <job> <json>`. The polkit rule says YES only for that exact program, for the active local session of its owner. No password, works in Game Mode.
 3. **Helper updates ask for the password again** (step 1). They are rare, and a password-free self-update would let any program running as the player replace the helper.
 4. The helper refuses to run unless its folder and file are root's and writable by nobody else, and refuses callers other than its owner.

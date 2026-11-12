@@ -1,0 +1,53 @@
+{
+    "id": "io.github.ravenor907.TurbineHub",
+    "runtime": "org.kde.Platform",
+    "runtime-version": "6.11",
+    "sdk": "org.kde.Sdk",
+    "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+    "command": "turbinehub",
+    "finish-args": [
+        "--share=ipc",
+        "--share=network",
+        "--socket=wayland",
+        "--socket=x11",
+        "--device=all",
+        "--filesystem=/run/udev:ro",
+        "--filesystem=/run/media",
+        "--filesystem=~/.local/share/Steam",
+        "--filesystem=~/.steam:ro",
+        "--filesystem=~/.var/app/com.heroicgameslauncher.hgl",
+        "--filesystem=~/.config/heroic:ro",
+        "--filesystem=~/Games",
+        "--filesystem=~/.var/app/com.github.mtkennerly.ludusavi:ro",
+        "--filesystem=/var/lib/turbinehub:ro",
+        "--filesystem=~/homebrew:ro",
+        "--talk-name=org.freedesktop.Flatpak"
+    ],
+    "modules": [
+        {
+            "name": "turbinehub",
+            "buildsystem": "simple",
+            "build-options": {
+                "append-path": "/usr/lib/sdk/rust-stable/bin",
+                "env": {
+                    "CARGO_HOME": "/run/build/turbinehub/cargo",
+                    "CARGO_NET_OFFLINE": "true",
+                    "TURBINEHUB_VERSION": "0.1"
+                }
+            },
+            "build-commands": [
+                "if [ -d /run/ccache ]; then export CARGO_TARGET_DIR=/run/ccache/cargo-target; fi; cargo --offline build --release --locked -p turbinehub -p turbinehub-helper && for b in turbinehub turbinehub-helper; do install -Dm755 \"${CARGO_TARGET_DIR:-target}/release/$b\" /app/bin/$b; done",
+                "install -Dm644 -t /app/share/turbinehub/fonts fonts/*.ttf",
+                "install -Dm644 -t /app/share/turbinehub/licenses fonts/OFL-*.txt LICENSE",
+                "install -Dm644 -t /app/share/turbinehub/art packaging/art/veteran.jpg",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineHub.desktop /app/share/applications/io.github.ravenor907.TurbineHub.desktop",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineHub.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineHub.metainfo.xml",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineHub.svg /app/share/icons/hicolor/scalable/apps/io.github.ravenor907.TurbineHub.svg",
+                "for n in 32 48 64 128 256 512; do install -Dm644 packaging/io.github.ravenor907.TurbineHub-$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineHub.png; done"
+            ],
+            "sources": [
+                { "type": "dir", "path": "..", "skip": ["target", "build-dir", ".flatpak-builder", "shots", "repo", "decky/node_modules"] }
+            ]
+        }
+    ]
+}

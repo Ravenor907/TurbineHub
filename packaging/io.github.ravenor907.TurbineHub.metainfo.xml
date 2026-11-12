@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ravenor907.TurbineHub</id>
+  <name>Turbine Hub</name>
+  <summary>The first stop after installing SteamOS</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.ravenor907">
+    <name>Ravenor907</name>
+  </developer>
+  <description>
+    <p>Setup, checks and settings for SteamOS on handhelds, desktop PCs and TV PCs.</p>
+    <ul>
+      <li>Sets up a fresh SteamOS install for the machine it runs on</li>
+      <li>Checks the machine and the game library, with problems first and a fix for each</li>
+      <li>Shows every change before it is made, and every change can be undone</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.ravenor907.TurbineHub.desktop</launchable>
+  <url type="homepage">https://github.com/Ravenor907/TurbineHub</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1" date="2026-11-11" type="development"/>
+  </releases>
+</component>

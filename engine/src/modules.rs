@@ -33,7 +33,7 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
     let tune_value = format!("{tune_on} of {} on", tune.len());
     let blocked = ledger.settings().iter().filter(|s| matches!(s, Setting::Wake { wake: false, .. })).count();
     let can_wake = m.wake_devices.iter().filter(|d| d.enabled).count();
-    let wake_value = if blocked > 0 { format!("{blocked} blocked") } else { format!("{can_wake} devices can wake it") };
+    let wake_value = if blocked > 0 { format!("{blocked} blocked") } else { if can_wake == 1 { "1 device can wake it".to_string() } else { format!("{can_wake} devices can wake it") } };
 
     if matches!(m.kind, Kind::Handheld | Kind::Laptop) {
         if let Some(pl) = m.power_limits.first() {

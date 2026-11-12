@@ -26,6 +26,7 @@ pub mod steam;
 pub mod steam_art;
 pub mod switches;
 pub mod tuneup;
+pub mod ui;
 pub mod vdf;
 pub mod zip;
 

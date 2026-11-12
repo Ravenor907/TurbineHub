@@ -67,7 +67,7 @@ def social():
     art.put_turbine(im, (w // 2, 250), 560, faint=40)
     art.put_turbine(im, (w // 2, 250), 290)
     art.words(im, "TURBINE HUB", (w // 2, 485), 70, spacing=0.1)
-    line(im, "Handhelds, desktop PCs and TV PCs on SteamOS", (w // 2, 565), 30)
+    line(im, "Unlock the True Potential of SteamOS", (w // 2, 565), 34)
     return im
 
 

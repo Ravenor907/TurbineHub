@@ -102,7 +102,7 @@ Recycle Bin rules (the freedesktop Trash specification 1.0, so Dolphin sees the 
 
 Opening: text (UTF-8, UTF-16 with its mark, old Western files; the first 256 KB) and common pictures preview inside the app; everything else opens with its own app through `xdg-open` on the host in Desktop Mode.
 
-Sandbox: every access goes through one trait (`Fs`) with real paths, and a map says where the app finds each one. Inside the Flatpak the host's `/usr` and `/etc` are under `/run/host`; everything else is at its own path once the Flatpak has `--filesystem=host`. Links are followed in real paths, so a link to `/usr/share` leads to the machine's folder and not the Flatpak runtime's.
+Sandbox: every access goes through one trait (`Fs`) with real paths, and a map says where the app finds each one. Inside the Flatpak the host's `/usr` and `/etc` are under `/run/host`; the home folder, other apps' data (`~/.var/app`), drives under `/run/media` and installed apps (`/var/lib/flatpak`, read only) are at their own paths. The Flatpak asks for exactly that (`home`, `~/.var/app`, `host-os:ro`, `host-etc:ro`, `/var/lib/flatpak:ro`), not for the whole machine, and no file action ever asks for a password. Links are followed in real paths, so a link to `/usr/share` leads to the machine's folder and not the Flatpak runtime's.
 
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.

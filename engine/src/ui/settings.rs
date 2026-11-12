@@ -111,7 +111,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         }
         "help" => vec![
             open_row("wheres", "Where's my...?", "Windows things and where they are on SteamOS", "Open"),
-            with(row("reports", "", "toggle", "Send problem reports", "Off unless you turn it on. Reports never hold names, addresses or keys."), "on", b(st.reports)),
+            row("none", "", "info", "Problem reports", "Turbine Hub never sends anything. A report you write from a game's page stays on this machine for you to share if you want."),
             open_row("pick", "Pick a mode again", "Shows the first screen", "Open"),
         ],
         _ => vec![
@@ -259,17 +259,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             };
             p.steps.push(Step::Choice { key: "testbuilds", on });
             p.done = if on { "Test builds on" } else { "Test builds off" }.into();
-            return Some(dialog(ui, p));
-        }
-        "reports" => {
-            let on = !st.reports;
-            let mut p = if on {
-                Plan::new("Send problem reports?", "When something goes wrong, Turbine Hub may send a short report so it can be fixed: what failed, its version and the kind of machine. Reports never hold names, addresses or keys.", "Turn on")
-            } else {
-                Plan::new("Stop problem reports?", "Turbine Hub sends nothing. Reports you write yourself from a game's page stay on this machine.", "Turn off")
-            };
-            p.steps.push(Step::Choice { key: "reports", on });
-            p.done = if on { "Problem reports on" } else { "Problem reports off" }.into();
             return Some(dialog(ui, p));
         }
         "agent" => {

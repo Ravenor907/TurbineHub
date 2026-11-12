@@ -26,7 +26,7 @@ pub struct Settings {
     pub save_snapshots: bool,
     /// Pre-releases too.
     pub test_builds: bool,
-    /// Problem reports go out only when the player turns this on.
+    /// Kept so older settings files still read; Turbine Hub sends no reports anywhere.
     pub reports: bool,
     /// First-run steps finished or skipped ("machine", "password", "games", "bring", "picks").
     pub setup_done: Vec<String>,

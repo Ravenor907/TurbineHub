@@ -564,11 +564,11 @@ fn system_dialogs_show_plain_names_and_before_and_after() {
     assert_eq!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("title"), Some("Graphics card power limit: 304 W \u{2192} 250 W"));
     p.cancel();
     // One-press settings ask once, and change only when confirmed.
-    for (act, title) in [("reports", "Send problem reports?"), ("testbuilds", "Get test builds?")] {
-        let d = parse(&g.act(act, "", "")).unwrap();
-        assert_eq!(d.get("dialog").unwrap().str_at("title"), Some(title));
-        assert_eq!(g.confirm().unwrap().steps, vec![Step::Choice { key: if act == "reports" { "reports" } else { "testbuilds" }, on: true }]);
-    }
+    let d = parse(&g.act("testbuilds", "", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().str_at("title"), Some("Get test builds?"));
+    assert_eq!(g.confirm().unwrap().steps, vec![Step::Choice { key: "testbuilds", on: true }]);
+    // Nothing is ever sent: there is no switch for it.
+    assert!(g.act("reports", "", "").is_empty() || !g.act("reports", "", "").contains("dialog"));
     let st = g.settings();
     assert!(!st.reports && !st.test_builds);
     // The living room PC is called that everywhere.

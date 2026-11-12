@@ -29,6 +29,12 @@ fn the_stand_in_answers_in_the_shape_the_engine_reads() {
     let fixes = library::parse_fixes(&data("fixes.json"));
     assert_eq!(fixes.iter().map(|(id, f)| (id.as_str(), f.kind.as_str())).collect::<Vec<_>>(), vec![("1245620", "switch"), ("1086940", "proton"), ("632470", "note")]);
     assert!(fixes.iter().all(|(_, f)| !f.words.is_empty()));
+
+    use turbinehub_engine::protondb::{self, Tier};
+    let players = json::parse(&data("protondb.json")).unwrap();
+    let says = |id: &str| players.get(id).map(Json::to_text).and_then(|t| protondb::parse(&t));
+    assert_eq!((says("1245620"), says("1086940"), says("1172470"), says("3999903"), says("892970"), says("1")), (Some(Tier::Gold), Some(Tier::Platinum), Some(Tier::Silver), Some(Tier::Borked), None, None));
+    assert!(players.entries().iter().all(|(_, s)| protondb::valid(&s.to_text())));
 }
 
 /// Runs tools/fake-home.py. None where there is no python3 (the test then has nothing to check).

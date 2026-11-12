@@ -116,6 +116,8 @@ pub const ALLOWED_HOSTS: &[&str] = &[
     // App details and icons for the Store tab.
     "flathub.org",
     ".flathub.org",
+    // What players report about a game on Proton (ProtonDB's summary, shown beside Valve's rating, never decided by).
+    "www.protondb.com",
 ];
 
 /// Domains where anyone can get a subdomain of their own, so a leading-dot entry for them would let in sites run by

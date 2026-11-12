@@ -15,6 +15,7 @@ pub mod launch;
 pub mod lighting;
 pub mod machine;
 pub mod nsl;
+pub mod onepress;
 pub mod plan;
 mod sample;
 pub mod saves;
@@ -224,7 +225,7 @@ impl Ui {
         let l = lighting::Lighting::load(&self.folder());
         // Another app setting the lights only matters once Turbine Hub drives them too.
         let rival = if lighting::Lighting::saved(&self.folder()) && l.left_to().is_none() { lighting::rivals(&self.host_lights, &self.ctx.home).first().map(|r| r.name.to_string()) } else { None };
-        Facts { app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, ..self.facts.clone() }
+        Facts { app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, tiles_without_art: crate::tile_art::to_fix(&self.ctx.home).len(), ..self.facts.clone() }
     }
 
     /// Is the helper on this machine older than the one this Turbine Hub came with? Its file differs then. The
@@ -447,3 +448,5 @@ mod tests_nsl;
 mod tests_app;
 #[cfg(test)]
 mod tests_files;
+#[cfg(test)]
+mod tests_onepress;

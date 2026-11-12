@@ -157,6 +157,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "light-test" | "light-report" => return super::lighting::act(ui, arg, "", value),
         "lighting" => open("module:lighting"),
         "self-tile" => return super::selftile::act(ui, "self-tile", "add", value),
+        "tile-art" => return super::onepress::act(ui, "tile-art", "fix", value),
         "help:panel" => return super::store::act(ui, "panel-guide", "", value),
         "help:controller" => guide(
             "Using a controller in Desktop Mode",

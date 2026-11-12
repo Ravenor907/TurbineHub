@@ -62,6 +62,16 @@ pub enum Step {
     /// The storage saver's work: frees the ticked leftovers (each one looked at again first), or puts back what the
     /// last cleaning moved to the Recycle Bin.
     Storage(crate::storage::Job),
+    /// Downloads a GE-Proton release ("" for the newest), checks it against its published SHA-512 and unpacks it
+    /// into Steam's folder for tools.
+    ProtonGet { tag: String },
+    /// Takes a GE-Proton build Turbine Hub fetched out again, by its folder's name (refused while a game is set
+    /// to use it).
+    ProtonRemove { name: String },
+    /// Draws the missing pictures of the library entries that have none, never over the player's own.
+    TileArt,
+    /// Removes exactly the pictures `TileArt` wrote, and the icons it set.
+    TileArtUndo,
 }
 
 /// Which password the dialog asks for.
@@ -114,7 +124,7 @@ impl Plan {
                 let has = |w: &str| c.iter().any(|a| a == w);
                 (has("flatpak") && (has("install") || has("update"))) || has("decky-install")
             }
-            Step::SelfUpdate | Step::Nsl { .. } => true,
+            Step::SelfUpdate | Step::Nsl { .. } | Step::ProtonGet { .. } => true,
             _ => false,
         })
     }
@@ -367,6 +377,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
         .or_else(|| super::launch::act(ui, action, arg, value))
         .or_else(|| super::saves::act(ui, action, arg, value))
         .or_else(|| super::selftile::act(ui, action, arg, value))
+        .or_else(|| super::onepress::act(ui, action, arg, value))
         .or_else(|| super::machine::act(ui, action, arg, value))
         .or_else(|| super::store::act(ui, action, arg, value))
         .or_else(|| super::nsl::act(ui, action, arg, value))

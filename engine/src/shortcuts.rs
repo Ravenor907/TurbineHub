@@ -484,6 +484,29 @@ fn remove_where(file: &Path, steam: Steam, ours: &dyn Fn(&vdf::BinItem) -> bool)
     Ok(TileChange::Removed(appid))
 }
 
+/// Sets the icon of entries in Steam's list: `pick` gets each entry's appid and the icon it names now, and answers
+/// the new one (None leaves the entry as it is). Everything else in the file stays byte for byte. Only while Steam
+/// is closed; a backup first. Answers how many entries changed (nothing is written for none).
+pub fn set_icons(file: &Path, pick: &dyn Fn(u32, &str) -> Option<String>, steam: Steam) -> Result<usize, String> {
+    let (before, mut doc) = load(file)?;
+    let mut changed = 0;
+    for e in list_mut(&mut doc).iter_mut() {
+        let Some(new) = pick(entry_appid(e), &entry_text(e, "icon")) else { continue };
+        let Some(items) = e.children_mut() else { continue };
+        match items.iter_mut().find(|i| i.key_is("icon")) {
+            Some(i) => *i = vdf::BinItem { key: i.key.clone(), ..vdf::BinItem::text("icon", &new) },
+            None => items.push(vdf::BinItem::text("icon", &new)),
+        }
+        changed += 1;
+    }
+    if changed == 0 {
+        return Ok(0);
+    }
+    steam.may_write()?;
+    save(file, before.as_deref(), &doc)?;
+    Ok(changed)
+}
+
 /// Adds the co-op tile with its art: the art (capsule, wide, hero, logo, icon from `art_dir`, see
 /// steam_art::COOP_PARTS) goes into the grid folder by the tile's appid first, never over the player's own, and the
 /// tile's icon is the icon there. `record`: Turbine Hub's art record.

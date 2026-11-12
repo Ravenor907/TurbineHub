@@ -201,6 +201,9 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
             out.push(section("Switches", rows));
         }
         let mut help = Vec::new();
+        if l.game.store == Store::Steam {
+            help.push(with(row("game", &format!("validate|{id}"), "button", "Check the game's files", "Steam looks for damaged or missing files and downloads those again"), "icon", s("shield")));
+        }
         if l.game.runtime != Runtime::Native {
             let line = if l.game.store == Store::Steam { launch::proton_line(ui, tv, &l.game) } else { "Heroic keeps this choice".to_string() };
             help.push(with(row("open", &format!("proton|{id}"), "button", "Try another Proton", &line), "icon", s("swap")));
@@ -274,6 +277,12 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let mut chips = vec![obj! {"text": s(l.verdict.label.words()), "tone": s(tone(&l.verdict))}];
     if l.takes_switches() && tv.uses(&l.game) == Uses::Hub && tv.state != tool::State::Missing {
         chips.push(obj! {"text": s("Uses Turbine Hub"), "tone": s("ok")});
+    }
+    // What players report on ProtonDB, beside Valve's rating. Only shown: nothing is locked or offered by it.
+    if l.game.store == Store::Steam
+        && let Some(t) = crate::protondb::tier(&ui.cache, &l.game.store_id)
+    {
+        chips.push(obj! {"text": s(t.chip()), "tone": s(t.tone())});
     }
     let playable = l.verdict.label != Label::WontRun;
     obj! {
@@ -563,6 +572,14 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                     let mut p = Plan::new(&format!("Play {name}?"), "Steam starts the game.", "Play");
                     p.steps.push(Step::Host(["flatpak-spawn", "--host", "xdg-open", &format!("steam://rungameid/{}", l.game.store_id)].iter().map(|x| x.to_string()).collect()));
                     p.done = format!("Starting {name}");
+                    dialog(ui, p)
+                }
+                "validate" if l.game.store != Store::Steam => toast("Steam checks the files of its own games. For this one, look in Heroic: the game's settings, Verify and repair."),
+                "validate" => {
+                    let mut p = Plan::new(&format!("Check the files of {name}?"), "Steam compares every file of the game with its own copy and downloads again what is damaged or missing. Saves and settings stay. Steam shows how far it is on its Downloads page.", "Check");
+                    p.items.push(("Close the game first".into(), "Steam can't check files that are in use.".into()));
+                    p.steps.push(Step::Host(["flatpak-spawn", "--host", "xdg-open", &format!("steam://validate/{}", l.game.store_id)].iter().map(|x| x.to_string()).collect()));
+                    p.done = format!("Steam is checking the files of {name}");
                     dialog(ui, p)
                 }
                 "play" => guide("Start it from Heroic", "Games from Epic, GOG and Amazon start from Heroic, or from their tile in your Steam library.", &[]),

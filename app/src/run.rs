@@ -325,6 +325,11 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
             }
             Ok(())
         }
+        Step::ProtonGet { .. } | Step::ProtonRemove { .. } | Step::TileArt | Step::TileArtUndo => {
+            // Only the pictures touch Steam's library: they ask whether Steam runs right before they write.
+            let steam = if matches!(st, Step::TileArt | Step::TileArtUndo) { steam_now() } else { Steam::Closed };
+            ui::onepress::run_step(st, &job.home, &job.folder, &job.cache, &Client::new(&job.version, &job.cache), steam, say).unwrap_or(Ok(()))
+        }
         Step::Nsl { tag, plugin } => {
             say("Getting NonSteamLaunchers".into());
             start_nsl(job, tag, *plugin)
@@ -518,6 +523,10 @@ pub fn gather(g: Gather, tx: Sender<Event>) {
         let lists = sources::refresh(&g.cache, &ids, Some(&turbinehub_engine::cli::anticheat_cache(&g.config_home)), now, 40, &mut fetch);
         let decky = sources::get(&sources::DECKY_RELEASE, &g.cache, now, &mut fetch);
         let nsl = sources::get(&sources::NSL_RELEASE, &g.cache, now, &mut fetch);
+        // The newest GE-Proton's name for the Proton page, and what players say about the installed Steam games on
+        // ProtonDB (a few games at a time). Both only fill the cache folder.
+        sources::get(&turbinehub_engine::proton_get::RELEASE, &g.cache, now, &mut fetch);
+        turbinehub_engine::protondb::refresh(&g.cache, &ids, now, 25, &mut fetch);
         let (found, updates_online) = look_for_updates(&g.home, &g.cache, &g.version, g.test_builds, g.check_now);
         let answers = [lists.online, if decky.origin == Origin::Live { Some(true) } else if decky.offline { Some(false) } else { None }, updates_online];
         let f = Facts {

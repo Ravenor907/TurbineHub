@@ -193,7 +193,7 @@ pub(crate) fn proton_page(ui: &mut Ui, arg: &str) -> Json {
         "crumb": s("Games"),
         "title": s(title),
         "intro": s("Another Proton often fixes a game that won't start. The pick is Turbine Hub's own: Steam's settings stay as they are."),
-        "sections": arr([section("", first), section("Installed", rows), section("", vec![more])]),
+        "sections": arr([section("", first), section("Installed", rows), section("", super::onepress::proton_rows(ui).into_iter().chain([more]).collect())]),
     }
 }
 

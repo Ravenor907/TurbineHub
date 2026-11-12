@@ -1,0 +1,7 @@
+{
+  "1245620": {"bestReportedTier": "platinum", "confidence": "strong", "score": 0.79, "tier": "gold", "total": 2107, "trendingTier": "platinum"},
+  "1086940": {"bestReportedTier": "platinum", "confidence": "strong", "score": 0.93, "tier": "platinum", "total": 1554, "trendingTier": "platinum"},
+  "1172470": {"bestReportedTier": "gold", "confidence": "strong", "score": 0.61, "tier": "silver", "total": 912, "trendingTier": "silver"},
+  "3999903": {"bestReportedTier": "bronze", "confidence": "moderate", "score": 0.12, "tier": "borked", "total": 41, "trendingTier": "borked"},
+  "892970": {"bestReportedTier": "pending", "confidence": "inadequate", "score": 0.5, "tier": "pending", "total": 2, "trendingTier": "pending"}
+}

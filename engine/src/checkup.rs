@@ -47,6 +47,8 @@ pub struct Facts {
     pub screens: Vec<ScreenNow>,
     /// A drive is nearly full: the title and the line the storage saver's look gives (`storage::Report::checkup`).
     pub storage_full: Option<(String, String)>,
+    /// Non-Steam games in the library that have no pictures (`tile_art::to_fix`): blank tiles.
+    pub tiles_without_art: usize,
 }
 
 /// One screen as Desktop Mode has it set now.
@@ -199,6 +201,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     if f.not_in_library {
         out.push(item("library", Level::Tip, "games", "Turbine Hub isn't in your Game Mode library".into(), "Add it and it opens from Game Mode like a game.", ("Add", "self-tile")));
+    }
+    if f.tiles_without_art > 0 {
+        out.push(item("tile-art", Level::Tip, "games", crate::ui::onepress::checkup_title(f.tiles_without_art), "They show as blank tiles. Turbine Hub draws a cover, a banner and a background for each, never over your own.", ("Fix", "tile-art")));
     }
     if f.no_controller {
         out.push(item("controller", Level::Tip, "games", "No controller found".into(), "Start Turbine Hub from its Steam entry to use a controller.", ("How", "help:controller")));

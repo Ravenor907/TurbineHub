@@ -1,74 +1,17 @@
 //! Games: the list with each game's label, one game's panel (switches, help when it won't start, saves, mods), and
 //! the library check. Games whose anti-cheat runs online are locked: they get no switch and no change at all.
+use super::launch::{self, Uses};
 use super::plan::{Plan, Step, dialog, guide, refresh, toast};
 use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
+use crate::compat_tool as tool;
 use crate::games::{Game, Runtime, Store};
-use crate::json::{self, Json};
+use crate::json::Json;
 use crate::library::{self, AntiCheat, Fix, Label, Options, ValveRating, Verdict};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::switches::Switch;
 use std::path::{Path, PathBuf};
 
-/// The per-game switches, in the order shown: (id, name, what it does).
-pub const SWITCHES: &[(&str, &str, &str)] = &[
-    ("fsr4", "FSR 4 upgrade", "Sharper upscaling, costs a few frames"),
-    ("framegen", "Frame generation", "Lossless Scaling, set the multiplier in Decky"),
-    ("handheld", "Handheld mode", "The game's handheld presets and on-screen keyboard"),
-    ("protonlog", "Proton log", "Writes a log of the next launch"),
-];
-
 /// The player's game switches: one file in Turbine Hub's folder, read by the launch tool at each start of a game.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Switches {
-    /// FSR 4 for every Proton game that isn't locked.
-    pub fsr4_all: bool,
-    /// Game id ("steam:1086940") to the switches that are on.
-    pub games: BTreeMap<String, BTreeSet<String>>,
-}
-
-impl Switches {
-    fn file(folder: &Path) -> PathBuf {
-        folder.join("games.json")
-    }
-    pub fn parse(text: &str) -> Switches {
-        let Ok(j) = json::parse(text) else { return Switches::default() };
-        let mut games = BTreeMap::new();
-        for (id, v) in j.get("games").map(Json::entries).unwrap_or(&[]) {
-            let on: BTreeSet<String> = v.as_array().iter().filter_map(Json::as_str).filter(|x| SWITCHES.iter().any(|(k, _, _)| k == x)).map(String::from).collect();
-            if !on.is_empty() {
-                games.insert(id.clone(), on);
-            }
-        }
-        Switches { fsr4_all: j.get("fsr4All").and_then(Json::as_bool).unwrap_or(false), games }
-    }
-    pub fn to_json(&self) -> String {
-        let games = Json::Obj(self.games.iter().map(|(id, on)| (id.clone(), arr(on.iter().map(s)))).collect());
-        obj! {"fsr4All": b(self.fsr4_all), "games": games}.to_text() + "\n"
-    }
-    pub fn load(folder: &Path) -> Switches {
-        std::fs::read_to_string(Self::file(folder)).map(|t| Switches::parse(&t)).unwrap_or_default()
-    }
-    pub fn save(&self, folder: &Path) {
-        let _ = crate::write_atomic(&Self::file(folder), self.to_json().as_bytes());
-    }
-    pub fn on(&self, game: &str, switch: &str) -> bool {
-        self.games.get(game).is_some_and(|x| x.contains(switch))
-    }
-    /// Flips one switch. A locked game is refused and nothing changes.
-    pub fn toggle(&mut self, game: &str, switch: &str, locked: bool) -> Result<bool, &'static str> {
-        if locked {
-            return Err("Its anti-cheat runs online, so Turbine Hub leaves this game alone.");
-        }
-        if !SWITCHES.iter().any(|(k, _, _)| *k == switch) {
-            return Err("Unknown switch.");
-        }
-        let set = self.games.entry(game.to_string()).or_default();
-        let now = if set.remove(switch) { false } else { set.insert(switch.to_string()) };
-        if set.is_empty() {
-            self.games.remove(game);
-        }
-        Ok(now)
-    }
-}
+pub use crate::switches::GameSwitches as Switches;
 
 /// What Turbine Hub knows about how games run, from the files in the cache folder: the anti-cheat list, Turbine
 /// Hub's fixes and Valve's report per game. `crate::sources::refresh` keeps them current, each with a saved copy
@@ -124,18 +67,29 @@ fn chip(v: &Verdict) -> &'static str {
     }
 }
 
-struct Listed {
-    game: Game,
-    verdict: Verdict,
+pub(crate) struct Listed {
+    pub game: Game,
+    pub verdict: Verdict,
 }
 
-fn listed(ui: &Ui) -> Vec<Listed> {
+impl Listed {
+    /// Its anti-cheat runs online: Turbine Hub never changes how it starts.
+    pub fn locked(&self) -> bool {
+        self.verdict.online_anticheat
+    }
+    /// A Windows game Steam starts with Proton: the only kind the launch tool and the switches are for.
+    pub fn takes_switches(&self) -> bool {
+        self.game.store == Store::Steam && self.game.runtime != Runtime::Native && !self.locked() && self.verdict.label != Label::WontRun
+    }
+}
+
+pub(crate) fn listed(ui: &Ui) -> Vec<Listed> {
     let ratings = Ratings::load(&ui.cache);
     let o = Options { windows_installed: ui.machine().windows_boot.is_some() };
     crate::scan_games(&ui.ctx.home).games.into_iter().map(|g| Listed { verdict: ratings.verdict(&g, o), game: g }).collect()
 }
 
-fn find(ui: &Ui, id: &str) -> Option<Listed> {
+pub(crate) fn find(ui: &Ui, id: &str) -> Option<Listed> {
     listed(ui).into_iter().find(|l| game_id(&l.game) == id)
 }
 
@@ -147,54 +101,158 @@ fn runs_with(g: &Game) -> &'static str {
     }
 }
 
-fn panel(ui: &Ui, l: &Listed) -> Vec<Json> {
+/// Does `text` hold every word of what the player typed? Case and marks like the apostrophe in "Baldur's" don't
+/// matter, and neither do the spaces inside a name ("eldenring" finds "Elden Ring"). An empty search matches
+/// everything.
+pub fn matches(query: &str, text: &str) -> bool {
+    let plain = |t: &str| -> String { t.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).flat_map(char::to_lowercase).collect() };
+    let hay = plain(text);
+    let tight: String = hay.split_whitespace().collect();
+    plain(query).split_whitespace().all(|w| hay.contains(w) || tight.contains(w))
+}
+
+/// What the player typed into a page's search box ("" when nothing).
+pub(crate) fn query(ui: &Ui, page: &str) -> String {
+    ui.filter.get(&format!("search:{page}")).cloned().unwrap_or_default()
+}
+
+/// The search box of a side page: what it holds and the words shown while it is empty.
+pub(crate) fn search_box(ui: &Ui, page: &str, hint: &str) -> Json {
+    obj! {"arg": s(page), "value": s(query(ui, page)), "hint": s(hint)}
+}
+
+/// The words under a switch, as short as the row allows.
+fn switch_line(ui: &Ui, sw: Switch) -> &'static str {
+    match sw {
+        Switch::Fsr4 => "Sharper upscaling, costs a few frames",
+        Switch::FrameGen if tool::framegen_wrapper(&ui.ctx.home).is_file() => "Lossless Scaling, set the multiplier in Decky",
+        Switch::FrameGen => "Needs the Lossless Scaling plugin from Decky's store first",
+        Switch::Handheld => "The game's handheld presets and on-screen keyboard",
+        Switch::ProtonLog => "Writes a log of the next launch into your home folder",
+    }
+}
+
+/// The ways to play a game that won't run here.
+fn alternatives(ui: &Ui) -> Vec<Json> {
+    let mut out = Vec::new();
+    if ui.machine().windows_boot.is_some() {
+        out.push(with(with(row("open", "module:windows", "button", "Restart to Windows", "It runs there. The next start only, then SteamOS again."), "icon", s("reboot")), "button", s("Open")));
+    }
+    for id in ["geforcenow", "xcloud"] {
+        let Some(t) = super::store::tile(id) else { continue };
+        let line = if id == "geforcenow" { "Streams the game from a PC in the cloud, when the game is offered there" } else { "Streams it when it is part of Game Pass" };
+        out.push(if super::store::tile_added(ui, t) {
+            with(with(with(row("none", "", "info", t.name, line), "icon", s("cloud")), "badge", s("In your library")), "tone", s("ok"))
+        } else {
+            with(with(row("tile", t.id, "button", t.name, line), "icon", s("cloud")), "button", s("Add tile"))
+        });
+    }
+    out
+}
+
+fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
     let id = game_id(&l.game);
     let mut out = Vec::new();
-    if l.verdict.online_anticheat {
+    if l.verdict.label == Label::WontRun {
+        // Nothing Turbine Hub can switch makes it run: only the other ways to play it.
+        out.push(section("Play it another way", alternatives(ui)));
+        return out;
+    }
+    if l.locked() {
         let mut r = row("none", "", "info", "Locked", "Its anti-cheat runs online. Turbine Hub never changes how this game starts.");
         r = with(r, "icon", s("lock"));
         out.push(section("Online anti-cheat", vec![r]));
     } else {
-        let sw = Switches::load(&ui.folder());
+        let uses = tv.uses(&l.game);
         if l.game.runtime == Runtime::Native {
             out.push(section("Switches", vec![row("none", "", "info", "Linux version", "It runs without Proton, so the switches don't apply.")]));
+        } else if l.game.store != Store::Steam {
+            out.push(section("Switches", vec![row("none", "", "info", "Set in Heroic", "The switches reach games that Steam starts. For this one, open its settings in Heroic.")]));
+        } else if uses == Uses::Mods {
+            out.push(section(
+                "Switches",
+                vec![
+                    with(with(with(row("none", "", "info", "Uses Turbine Mod Manager in Steam", "Steam allows one tool per game, so this game's switches come with Turbine Mod Manager."), "icon", s("external")), "badge", s("Mods")), "tone", s("muted")),
+                    with(row("game", &format!("mods|{id}"), "button", "Open Turbine Mod Manager", "Its settings for this game"), "icon", s("external")),
+                ],
+            ));
         } else {
-            out.push(section("Switches", SWITCHES.iter().map(|(k, title, line)| with(row("switch", &format!("{id}|{k}"), "toggle", title, line), "on", b(sw.on(&id, k) || (*k == "fsr4" && sw.fsr4_all)))).collect()));
+            let sw = Switches::load(&ui.folder());
+            let mut rows = vec![launch::game_row(tv, &l.game, uses)];
+            rows.extend(Switch::ALL.iter().map(|k| with(row("switch", &format!("{id}|{}", k.key()), "toggle", k.title(), switch_line(ui, *k)), "on", b(sw.is_on(&id, *k) || (*k == Switch::Fsr4 && sw.fsr4_all)))));
+            out.push(section("Switches", rows));
         }
-        let mut help = vec![with(row("game", &format!("proton|{id}"), "button", "Try another Proton", "Where Steam keeps the choice"), "icon", s("swap"))];
+        let mut help = Vec::new();
+        if l.game.runtime != Runtime::Native {
+            let line = if l.game.store == Store::Steam { launch::proton_line(ui, tv, &l.game) } else { "Heroic keeps this choice".to_string() };
+            help.push(with(row("open", &format!("proton|{id}"), "button", "Try another Proton", &line), "icon", s("swap")));
+        }
         if l.game.prefix.is_some() {
             help.push(with(row("game", &format!("reset|{id}"), "button", "Reset Windows files", "A fresh start, the old ones kept as a backup"), "icon", s("restore")));
         }
         help.push(with(row("game", &format!("report|{id}"), "button", "Write a report", "What a helper needs to see, with private details removed"), "icon", s("log")));
         out.push(section("Won't start?", help));
     }
-    out.push(section("Saves", vec![with(row("game", &format!("backup|{id}"), "button", "Back up saves now", "With Ludusavi"), "icon", s("save")), with(row("game", &format!("restore|{id}"), "button", "Restore a save", "Puts the newest backup back"), "icon", s("restore"))]));
-    if !l.verdict.online_anticheat {
+    let line = match crate::snapshots::list(&ui.data, &id).len() {
+        0 => "Back up now, restore a snapshot, undo".to_string(),
+        1 => "1 snapshot. Restoring keeps the current saves first".into(),
+        c => format!("{c} snapshots. Restoring one keeps the current saves first"),
+    };
+    out.push(section("Saves", vec![with(row("open", &format!("saves|{id}"), "button", "Saves and snapshots", &line), "icon", s("save"))]));
+    if !l.locked() {
         out.push(section("Mods", vec![with(row("game", &format!("mods|{id}"), "button", "Mods: open Turbine", "Turbine Mod Manager handles mods"), "icon", s("external"))]));
     }
     out
 }
 
 /// The Games tab: every installed game on the left, the picked one's panel on the right. `arg` is the picked game.
+/// What was typed into the search box narrows the list.
 pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
-    let all = listed(ui);
+    let everything = listed(ui);
+    let total = everything.len();
+    let q = query(ui, "games");
+    let tv = launch::tool_view(ui);
+    // Not at every letter of a search: the files only follow what Steam and the ratings say.
+    if q.is_empty() {
+        launch::keep_files(ui, &tv, &everything);
+    }
+    let all: Vec<Listed> = everything.into_iter().filter(|l| matches(&q, &l.game.name)).collect();
+    let search = search_box(ui, "games", "Search games");
     let picked = all.iter().position(|l| game_id(&l.game) == arg).unwrap_or(0);
     let side = arr(all.iter().map(|l| obj! {"id": s(game_id(&l.game)), "title": s(&l.game.name), "chip": s(chip(&l.verdict)), "tone": s(if l.verdict.online_anticheat { "muted" } else { tone(&l.verdict) }), "lock": b(l.verdict.online_anticheat)}));
     let Some(l) = all.get(picked) else {
-        return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s("No games found. Install one in Steam or Heroic and it shows up here."), "sections": arr([]), "hints": arr([])};
+        if total == 0 {
+            return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s("No games found. Install one in Steam or Heroic and it shows up here."), "sections": arr([]), "hints": arr([])};
+        }
+        return obj! {"side": arr([]), "sideTitle": s(format!("0 of {total} games")), "index": n(0.0), "search": search, "empty": s(format!("No game matches \"{}\".", q.trim())), "sections": arr([]), "hints": arr([hint("rt", "Search")])};
     };
+    let side_title = match (q.trim().is_empty(), total) {
+        (true, 1) => "Installed \u{b7} 1 game".to_string(),
+        (true, c) => format!("Installed \u{b7} {c} games"),
+        (false, c) => format!("{} of {c} games", all.len()),
+    };
+    let mut chips = vec![obj! {"text": s(l.verdict.label.words()), "tone": s(tone(&l.verdict))}];
+    if l.takes_switches() && tv.uses(&l.game) == Uses::Hub && tv.state != tool::State::Missing {
+        chips.push(obj! {"text": s("Uses Turbine Hub"), "tone": s("ok")});
+    }
+    let playable = l.verdict.label != Label::WontRun;
+    let mut hints = vec![hint("rt", "Search"), hint("y", "Library check")];
+    if playable {
+        hints.insert(0, hint("x", "Play"));
+    }
     obj! {
         "side": side,
-        "sideTitle": s(match all.len() { 1 => "Installed \u{b7} 1 game".to_string(), c => format!("Installed \u{b7} {c} games") }),
+        "sideTitle": s(side_title),
         "index": n(picked as f64),
+        "search": search,
         "header": obj! {
             "title": s(&l.game.name),
-            "chips": arr([obj! {"text": s(l.verdict.label.words()), "tone": s(tone(&l.verdict))}]),
+            "chips": arr(chips),
             "line": s(format!("{} \u{b7} {} \u{b7} {}", l.game.store.label(), runs_with(&l.game), l.verdict.note)),
         },
-        "sections": arr(panel(ui, l)),
-        "hints": arr([hint("x", "Play"), hint("y", "Library check")]),
-        "x": obj! {"act": s("game"), "arg": s(format!("play|{}", game_id(&l.game)))},
+        "sections": arr(panel(ui, l, &tv)),
+        "hints": arr(hints),
+        "x": if playable { obj! {"act": s("game"), "arg": s(format!("play|{}", game_id(&l.game)))} } else { Json::Null },
         "y": obj! {"act": s("open"), "arg": s("library")},
     }
 }
@@ -274,7 +332,7 @@ pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
     let m = ui.machine();
     let st = ui.settings();
     let sw = Switches::load(&ui.folder());
-    let games = find(ui, id).map(|l| vec![format!("{} ({id}): {}, {}, switches on: {}", l.game.name, runs_with(&l.game), l.verdict.label.words(), sw.games.get(id).map(|x| x.iter().cloned().collect::<Vec<_>>().join(", ")).filter(|x| !x.is_empty()).unwrap_or_else(|| "none".into()))]).unwrap_or_default();
+    let games = find(ui, id).map(|l| vec![format!("{} ({id}): {}, {}, switches on: {}", l.game.name, runs_with(&l.game), l.verdict.label.words(), Some(sw.applied(id).iter().map(|x| x.key()).collect::<Vec<_>>().join(", ")).filter(|x| !x.is_empty()).unwrap_or_else(|| "none".into()))]).unwrap_or_default();
     crate::report::build(&crate::report::ProblemReport {
         version: ui.ctx.version.clone(),
         when: when.into(),
@@ -287,12 +345,17 @@ pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
     })
 }
 
-fn ludusavi(verb: &str, name: &str) -> Vec<String> {
-    ["flatpak-spawn", "--host", "flatpak", "run", super::store::LUDUSAVI, verb, "--force", name].iter().map(|x| x.to_string()).collect()
-}
-
-pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<Json> {
+pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<Json> {
     match action {
+        // What was typed into a page's search box.
+        "search" => {
+            if !["games", "store"].contains(&arg) {
+                return None;
+            }
+            let text: String = value.chars().filter(|c| !c.is_control()).take(60).collect();
+            ui.filter.insert(format!("search:{arg}"), text);
+            Some(refresh())
+        }
         "fsr4all" => {
             let mut sw = Switches::load(&ui.folder());
             sw.fsr4_all = !sw.fsr4_all;
@@ -301,12 +364,21 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
         }
         "switch" => {
             let (id, k) = arg.split_once('|')?;
-            let locked = find(ui, id).is_none_or(|l| l.verdict.online_anticheat);
+            let Some(l) = find(ui, id).filter(|l| !l.locked()) else {
+                return Some(toast("Its anti-cheat runs online, so Turbine Hub leaves this game alone."));
+            };
+            if !l.takes_switches() {
+                return Some(toast("The switches are for Windows games that Steam starts."));
+            }
+            let uses = launch::tool_view(ui).uses(&l.game);
+            if uses == Uses::Mods {
+                return Some(toast("This game uses Turbine Mod Manager in Steam. Its switches come with Turbine Mod Manager."));
+            }
             let mut sw = Switches::load(&ui.folder());
-            Some(match sw.toggle(id, k, locked) {
+            Some(match sw.toggle(id, k, false) {
                 Ok(_) => {
                     sw.save(&ui.folder());
-                    with(refresh(), "toast", s("Applies the next time the game starts."))
+                    with(refresh(), "toast", s(if uses == Uses::Hub { "Applies the next time the game starts." } else { "Saved. It applies once this game uses Turbine Hub in Steam." }))
                 }
                 Err(e) => toast(e),
             })
@@ -315,8 +387,9 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             let (what, id) = arg.split_once('|')?;
             let l = find(ui, id)?;
             let name = l.game.name.clone();
-            let locked = l.verdict.online_anticheat;
+            let locked = l.locked();
             Some(match what {
+                "play" if l.verdict.label == Label::WontRun => toast("It won't run on SteamOS. Its page lists the other ways to play it."),
                 "play" if l.game.store == Store::Steam => {
                     let mut p = Plan::new(&format!("Play {name}?"), "Steam starts the game.", "Play");
                     p.steps.push(Step::Host(["flatpak-spawn", "--host", "xdg-open", &format!("steam://rungameid/{}", l.game.store_id)].iter().map(|x| x.to_string()).collect()));
@@ -324,11 +397,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                     dialog(ui, p)
                 }
                 "play" => guide("Start it from Heroic", "Games from Epic, GOG and Amazon start from Heroic, or from their tile in your Steam library.", &[]),
-                "proton" => guide(
-                    "Try another Proton",
-                    "Steam keeps this choice per game.",
-                    &[("1", "In Steam, open the game's page and press the gear."), ("2", "Properties, then Compatibility."), ("3", "Tick \"Force the use of a specific Steam Play compatibility tool\" and pick another Proton."), ("Tip", "Proton Experimental and the newest GE-Proton fix the most games. ProtonPlus in the Store tab installs more.")],
-                ),
                 "reset" if locked => toast("Its anti-cheat runs online, so Turbine Hub leaves this game alone."),
                 "reset" => {
                     let pfx = l.game.prefix.clone()?;
@@ -342,17 +410,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                     let mut p = Plan::new("Write a report?", &format!("Turbine Hub writes what it knows about {name} and this machine into a text file. Names, addresses and keys are removed. Nothing is sent anywhere."), "Write it");
                     p.steps.push(Step::Report { game: id.to_string() });
                     p.done = "Report written".into();
-                    dialog(ui, p)
-                }
-                "backup" | "restore" => {
-                    if !ui.installed.iter().any(|a| a == super::store::LUDUSAVI) {
-                        return Some(with(toast("Saves need Ludusavi. Install it from Store, Essentials."), "open", s("store")));
-                    }
-                    let back = what == "backup";
-                    let mut p = Plan::new(if back { "Back up saves now?" } else { "Restore a save?" }, &if back { format!("Ludusavi copies the saves of {name} into its backup folder.") } else { format!("Ludusavi puts the newest backup of {name} back. Saves made since then are replaced.") }, if back { "Back up" } else { "Restore" });
-                    p.danger = !back;
-                    p.steps.push(Step::Host(ludusavi(what, &name)));
-                    p.done = if back { "Saves backed up".into() } else { "Save restored".into() };
                     dialog(ui, p)
                 }
                 "mods" if locked => toast("Its anti-cheat runs online, so mods stay off."),
@@ -375,10 +432,10 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             for l in all.iter().filter(|l| action == "fix-all" || game_id(&l.game) == arg) {
                 let Some(f) = &l.verdict.fix else { continue };
                 let id = game_id(&l.game);
-                if f.kind == "switch" && !l.verdict.online_anticheat && !sw.on(&id, &f.value) && sw.toggle(&id, &f.value, false).is_ok() {
+                if f.kind == "switch" && l.takes_switches() && !sw.on(&id, &f.value) && sw.toggle(&id, &f.value, false).is_ok() {
                     done += 1;
                 } else if f.kind != "switch" {
-                    notes.push((l.game.name.clone(), if f.kind == "proton" { format!("Use {} for this game: its page in Steam, the gear, Properties, Compatibility.", f.value) } else { f.words.clone() }));
+                    notes.push((l.game.name.clone(), if f.kind == "proton" { format!("Use {} for this game: Games, the game, Try another Proton.", f.value) } else { f.words.clone() }));
                 }
             }
             sw.save(&ui.folder());
@@ -386,7 +443,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 with(refresh(), "toast", s(match done { 0 => "Nothing to fix.".to_string(), 1 => "Fix on. It applies the next time the game starts.".into(), c => format!("{c} fixes on. They apply the next time each game starts.") }))
             } else {
                 let items: Vec<(&str, &str)> = notes.iter().map(|(a, t)| (a.as_str(), t.as_str())).collect();
-                with(guide("How to fix", "These need a step in Steam.", &items), "refresh", b(true))
+                with(guide("How to fix", "These need a step of yours.", &items), "refresh", b(true))
             })
         }
         _ => None,

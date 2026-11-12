@@ -1,5 +1,5 @@
-//! Bring it over from Windows: the six cards, the Windows drive's games to copy, and the Windows apps with what
-//! each becomes on SteamOS. The Windows drive is only ever read.
+//! Bring it over from Windows: the six cards, the Windows drive's games to copy and its saves to bring into the
+//! games here, and the Windows apps with what each becomes on SteamOS. The Windows drive is only ever read.
 use super::plan::{Plan, Step, dialog, refresh, toast};
 use super::store::{self, CHROME, HEROIC};
 use super::{Ui, arr, b, hint, n, obj, row, s, section, size_words, with};
@@ -7,6 +7,7 @@ use crate::bring::{self, Becomes, WinGame};
 use crate::hardware::DriveRole;
 use crate::json::Json;
 use crate::library::{AntiCheat, parse_anticheat};
+use crate::saves::{self, Job, Target, WindowsRun};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -91,6 +92,44 @@ fn picks<'a>(ui: &'a mut Ui, page: &str, defaults: impl FnOnce() -> BTreeSet<Str
     ui.picked.entry(page.to_string()).or_insert_with(defaults)
 }
 
+/// The games here that saves from the Windows drive can go into: Windows games Steam starts, never one whose
+/// anti-cheat runs online. Each with its folder on the drive when it is installed there too.
+fn save_targets(ui: &Ui, mount: &Path) -> Vec<Target> {
+    let on_drive = bring::steam_games(mount);
+    super::games::listed(ui)
+        .into_iter()
+        .filter(|l| l.game.store == crate::Store::Steam && l.game.runtime != crate::Runtime::Native && !l.locked())
+        .map(|l| Target { windows_dir: on_drive.iter().find(|w| w.app_id == l.game.store_id).map(|w| w.dir.clone()), name: l.game.name, prefix: l.game.prefix, install_dir: l.game.install_dir })
+        .collect()
+}
+
+fn names(list: &[String]) -> String {
+    match list.len() {
+        0..=3 => list.join(", "),
+        c => format!("{} and {} more", list[..3].join(", "), c - 3),
+    }
+}
+
+/// The Saves part of the Windows drive's page: the one button, what the last run did, and its Undo.
+fn saves_rows(ui: &Ui) -> Vec<Json> {
+    let line = if store::is_installed(ui, saves::LUDUSAVI) { "Ludusavi finds the saves on this drive and puts them into the games installed here. Steam Cloud brings most by itself." } else { "Ludusavi is installed first. It finds the saves on this drive and puts them into the games installed here." };
+    let mut rows = vec![with(with(row("win-saves", "", "button", "Bring saves over", line), "icon", s("save")), "button", s("Bring over"))];
+    let Some(last) = WindowsRun::load(&ui.folder()) else { return rows };
+    let when = super::saves::when_words(crate::now(), last.at);
+    let title = match (last.undone, last.brought.len()) {
+        (true, _) => "Last time: undone".to_string(),
+        (_, 0) => "Last time: no saves had a place here yet".into(),
+        (_, 1) => format!("Last time: saves of {} brought over", last.brought[0]),
+        (_, _) => format!("Last time: saves of {} brought over", names(&last.brought)),
+    };
+    let waiting = if last.waiting.is_empty() { String::new() } else { format!(" Kept for later: {}. Install those games and start each once, then bring saves over again.", names(&last.waiting)) };
+    rows.push(row("none", "", "info", &title, format!("{when}.{waiting}").trim()));
+    if last.kept.is_some() && !last.undone {
+        rows.push(with(with(row("win-saves-undo", "", "button", "Undo", "Puts back the saves these games had here before"), "icon", s("restore")), "button", s("Undo")));
+    }
+    rows
+}
+
 /// Your Windows drive: the Steam games on it, ticked to copy.
 pub(crate) fn drive(ui: &mut Ui) -> Json {
     let Some(mount) = ui.windows_drive() else {
@@ -127,7 +166,7 @@ pub(crate) fn drive(ui: &mut Ui) -> Json {
         "intro": s("Read only. Nothing on Windows changes."),
         "sections": arr([
             with(section(&if count == 0 { format!("Steam games \u{b7} 0 of {} picked", dg.games.len()) } else { format!("Steam games \u{b7} {count} of {} picked \u{b7} {}", dg.games.len(), size_words(bytes)) }, rows), "empty", s(if dg.games.is_empty() { "No Steam games found on this drive." } else { "" })),
-            section("Saves", vec![row("none", "", "info", "Steam Cloud brings most saves by itself", "For the rest: back them up with Ludusavi on Windows, then restore them here with Ludusavi from the Store.")]),
+            section("Saves", saves_rows(ui)),
         ]),
         "note": s(room),
         "primary": if count > 0 { obj! {"label": s(if count == 1 { "Copy 1 game".to_string() } else { format!("Copy {count} games") }), "k": s("start"), "act": s("copy"), "arg": s("")} } else { Json::Null },
@@ -259,6 +298,34 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.steps = chosen.iter().map(|g| Step::CopyGame { name: g.name.clone(), pairs: bring::copy_plan(g, &target) }).collect();
             p.steps.push(Step::Done { setup: None, brought: Some("windows") });
             p.done = "Games copied. Steam checks them at its next start.".into();
+            Some(dialog(ui, p))
+        }
+        "win-saves" => {
+            let Some(mount) = ui.windows_drive() else { return Some(toast("No Windows drive is open.")) };
+            let targets = save_targets(ui, &mount);
+            let ready = targets.iter().filter(|t| t.prefix.is_some()).count();
+            if ready == 0 {
+                return Some(toast("No game here can take saves yet. Install a game and start it once first."));
+            }
+            let mut p = Plan::new("Bring saves over?", "Ludusavi looks for saves on your Windows drive and puts them into the games installed here. The Windows drive is only read. Saves these games have here now are kept first, so Undo brings them back.", "Bring over");
+            if !store::is_installed(ui, saves::LUDUSAVI) {
+                p.items.push(("Ludusavi".into(), "It does the copying. Installed from Flathub first.".into()));
+                p.steps.push(store::install_step(saves::LUDUSAVI));
+            }
+            p.items.push(("Close your games first".into(), "A game can't be running while its saves change.".into()));
+            p.items.push((if ready == 1 { "1 game here can take saves".to_string() } else { format!("{ready} games here can take saves") }, "Windows games from Steam that have been started here once. Saves of other games are kept for later.".into()));
+            p.items.push(("Games with online anti-cheat are left alone".into(), String::new()));
+            p.steps.push(Step::Saves(Job::Windows { mount, targets }));
+            p.done = "Saves brought over. The page says for which games.".into();
+            Some(dialog(ui, p))
+        }
+        "win-saves-undo" => {
+            let Some(last) = WindowsRun::load(&ui.folder()).filter(|l| l.kept.is_some() && !l.undone) else { return Some(with(toast("There is nothing to undo."), "refresh", b(true))) };
+            let mut p = Plan::new("Undo bringing saves over?", &format!("The saves these games had here before come back: {}.", names(&last.brought)), "Undo");
+            p.danger = true;
+            p.items.push(("Close your games first".into(), "A game can't be running while its saves change.".into()));
+            p.steps.push(Step::Saves(Job::WindowsUndo));
+            p.done = "The saves from before are back".into();
             Some(dialog(ui, p))
         }
         "install-apps" => {

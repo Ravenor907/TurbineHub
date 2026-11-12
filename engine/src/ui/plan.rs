@@ -32,6 +32,16 @@ pub enum Step {
     SetupFinished { boost: bool },
     /// Downloads the newer Turbine Hub, checks it against its published checksum and installs it.
     SelfUpdate,
+    /// Writes the launch tool into Steam's folder for tools (or what differs of it), or takes it out again.
+    Tool { install: bool },
+    /// The Proton one game starts with through the launch tool: a Proton's folder, or None for Automatic.
+    ProtonPick { app_id: String, dir: Option<PathBuf> },
+    /// Puts the game's Proton pick from before the last change back.
+    ProtonUndo { app_id: String },
+    /// Ludusavi's work on a game's saves or on the Windows drive's: snapshot, restore, Undo.
+    Saves(crate::saves::Job),
+    /// Takes a tile out of the Steam library again.
+    TileRemove { url: String },
 }
 
 /// Which password the dialog asks for.
@@ -146,6 +156,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
     }
     let found = super::settings::act(ui, action, arg, value)
         .or_else(|| super::games::act(ui, action, arg, value))
+        .or_else(|| super::launch::act(ui, action, arg, value))
+        .or_else(|| super::saves::act(ui, action, arg, value))
         .or_else(|| super::machine::act(ui, action, arg, value))
         .or_else(|| super::store::act(ui, action, arg, value))
         .or_else(|| super::bring::act(ui, action, arg, value))

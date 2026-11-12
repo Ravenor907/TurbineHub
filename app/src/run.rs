@@ -32,6 +32,8 @@ pub struct Facts {
     pub updates: Option<Vec<String>>,
     pub has_password: Option<bool>,
     pub steam_running: bool,
+    /// When the running Steam started, in seconds since 1970.
+    pub steam_started: Option<u64>,
     pub sound: Vec<(String, String)>,
     pub sound_now: String,
     pub free_bytes: Option<u64>,
@@ -121,6 +123,10 @@ pub struct Job {
     pub steps: Vec<Step>,
     pub password: String,
     pub home: PathBuf,
+    /// Turbine Hub's own folder (the games file, the launch folder).
+    pub folder: PathBuf,
+    /// Turbine Hub's data folder (the save snapshots).
+    pub data: PathBuf,
     pub steam_running: bool,
     pub version: String,
     pub cache: PathBuf,
@@ -169,6 +175,16 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             Ok(())
         }
         Step::ResetPrefix { pfx } => ui::games::reset_windows_files(pfx, turbinehub_engine::now()).map(|_| ()),
+        Step::Tool { .. } | Step::ProtonPick { .. } | Step::ProtonUndo { .. } => ui::launch::run_step(st, &job.home, &job.folder).unwrap_or(Ok(())),
+        Step::Saves(work) => {
+            let mut runner = |line: &[String]| run(line, None).map(|o| turbinehub_engine::saves::Ran { code: o.code, stdout: o.stdout, stderr: o.stderr });
+            let places = turbinehub_engine::saves::Places { folder: &job.folder, data: &job.data, home: &job.home };
+            turbinehub_engine::saves::run(work, &places, turbinehub_engine::now(), say, &mut runner).map(|_| ())
+        }
+        Step::TileRemove { url } => {
+            let file = turbinehub_engine::shortcuts::tile_file(&job.home).ok_or("Steam's list of non-Steam games wasn't found.")?;
+            turbinehub_engine::shortcuts::remove_shortcut(&file, &ui::store::tile_marker(url), job.steam_running).map(|_| ())
+        }
         Step::SelfUpdate => {
             say("Getting the new version".into());
             let client = Client::new(&job.version, &job.cache);
@@ -241,11 +257,26 @@ pub fn look_for_updates(home: &Path, cache: &Path, version: &str, test_builds: b
     (found, if worked { Some(true) } else if failed { Some(false) } else { None })
 }
 
+/// When the running Steam started (its oldest process, asked on the host). None without a running Steam.
+fn steam_started() -> Option<u64> {
+    let pid = host_text(&["pgrep", "-o", "-x", "steam"])?.trim().to_string();
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let secs: u64 = host_text(&["ps", "-o", "etimes=", "-p", &pid])?.trim().parse().ok()?;
+    turbinehub_engine::now().checked_sub(secs + 1)
+}
+
 /// What the host can say without the internet. Quick, so screens fill in at once.
-fn local_facts(home: &Path, helper_there: bool) -> Facts {
+fn local_facts(home: &Path, cache: &Path, helper_there: bool) -> Facts {
     let mut f = Facts { local: true, installed: lines(host_text(&["flatpak", "list", "--app", "--columns=application"])), ..Facts::default() };
+    // Each installed app's version and size, for the Store's pages.
+    if let Some(text) = host_text(&["flatpak", "list", "--app", ui::store::INSTALLED_COLUMNS]) {
+        ui::store::remember_installed(cache, &text);
+    }
     f.has_password = host_text(&["passwd", "-S"]).and_then(|t| t.split_whitespace().nth(1).map(|w| w != "NP"));
     f.steam_running = run(&host(&["pgrep", "-x", "steam"]), None).is_ok_and(|o| o.code == 0);
+    f.steam_started = steam_started();
     f.sound = host_text(&["pactl", "list", "sinks"]).map(|t| agent::sinks(&t)).unwrap_or_default();
     f.sound_now = host_text(&["pactl", "get-default-sink"]).map(|t| t.trim().to_string()).unwrap_or_default();
     f.efibootmgr = host_text(&["efibootmgr"]);
@@ -274,9 +305,13 @@ pub struct Gather {
 /// for the internet and never loses what it showed.
 pub fn gather(g: Gather, tx: Sender<Event>) {
     std::thread::spawn(move || {
-        let _ = tx.send(Event::Facts(Box::new(local_facts(&g.home, g.helper_there))));
+        let _ = tx.send(Event::Facts(Box::new(local_facts(&g.home, &g.cache, g.helper_there))));
         let client = Client::new(&g.version, &g.cache);
         let now = turbinehub_engine::now();
+        // The newest version and the sizes of the Store's apps. No answer keeps what was found last.
+        if let Some(text) = host_text(&["flatpak", "remote-ls", "flathub", "--app", ui::store::REMOTE_COLUMNS]) {
+            ui::store::remember_remote(&g.cache, &text, now);
+        }
         let mut fetch = |u: &str| client.get_text(u, &[]).map_err(|e| e.to_string());
         // The lists, then Valve's rating for the installed Steam games: at most 40 fetched in one go.
         let ids: Vec<String> = turbinehub_engine::scan_games(&g.home).games.into_iter().filter(|x| x.store == Store::Steam).map(|x| x.store_id).collect();

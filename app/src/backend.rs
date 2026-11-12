@@ -151,6 +151,13 @@ fn make_ui() -> Ui {
     if option("no-password").is_some() {
         ui.facts.has_password = Some(false);
     }
+    if option("no-tool").is_some() {
+        ui.sample_without_tool();
+    }
+    // An app the made-up machine has as well ("--installed=<app id>").
+    if let Some(id) = option("installed") {
+        ui.installed.push(id);
+    }
     let mut st = ui.settings();
     if let Some(v) = option("scale").and_then(|v| v.parse::<u32>().ok()) {
         st.ui_scale = v.clamp(50, 150);
@@ -205,6 +212,7 @@ impl HubRust {
         if f.local {
             ui.facts.has_password = f.has_password;
             ui.steam_running = f.steam_running;
+            ui.steam_started = f.steam_started;
             ui.sound = f.sound;
             ui.sound_now = f.sound_now;
             ui.free_bytes = f.free_bytes;
@@ -336,7 +344,7 @@ impl qobject::Hub {
             return answer(&[("toast", quote(&plan.done)), ("open", quote(&plan.then_open)), ("refresh", "true".into())]);
         }
         let st = self.rust().ui.settings();
-        let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), steam_running: self.rust().ui.steam_running, version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };
+        let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), folder: self.rust().ui.folder(), data: self.rust().ui.data.clone(), steam_running: self.rust().ui.steam_running, version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };
         run::start(job, self.rust().tx.clone());
         self.as_mut().rust_mut().running = Some(plan);
         self.as_mut().set_busy_words(QString::from("Working"));

@@ -1,11 +1,16 @@
-//! Store: what Turbine Hub offers to install, by section, with each thing's state on this machine. Apps come from
-//! Flathub through the host's flatpak, Decky Loader through the helper, and TV and cloud services become library tiles.
+//! Store: what Turbine Hub offers to install, by section, with each thing's state on this machine, a search over
+//! all of it, and a page per thing (what it is, where it comes from, its size and version, install, update,
+//! remove). Apps come from Flathub through the host's flatpak, Decky Loader through the helper, and TV and cloud
+//! services become library tiles.
+use super::games::{matches, query, search_box};
 use super::plan::{Plan, Step, dialog, guide, helper_plan, toast, with_helper};
 use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
 use crate::helper::{self, Setting};
-use crate::json::{self, Json};
+use crate::json::{self, Json, quote};
+use std::collections::BTreeMap;
+use std::path::Path;
 
-pub const LUDUSAVI: &str = "com.github.mtkennerly.ludusavi";
+pub const LUDUSAVI: &str = crate::saves::LUDUSAVI;
 pub const TURBINE: &str = "io.github.ravenor907.TurbineModManager";
 pub const CHROME: &str = "com.google.Chrome";
 pub const HEROIC: &str = "com.heroicgameslauncher.hgl";
@@ -16,29 +21,31 @@ pub struct App {
     pub name: &'static str,
     pub line: &'static str,
     pub section: &'static str,
+    /// What it is, in a sentence or two, for its own page.
+    pub about: &'static str,
 }
 
-const fn app(section: &'static str, id: &'static str, name: &'static str, line: &'static str) -> App {
-    App { id, name, line, section }
+const fn app(section: &'static str, id: &'static str, name: &'static str, line: &'static str, about: &'static str) -> App {
+    App { id, name, line, section, about }
 }
 
 /// Everything from Flathub the Store lists, in the order shown.
 pub const APPS: &[App] = &[
-    app("essentials", LUDUSAVI, "Ludusavi", "Save backups for every game"),
-    app("essentials", "com.vysp3r.ProtonPlus", "ProtonPlus", "Extra Proton versions"),
-    app("essentials", "io.github.radiolamp.mangojuice", "MangoJuice", "Set up the FPS and temps overlay"),
-    app("essentials", "com.github.tchx84.Flatseal", "Flatseal", "What each app may reach"),
-    app("apps", "com.discordapp.Discord", "Discord", "Voice chat and friends"),
-    app("apps", "com.moonlight_stream.Moonlight", "Moonlight", "Stream games from your PC"),
-    app("apps", "com.obsproject.Studio", "OBS Studio", "Record and stream"),
-    app("apps", "com.spotify.Client", "Spotify", "Music while you play"),
-    app("apps", CHROME, "Chrome", "The browser the library tiles use"),
-    app("apps", "org.mozilla.firefox", "Firefox", "A browser for Desktop Mode"),
-    app("apps", "org.videolan.VLC", "VLC", "Plays any video file"),
-    app("launchers", HEROIC, "Heroic Games Launcher", "Epic, GOG and Amazon games"),
-    app("launchers", "net.lutris.Lutris", "Lutris", "Other launchers and older games"),
-    app("launchers", "com.usebottles.bottles", "Bottles", "Windows programs that aren't games"),
-    app("emulation", "net.retrodeck.retrodeck", "RetroDECK", "Classic systems in one app"),
+    app("essentials", LUDUSAVI, "Ludusavi", "Save backups for every game", "Knows where thousands of games keep their saves and copies them to a safe place. Turbine Hub uses it for snapshots, restores and the saves on a Windows drive."),
+    app("essentials", "com.vysp3r.ProtonPlus", "ProtonPlus", "Extra Proton versions", "Installs other versions of Proton, such as GE-Proton, that fix games Steam's own Proton has trouble with. They show up in Games, Try another Proton."),
+    app("essentials", "io.github.radiolamp.mangojuice", "MangoJuice", "Set up the FPS and temps overlay", "Sets up MangoHud, the overlay that shows frame rate, temperatures and load while a game runs."),
+    app("essentials", "com.github.tchx84.Flatseal", "Flatseal", "What each app may reach", "Shows and changes which folders and devices each installed app may reach."),
+    app("apps", "com.discordapp.Discord", "Discord", "Voice chat and friends", "Voice, video and text chat. The same app and account as on Windows."),
+    app("apps", "com.moonlight_stream.Moonlight", "Moonlight", "Stream games from your PC", "Plays games from another PC in the house on this machine, over the home network."),
+    app("apps", "com.obsproject.Studio", "OBS Studio", "Record and stream", "Records the screen and streams it live. The same app as on Windows."),
+    app("apps", "com.spotify.Client", "Spotify", "Music while you play", "Music and podcasts. Keeps playing in the background while a game runs."),
+    app("apps", CHROME, "Chrome", "The browser the library tiles use", "Google's browser. The TV, streaming and cloud gaming tiles open in it, full screen, with a controller."),
+    app("apps", "org.mozilla.firefox", "Firefox", "A browser for Desktop Mode", "Mozilla's browser, for Desktop Mode with a mouse and keyboard."),
+    app("apps", "org.videolan.VLC", "VLC", "Plays any video file", "Plays nearly every video and music file without anything extra."),
+    app("launchers", HEROIC, "Heroic Games Launcher", "Epic, GOG and Amazon games", "Installs and starts your games from Epic, GOG and Amazon, and adds them to your Steam library."),
+    app("launchers", "net.lutris.Lutris", "Lutris", "Other launchers and older games", "Installs games from other launchers and older Windows games with ready-made recipes."),
+    app("launchers", "com.usebottles.bottles", "Bottles", "Windows programs that aren't games", "Runs Windows programs that aren't games, each in its own set of Windows files."),
+    app("emulation", "net.retrodeck.retrodeck", "RetroDECK", "Classic systems in one app", "Emulators for classic systems in one app, set up for a controller. Bring your own games."),
 ];
 
 pub struct Tile {
@@ -47,6 +54,8 @@ pub struct Tile {
     pub url: &'static str,
     pub line: &'static str,
 }
+
+const DECKY_LINE: &str = "Plugins for Steam's quick menu, from its official release";
 
 /// Services that become a library tile opening the browser full screen.
 pub const TILES: &[Tile] = &[
@@ -121,17 +130,28 @@ pub(crate) fn tile_steps(ui: &Ui, t: &Tile) -> Vec<Step> {
     steps
 }
 
-fn app_row(ui: &Ui, a: &App, removing: bool) -> Json {
-    let installed = is_installed(ui, a.id);
-    let update = ui.updates.iter().any(|u| u == a.id);
-    let (badge, tone, button) = match (installed, update, removing) {
-        (true, _, true) => ("", "", "Remove"),
-        (true, true, _) => ("Update ready", "warn", "Update"),
-        (true, false, _) => ("Installed", "ok", "Remove"),
-        _ => ("", "", "Install"),
+/// An app's row in a list: its state as a badge. A press opens the app's own page.
+fn app_row(ui: &Ui, a: &App) -> Json {
+    let (badge, tone) = match (is_installed(ui, a.id), ui.updates.iter().any(|u| u == a.id)) {
+        (true, true) => ("Update ready", "warn"),
+        (true, false) => ("Installed", "ok"),
+        _ => ("", ""),
     };
-    let r = with(row("store", a.id, "button", a.name, a.line), "button", s(button));
-    with(with(r, "badge", s(badge)), "tone", s(tone))
+    with(with(row("open", &format!("store-item|{}", a.id), "button", a.name, a.line), "badge", s(badge)), "tone", s(tone))
+}
+
+fn tile_row(ui: &Ui, t: &Tile) -> Json {
+    let added = tile_added(ui, t);
+    with(with(row("open", &format!("store-item|tile:{}", t.id), "button", t.name, t.line), "badge", s(if added { "In your library" } else { "" })), "tone", s("ok"))
+}
+
+fn decky_row(ui: &Ui) -> Json {
+    let has = decky_installed(ui);
+    with(with(row("open", "store-item|decky", "button", "Decky Loader", DECKY_LINE), "badge", s(if has { "Installed" } else { "" })), "tone", s("ok"))
+}
+
+fn launcher_row(id: &str, name: &str) -> Json {
+    with(row("launcher-guide", id, "button", name, "Installs through NonSteamLaunchers"), "button", s("How"))
 }
 
 fn decky_installed(ui: &Ui) -> bool {
@@ -151,52 +171,264 @@ fn plugins_off(ui: &Ui) -> bool {
 }
 
 fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
-    let mut out: Vec<Json> = APPS.iter().filter(|a| a.section == sec).map(|a| app_row(ui, a, false)).collect();
+    let mut out: Vec<Json> = APPS.iter().filter(|a| a.section == sec).map(|a| app_row(ui, a)).collect();
     match sec {
         "decky" => {
-            let has = decky_installed(ui);
-            out.push(with(with(with(row("decky", "", "button", "Decky Loader", "Plugins for Steam's quick menu, from its official release"), "button", s(if has { "Repair" } else { "Install" })), "badge", s(if has { "Installed" } else { "" })), "tone", s("ok")));
-            if has {
+            out.push(decky_row(ui));
+            if decky_installed(ui) {
                 out.push(with(row("decky-off", "", "toggle", "Plugins on", "Turn every plugin off to see if one of them causes a problem"), "on", b(!plugins_off(ui))));
                 out.extend(plugins(ui).iter().map(|p| row("none", "", "info", p, "Plugin")));
             }
         }
-        "launchers" => out.extend(NSL.iter().map(|(id, name)| with(row("launcher-guide", id, "button", name, "Installs through NonSteamLaunchers"), "button", s("How")))),
-        "tv" => out.extend(TILES.iter().map(|t| {
-            let added = tile_added(ui, t);
-            with(with(with(row("tile", t.id, if added { "info" } else { "button" }, t.name, t.line), "button", s(if added { "" } else { "Add tile" })), "badge", s(if added { "In your library" } else { "" })), "tone", s("ok"))
-        })),
+        "launchers" => out.extend(NSL.iter().map(|(id, name)| launcher_row(id, name))),
+        "tv" => out.extend(TILES.iter().map(|t| tile_row(ui, t))),
         "emulation" => out.push(row("none", "", "info", "EmuDeck", "Installs from emudeck.com in Desktop Mode. RetroDECK above needs no setup outside the app.")),
-        "installed" => out = APPS.iter().filter(|a| is_installed(ui, a.id)).map(|a| app_row(ui, a, true)).collect(),
+        "installed" => {
+            out = APPS.iter().filter(|a| is_installed(ui, a.id)).map(|a| app_row(ui, a)).collect();
+            if decky_installed(ui) {
+                out.push(decky_row(ui));
+            }
+            out.extend(TILES.iter().filter(|t| tile_added(ui, t)).map(|t| tile_row(ui, t)));
+        }
         _ => {}
     }
     out
 }
 
-/// The Store tab. `arg` is the section.
+/// Everything in the Store that matches what the player typed, whatever its section: apps, Decky Loader, the
+/// Windows launchers and the tiles. Names are looked at first, then the words under them.
+fn found(ui: &Ui, q: &str) -> Vec<Json> {
+    let mut by_name = Vec::new();
+    let mut by_words = Vec::new();
+    let mut put = |name: &str, words: &str, r: Json| {
+        if matches(q, name) {
+            by_name.push(r);
+        } else if matches(q, &format!("{name} {words}")) {
+            by_words.push(r);
+        }
+    };
+    for a in APPS {
+        put(a.name, &format!("{} {}", a.line, a.about), app_row(ui, a));
+    }
+    put("Decky Loader", &format!("{DECKY_LINE} plugins"), decky_row(ui));
+    for (id, name) in NSL {
+        put(name, "launcher NonSteamLaunchers", launcher_row(id, name));
+    }
+    for t in TILES {
+        put(t.name, &format!("{} tile streaming", t.line), tile_row(ui, t));
+    }
+    by_name.append(&mut by_words);
+    by_name
+}
+
+/// The Store tab. `arg` is the section. While the search box holds something, the matches from every section show
+/// instead.
 pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let index = SECTIONS.iter().position(|(id, _, _)| *id == arg).unwrap_or(0);
     let (id, title, line) = SECTIONS[index];
-    let list = rows(ui, id);
-    let empty = if list.is_empty() { "Nothing installed from the Store yet." } else { "" };
+    let q = query(ui, "store");
+    let searching = !q.trim().is_empty();
+    let list = if searching { found(ui, &q) } else { rows(ui, id) };
+    let empty = match (list.is_empty(), searching) {
+        (false, _) => String::new(),
+        (true, true) => format!("Nothing in the Store matches \"{}\".", q.trim()),
+        (true, false) => "Nothing installed from the Store yet.".into(),
+    };
     let updates = APPS.iter().filter(|a| ui.updates.iter().any(|u| u == a.id)).count();
+    let (title, line) = if searching { ("Search", match list.len() { 1 => format!("1 match for \"{}\"", q.trim()), c => format!("{c} matches for \"{}\"", q.trim()) }) } else { (title, line.to_string()) };
+    let mut hints = vec![hint("rt", "Search")];
+    if updates > 0 {
+        hints.push(hint("y", "Update all"));
+    }
     obj! {
-        "side": arr(SECTIONS.iter().map(|(id, title, _)| obj! {"id": s(*id), "title": s(*title), "chip": s(""), "tone": s(""), "lock": b(false)})),
-        "sideTitle": s(""),
+        // While searching, the sections step aside: the matches come from all of them.
+        "side": arr(SECTIONS.iter().filter(|_| !searching).map(|(id, title, _)| obj! {"id": s(*id), "title": s(*title), "chip": s(""), "tone": s(""), "lock": b(false)})),
+        "sideTitle": s(if searching { "Every section" } else { "" }),
         "index": n(index as f64),
+        "search": search_box(ui, "store", "Search the Store"),
         "header": obj! {"title": s(title), "chips": arr(if ui.offline { vec![obj! {"text": s("Offline now. This is what was found last; installing needs the internet."), "tone": s("warn")}] } else { vec![] }), "line": s(line)},
         "sections": arr([with(with(section("", list), "columns", n(2.0)), "empty", s(empty))]),
-        "hints": arr(if updates > 0 { vec![hint("y", "Update all")] } else { vec![] }),
+        "hints": arr(hints),
         "y": if updates > 0 { obj! {"act": s("update-all"), "arg": s("")} } else { Json::Null },
+    }
+}
+
+// ---- Versions and sizes, as the host's flatpak last told them ----
+
+/// What is known about one app: the version installed and its size on the drive, the newest version on Flathub
+/// and what a fresh install downloads and takes. "" for what isn't known.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AppFacts {
+    pub version: String,
+    pub size: String,
+    pub newest: String,
+    pub download: String,
+    pub full: String,
+}
+
+/// The columns asked of `flatpak list --app` and of `flatpak remote-ls flathub --app`, in the order they are read.
+pub const INSTALLED_COLUMNS: &str = "--columns=application,version,size";
+pub const REMOTE_COLUMNS: &str = "--columns=application,version,download-size,installed-size";
+
+fn facts_file(cache: &Path) -> std::path::PathBuf {
+    cache.join("store.json")
+}
+
+/// The facts kept from the last time the host answered, with when the Flathub part was fetched.
+pub fn app_facts(cache: &Path) -> (Option<u64>, BTreeMap<String, AppFacts>) {
+    let Some(j) = std::fs::read_to_string(facts_file(cache)).ok().and_then(|t| json::parse(&t).ok()) else { return (None, BTreeMap::new()) };
+    let text = |v: &Json, k: &str| v.str_at(k).unwrap_or("").to_string();
+    let apps = j.get("apps").map(Json::entries).unwrap_or(&[]).iter().map(|(id, v)| (id.clone(), AppFacts { version: text(v, "version"), size: text(v, "size"), newest: text(v, "newest"), download: text(v, "download"), full: text(v, "full") })).collect();
+    (j.get("at").and_then(Json::as_f64).map(|x| x as u64), apps)
+}
+
+fn save_facts(cache: &Path, at: Option<u64>, apps: &BTreeMap<String, AppFacts>) {
+    let body: Vec<String> = apps.iter().map(|(id, f)| format!("{}:{{\"version\":{},\"size\":{},\"newest\":{},\"download\":{},\"full\":{}}}", quote(id), quote(&f.version), quote(&f.size), quote(&f.newest), quote(&f.download), quote(&f.full))).collect();
+    let text = format!("{{\"at\":{},\"apps\":{{{}}}}}\n", at.map(|x| x.to_string()).unwrap_or_else(|| "null".into()), body.join(","));
+    let _ = crate::write_atomic(&facts_file(cache), text.as_bytes());
+}
+
+/// The lines of a flatpak listing as their columns, for the Store's own apps only. Sizes come with a space that
+/// doesn't break ("85.1 MB"); it becomes a plain one.
+fn columns(text: &str) -> Vec<Vec<String>> {
+    text.lines().map(|l| l.split('\t').map(|c| c.replace(['\u{a0}', '\u{202f}'], " ").trim().to_string()).collect::<Vec<_>>()).filter(|c| APPS.iter().any(|a| Some(a.id) == c.first().map(String::as_str))).collect()
+}
+
+/// Keeps what `flatpak list --app` with `INSTALLED_COLUMNS` said: each installed app's version and size. Apps it
+/// doesn't list aren't installed any more.
+pub fn remember_installed(cache: &Path, text: &str) {
+    let (at, mut apps) = app_facts(cache);
+    for f in apps.values_mut() {
+        f.version.clear();
+        f.size.clear();
+    }
+    for c in columns(text) {
+        let f = apps.entry(c[0].clone()).or_default();
+        f.version = c.get(1).cloned().unwrap_or_default();
+        f.size = c.get(2).cloned().unwrap_or_default();
+    }
+    save_facts(cache, at, &apps);
+}
+
+/// Keeps what `flatpak remote-ls flathub --app` with `REMOTE_COLUMNS` said: the newest version and the sizes. An
+/// empty answer (no internet) changes nothing, so the last good one stays with its age.
+pub fn remember_remote(cache: &Path, text: &str, now: u64) {
+    let list = columns(text);
+    if list.is_empty() {
+        return;
+    }
+    let (_, mut apps) = app_facts(cache);
+    for c in list {
+        let f = apps.entry(c[0].clone()).or_default();
+        f.newest = c.get(1).cloned().unwrap_or_default();
+        f.download = c.get(2).cloned().unwrap_or_default();
+        f.full = c.get(3).cloned().unwrap_or_default();
+    }
+    save_facts(cache, Some(now), &apps);
+}
+
+fn info(title: &str, line: &str) -> Json {
+    row("none", "", "info", title, line)
+}
+
+fn missing_item() -> Json {
+    obj! {"crumb": s("Store"), "title": s("Not found"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("The Store has nothing by that name."))]), "hints": arr([])}
+}
+
+/// One thing's own page: what it is, where it comes from, its size and version when known, and install, update or
+/// remove. `arg` is an app's id, "decky", or "tile:<id>".
+pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
+    if arg == "decky" {
+        let has = decky_installed(ui);
+        let action = with(with(row("decky", "", "button", if has { "Repair or update" } else { "Install" }, if has { "Installs the newest release again, over the one that is here" } else { "Asks for your SteamOS password once" }), "icon", s(if has { "refresh" } else { "download" })), "button", s(if has { "Repair" } else { "Install" }));
+        let newest = match (&ui.decky_tag, ui.offline) {
+            (Some(tag), false) => format!("Version {tag}"),
+            (Some(tag), true) => format!("Version {tag}, as found last. Offline now."),
+            (None, _) => "Not known yet. It shows once the internet is there.".to_string(),
+        };
+        let state = with(with(info(if has { "Installed" } else { "Not installed" }, if has { "Its plug icon is in Steam's quick menu." } else { "Nothing of it is on this machine." }), "badge", s(if has { "Installed" } else { "" })), "tone", s("ok"));
+        return obj! {
+            "crumb": s("Store"),
+            "title": s("Decky Loader"),
+            "intro": s("Adds plugins to Steam's quick menu: themes, extra controls, frame generation and more."),
+            "sections": arr([section("", vec![action]), section("About", vec![state, info("Newest", &newest), info("Source", "Its official release on github.com/SteamDeckHomebrew/decky-loader, checked against the checksum GitHub publishes"), info("Remove", "Decky Loader's own settings have Uninstall. Plugins on, in Store, Decky plugins, turns it off without removing anything.")])]),
+            "hints": arr([]),
+        };
+    }
+    if let Some(t) = arg.strip_prefix("tile:").and_then(tile) {
+        let added = tile_added(ui, t);
+        let action = if added { with(with(row("tile-remove", t.id, "button", "Remove from your library", "The tile goes. Chrome and your sign-in stay."), "icon", s("remove")), "button", s("Remove")) } else { with(with(row("tile", t.id, "button", "Add to your library", "Steam shows it after its next start"), "icon", s("download")), "button", s("Add tile")) };
+        let state = with(with(info(if added { "In your library" } else { "Not added yet" }, if added { "Under Non-Steam in your Steam library." } else { "Adding it changes nothing else." }), "badge", s(if added { "In your library" } else { "" })), "tone", s("ok"));
+        let opens = if is_installed(ui, CHROME) { "Chrome, full screen, with a controller" } else { "Chrome, full screen, with a controller. Chrome is installed first." };
+        return obj! {
+            "crumb": s("Store"),
+            "title": s(t.name),
+            "intro": s(format!("{}. It becomes a tile in your Steam library.", t.line)),
+            "sections": arr([section("", vec![action]), section("About", vec![state, info("Opens in", opens), info("Source", t.url), info("Size", "A tile takes no room. Chrome is about 400 MB when it isn't installed yet.")])]),
+            "hints": arr([]),
+        };
+    }
+    let Some(a) = APPS.iter().find(|a| a.id == arg) else { return missing_item() };
+    let installed = is_installed(ui, a.id);
+    let update = installed && ui.updates.iter().any(|u| u == a.id);
+    let (at, all) = app_facts(&ui.cache);
+    let f = all.get(a.id).cloned().unwrap_or_default();
+    let mut actions = Vec::new();
+    if !installed {
+        actions.push(with(with(row("store", a.id, "button", "Install", "From Flathub. No password needed."), "icon", s("download")), "button", s("Install")));
+    }
+    if update {
+        actions.push(with(with(with(with(row("store-update", a.id, "button", "Update", &if f.newest.is_empty() { "A newer version is ready".to_string() } else { format!("Version {} is ready", f.newest) }), "icon", s("refresh")), "button", s("Update")), "badge", s("Update ready")), "tone", s("warn")));
+    }
+    // Remove sits under what the page says about the app, never where the highlight starts.
+    let remove = if installed { vec![with(with(row("store-remove", a.id, "button", "Remove", "The app goes. Its own settings and files stay."), "icon", s("remove")), "button", s("Remove"))] } else { vec![] };
+    let state = match (installed, f.version.is_empty()) {
+        (true, false) => with(with(info("Installed", &format!("Version {}", f.version)), "badge", s("Installed")), "tone", s("ok")),
+        (true, true) => with(with(info("Installed", "Keeps itself up to date"), "badge", s("Installed")), "tone", s("ok")),
+        (false, _) if !f.newest.is_empty() => info("Not installed", &format!("Newest version {}", f.newest)),
+        (false, _) => info("Not installed", "Installing gets the newest version"),
+    };
+    let mut about = vec![state];
+    let size = match (installed, f.size.is_empty(), f.download.is_empty(), f.full.is_empty()) {
+        (true, false, _, _) => format!("{} on the drive", f.size),
+        (_, _, false, false) => format!("{} to download, {} on the drive", f.download, f.full),
+        (_, _, false, true) => format!("{} to download", f.download),
+        _ => String::new(),
+    };
+    if !size.is_empty() {
+        about.push(info("Size", &size));
+    }
+    about.push(info("Source", &format!("Flathub \u{b7} {}", a.id)));
+    about.push(info("Updates", "Update all in the Store brings every app to its newest version."));
+    let fresh = match at {
+        Some(t) => format!("Sizes and versions: {}", super::checked_words(crate::now(), Some(t), ui.offline).to_lowercase()),
+        None if ui.offline => "Offline now. Sizes and versions show once the internet is there.".into(),
+        None => String::new(),
+    };
+    obj! {
+        "crumb": s("Store"),
+        "title": s(a.name),
+        "intro": s(a.about),
+        "sections": arr([section("", actions), section("About", about), section(if remove.is_empty() { "" } else { "Remove" }, remove)]),
+        "note": s(fresh),
+        "hints": arr([]),
     }
 }
 
 pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<Json> {
     match action {
-        "store" => {
+        // "store" does what the app's state calls for; an app's own page asks for one thing by name.
+        "store" | "store-update" | "store-remove" => {
             let a = APPS.iter().find(|a| a.id == arg)?;
             let installed = is_installed(ui, a.id);
-            let update = ui.updates.iter().any(|u| u == a.id);
+            let update = match action {
+                "store-update" => true,
+                "store-remove" => false,
+                _ => ui.updates.iter().any(|u| u == a.id),
+            };
+            if !installed && action != "store" {
+                return Some(toast(&format!("{} isn't installed.", a.name)));
+            }
             let mut p = match (installed, update) {
                 (false, _) => {
                     let mut p = Plan::new(&format!("Install {}?", a.name), &format!("{}. It comes from Flathub and keeps itself up to date. No password needed.", a.line), "Install");
@@ -219,6 +451,21 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 }
             };
             p.items.push((a.name.to_string(), a.id.to_string()));
+            Some(dialog(ui, p))
+        }
+        "tile-remove" => {
+            let t = tile(arg)?;
+            if !tile_added(ui, t) {
+                return Some(toast("It isn't in your library."));
+            }
+            if ui.steam_running {
+                return Some(guide(&format!("Remove {} in Steam", t.name), "Steam is running, and it only lets go of a tile from its own menu.", &[("1", "Find the tile in your library, under Non-Steam."), ("2", "Open its options, then Manage, then Remove non-Steam game.")]));
+            }
+            let mut p = Plan::new(&format!("Remove {} from your library?", t.name), "The tile goes from Steam's library. Chrome and your sign-in there stay.", "Remove");
+            p.danger = true;
+            p.items.push((t.name.to_string(), t.url.to_string()));
+            p.steps.push(Step::TileRemove { url: t.url.into() });
+            p.done = format!("{} removed from your library", t.name);
             Some(dialog(ui, p))
         }
         "update-all" => {

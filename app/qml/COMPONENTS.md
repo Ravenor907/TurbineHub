@@ -21,7 +21,7 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
   can hold it. Directions move it to the nearest focusable on screen in that direction; `reveal` scrolls every
   list around it so the whole item shows. After a reload it returns to the item with the same `fid`.
 - **Presses.** `press(k)` takes every input: the controller (polled from `Hub.poll`), the keyboard (arrows, Enter,
-  Esc, Q and E, X, Y, Tab, F1, F10) and taps on the footer. Order: the dialog, the highlighted item, the page, then
+  Esc, Q and E, X, Y, Tab, /, F1, F10) and taps on the footer. Order: the dialog, the highlighted item, the page, then
   the window (tabs, Back, Help, Menu).
 - **Footer.** `footerHints` lists what each button does now, most important first.
 
@@ -62,9 +62,9 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 | File | Pages |
 |---|---|
 | HomePage | Home, Guided and Veteran. |
-| SidePage | Games, Store, Settings: a list on the left, its rows on the right. |
+| SidePage | Games, Store, Settings: a list on the left, its rows on the right. Games and Store have a search box above the list (RT, or / on a keyboard); every letter goes to the engine, which answers with the narrowed page. |
 | CardsPage | My machine, Bring it over. |
-| RowsPage | Every card's controls, the library check, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
+| RowsPage | Every card's controls, the library check, a Store item's own page, Turbine Hub in Steam, a game's Proton, a game's saves, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
 | PickPage | Guided or Veteran. |
 | SetupPage | Guided's five steps. |
 

@@ -80,7 +80,7 @@ fn game_json(arg: &str, ctx: &Ctx) -> Option<String> {
     let Some(g) = scan.games.iter().find(|g| g.id() == id) else { return Some("\"found\":false".into()) };
     let list = std::fs::read_to_string(anticheat_cache(&ctx.config_home)).map(|t| library::parse_anticheat(&t)).unwrap_or_default();
     let locked = g.store == crate::Store::Steam && list.iter().any(|(app, status)| *app == g.store_id && matches!(status, library::AntiCheat::Supported | library::AntiCheat::Running));
-    let on = GameSwitches::load(&ctx.config_home);
+    let on = GameSwitches::load(&ctx.config_home.join("turbinehub"));
     let switches = arr(Switch::ALL.iter().map(|s| format!("{{\"id\":{},\"title\":{},\"line\":{},\"on\":{}}}", quote(s.key()), quote(s.title()), quote(s.line()), !locked && on.is_on(&id, *s))));
     Some(format!("\"found\":true,\"game\":{{\"id\":{},\"name\":{},\"store\":{}}},\"locked\":{locked},\"switches\":{switches}", quote(&id), quote(&g.name), quote(g.store.label())))
 }
@@ -256,9 +256,9 @@ mod tests {
         steam_game(&c.home, "1245620", "ELDEN RING");
         steam_game(&c.home, "1145360", "Hades II");
         let mut on = GameSwitches::default();
-        on.set("steam:1145360", Switch::DeckMode, true);
+        on.set("steam:1145360", Switch::Handheld, true);
         on.set("steam:1245620", Switch::Fsr4, true);
-        on.save(&c.config_home).unwrap();
+        on.save(&c.config_home.join("turbinehub"));
         w(anticheat_cache(&c.config_home), r#"[{"status":"Running","storeIds":{"steam":"1245620"}},{"status":"Denied","storeIds":{"steam":"1145360"}}]"#);
 
         let j = parse(&run("game=1145360", &c).0).unwrap();
@@ -268,7 +268,7 @@ mod tests {
         let switches = j.get("switches").unwrap().as_array();
         assert_eq!(switches.len(), Switch::ALL.len());
         let on_ids: Vec<&str> = switches.iter().filter(|s| s.get("on").and_then(Json::as_bool) == Some(true)).filter_map(|s| s.str_at("id")).collect();
-        assert_eq!(on_ids, vec!["deck"]);
+        assert_eq!(on_ids, vec!["handheld"]);
 
         let j = parse(&run("game=steam:1245620", &c).0).unwrap();
         assert_eq!(j.get("locked").and_then(Json::as_bool), Some(true));

@@ -18,7 +18,7 @@ fn done(tag: &str) {
     let _ = std::fs::remove_dir_all(dir(tag));
 }
 
-const PAGES: &[&str] = &["home", "machine", "games", "library", "store", "settings", "bring", "windrive", "winapps", "wheres", "changes", "pick", "setup", "quick", "module:power", "module:cpu", "module:display", "module:lighting", "module:battery", "module:sleep", "module:tuneup", "module:dock", "module:gpu", "module:monitors", "module:drives", "module:sound", "module:windows"];
+const PAGES: &[&str] = &["home", "machine", "games", "library", "store", "store-item", "tool", "proton", "saves", "settings", "bring", "windrive", "winapps", "wheres", "changes", "pick", "setup", "quick", "module:power", "module:cpu", "module:display", "module:lighting", "module:battery", "module:sleep", "module:tuneup", "module:dock", "module:gpu", "module:monitors", "module:drives", "module:sound", "module:windows"];
 
 /// Every string anywhere in a page.
 fn strings(j: &Json, out: &mut Vec<String>) {
@@ -40,7 +40,7 @@ fn every_page_is_valid_and_plainly_worded() {
     for (preset, mode) in [(HANDHELD, Mode::Guided), (HANDHELD, Mode::Veteran), (Preset::Desktop, Mode::Guided), (Preset::TvPc, Mode::Veteran)] {
         let mut u = ui("pages", preset, mode);
         assert!(parse(&u.state()).is_ok());
-        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "password", "games", "bring", "picks"] {
+        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "password", "games", "bring", "picks", "steam:1086940", "steam:367520", "steam:1172470", "steam:1245620", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix"] {
             for p in PAGES {
                 let text = u.page(p, sections);
                 let j = parse(&text).unwrap_or_else(|e| panic!("{p} {sections}: {e}"));
@@ -62,7 +62,7 @@ fn every_page_is_valid_and_plainly_worded() {
 fn every_row_does_something() {
     for (preset, mode) in [(HANDHELD, Mode::Veteran), (Preset::Desktop, Mode::Guided)] {
         for p in PAGES {
-            for arg in ["", "decky", "tv", "launchers", "updates", "setup", "about", "look"] {
+            for arg in ["", "decky", "tv", "launchers", "updates", "setup", "about", "look", "steam:1086940", "steam:1091500", "steam:1172470", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix"] {
                 let mut u = ui("rows", preset, mode);
                 let page = parse(&u.page(p, arg)).unwrap();
                 for r in rows(&page) {
@@ -165,15 +165,17 @@ fn locked_games_get_no_switches_and_no_changes() {
     let elden = side.iter().find(|x| x.str_at("id") == Some("steam:1245620")).unwrap();
     assert_eq!((elden.str_at("chip"), elden.get("lock").and_then(Json::as_bool)), (Some("Online anti-cheat"), Some(true)));
     // Asking anyway is refused and nothing is written.
+    let before = Switches::load(&u.folder());
     let answer = parse(&u.act("switch", "steam:1245620|fsr4", "")).unwrap();
     assert!(answer.str_at("toast").unwrap().contains("anti-cheat"));
-    assert!(Switches::load(&u.folder()).games.is_empty());
+    assert_eq!(Switches::load(&u.folder()), before);
+    assert!(!before.games.contains_key("steam:1245620"));
     assert!(parse(&u.act("game", "reset|steam:1245620", "")).unwrap().get("dialog").is_none());
     // An unlocked game takes the switch.
-    u.act("switch", "steam:1086940|fsr4", "");
-    assert!(Switches::load(&u.folder()).on("steam:1086940", "fsr4"));
+    u.act("switch", "steam:1086940|handheld", "");
+    assert!(Switches::load(&u.folder()).on("steam:1086940", "handheld"));
     let j = parse(&u.page("games", "steam:1086940")).unwrap();
-    assert!(rows(&j).iter().any(|r| r.str_at("arg") == Some("steam:1086940|fsr4") && r.get("on").and_then(Json::as_bool) == Some(true)));
+    assert!(rows(&j).iter().any(|r| r.str_at("arg") == Some("steam:1086940|handheld") && r.get("on").and_then(Json::as_bool) == Some(true)));
     done("locked");
 }
 
@@ -188,7 +190,7 @@ fn switches_file_round_trips_and_drops_unknown_words() {
     assert_eq!(sw.toggle("steam:1", "fsr4", false), Ok(false));
     assert_eq!(sw.toggle("steam:1", "framegen", false), Ok(false));
     assert!(sw.games.is_empty());
-    assert_eq!(Switches::parse(r#"{"fsr4All":true,"games":{"steam:1":["fsr4","evil"],"steam:2":[]}}"#).games.len(), 1);
+    assert_eq!(Switches::parse(r#"{"fsr4All":true,"games":{"steam:1":{"switches":["fsr4","evil"]},"steam:2":{"switches":[]}}}"#).games.len(), 1);
     assert_eq!(Switches::parse("junk"), Switches::default());
 }
 
@@ -436,8 +438,9 @@ fn store_shows_each_apps_state_and_tiles_bring_their_browser() {
     let mut u = ui("store", HANDHELD, Mode::Guided);
     let page = parse(&u.page("store", "launchers")).unwrap();
     let heroic = rows(&page).into_iter().find(|r| r.str_at("title") == Some("Heroic Games Launcher")).unwrap();
-    assert_eq!((heroic.str_at("badge"), heroic.str_at("button")), (Some("Update ready"), Some("Update")));
-    assert_eq!(page.get("hints").unwrap().as_array()[0].str_at("label"), Some("Update all"));
+    // A row shows the app's state and opens the app's own page.
+    assert_eq!((heroic.str_at("badge"), heroic.str_at("act"), heroic.str_at("arg")), (Some("Update ready"), Some("open"), Some("store-item|com.heroicgameslauncher.hgl")));
+    assert!(page.get("hints").unwrap().as_array().iter().any(|h| h.str_at("label") == Some("Update all")));
     let j = parse(&u.act("store", "com.spotify.Client", "")).unwrap();
     assert_eq!(j.get("dialog").unwrap().str_at("confirm"), Some("Install"));
     assert_eq!(u.confirm().unwrap().steps, vec![Step::Host(["flatpak-spawn", "--host", "flatpak", "install", "-y", "--noninteractive", "flathub", "com.spotify.Client"].iter().map(|x| x.to_string()).collect())]);

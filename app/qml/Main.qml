@@ -145,7 +145,7 @@ Window {
     // ---------------------------------------------------------------- the last input: which glyphs the hints show
     property bool keyboard: st.window
     function glyph(k) {
-        if (keyboard) return ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "Tab", view: "F1", start: "F10", move: "Arrows" })[k] || k.toUpperCase()
+        if (keyboard) return ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "Tab", rt: "/", view: "F1", start: "F10", move: "Arrows" })[k] || k.toUpperCase()
         return ({ view: "VIEW", start: "MENU", move: "D-PAD" })[k] || k.toUpperCase()
     }
 
@@ -178,6 +178,8 @@ Window {
         if (view.file !== file) { view.file = file; view.setSource(file, { app: app }) }
         focusItem = null
         lastFid = ""
+        // A text box of the page before doesn't keep the keyboard.
+        keysBack()
         if (mo.on) pageIn.restart()
         Qt.callLater(restoreFocus)
     }
@@ -351,6 +353,7 @@ Window {
             map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
             map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_Tab] = "lt"
             map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F1] = "view"; map[Qt.Key_F10] = "start"; map[Qt.Key_F5] = "f5"
+            map[Qt.Key_Slash] = "rt"
             const k = map[e.key]
             if (!k) return
             e.accepted = true
@@ -363,6 +366,8 @@ Window {
     readonly property bool softwareDraw: keys.GraphicsInfo.api === GraphicsInfo.Software
     // A text box took the keyboard; this gives it back to the window.
     function keysBack() { keys.forceActiveFocus() }
+    // A text box wants typing: in Game Mode Steam's on-screen keyboard opens over the app.
+    function askKeyboard() { if (Hub.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard") }
 
     // The controller and finished work, every frame.
     property string heldDir: ""
@@ -460,11 +465,12 @@ Window {
             // A picture of a page that opens from a tab shows that tab as the open one.
             if (shot.page.startsWith("module:")) tab = 3
             else if (shot.page === "changes") tab = 4
-            else if (shot.page === "library") tab = 1
+            else if (["library", "tool", "proton", "saves"].indexOf(shot.page) >= 0) tab = 1
+            else if (shot.page === "store-item") tab = 2
             if (t >= 0) { tab = t; stack = [] } else stack = [{ page: shot.page, arg: shot.arg }]
             loadPage()
             if (t >= 0 && shot.arg !== "") setArg(shot.arg)
-            if (shot.act !== "") { const i = shot.act.indexOf(":"); doAct(shot.act.substring(0, i), shot.act.substring(i + 1), "") }
+            if (shot.act !== "") { const i = shot.act.indexOf(":"); doAct(shot.act.substring(0, i), shot.act.substring(i + 1), Hub.option("value")) }
         } else if (st.mode === "") {
             stack = [{ page: "pick", arg: "" }]
             loadPage()

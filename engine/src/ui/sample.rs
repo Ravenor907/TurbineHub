@@ -28,12 +28,32 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("home-veteran", "--page=home --machine=handheld --mode=veteran"),
     ("games", "--page=games --machine=handheld --mode=guided"),
     ("games-locked", "--page=games --arg=steam:1245620 --machine=handheld --mode=guided"),
+    ("games-switches", "--page=games --arg=steam:1086940 --machine=handheld --mode=guided"),
+    ("games-mods", "--page=games --arg=steam:367520 --machine=handheld --mode=guided"),
+    ("games-search", "--page=games --act=search:games --value=el --machine=handheld --mode=guided"),
+    ("games-search-none", "--page=games --act=search:games --value=zelda --machine=handheld --mode=guided"),
+    ("tool", "--page=tool --machine=handheld --mode=guided"),
+    ("tool-new", "--page=tool --machine=desktop --mode=guided --no-tool"),
+    ("dialog-tool", "--page=tool --act=tool:install --machine=desktop --mode=guided --no-tool"),
+    ("dialog-tool-how", "--page=games --arg=steam:1091500 --act=tool-how:steam:1091500 --machine=handheld --mode=guided"),
+    ("dialog-tool-remove", "--page=tool --act=tool:remove --machine=handheld --mode=guided"),
+    ("proton", "--page=proton --arg=steam:1086940 --machine=handheld --mode=guided"),
+    ("dialog-proton", "--page=proton --arg=steam:1086940 --act=proton-pick:steam:1086940|GE-Proton10-4 --machine=handheld --mode=guided"),
+    ("saves", "--page=saves --arg=steam:1086940 --machine=handheld --mode=guided --installed=com.github.mtkennerly.ludusavi"),
+    ("saves-empty", "--page=saves --arg=steam:2379780 --machine=handheld --mode=guided"),
+    ("dialog-restore", "--page=saves --arg=steam:1086940 --keys=down,a --machine=handheld --mode=guided --installed=com.github.mtkennerly.ludusavi"),
     ("library", "--page=library --machine=handheld --mode=guided"),
     ("library-offline", "--page=library --machine=handheld --mode=guided --offline"),
     ("store", "--page=store --arg=apps --machine=handheld --mode=guided"),
     ("store-offline", "--page=store --arg=apps --machine=handheld --mode=guided --offline"),
     ("store-decky", "--page=store --arg=decky --machine=handheld --mode=guided"),
     ("store-tv", "--page=store --arg=tv --machine=tv --mode=guided"),
+    ("store-search", "--page=store --act=search:store --value=stream --machine=handheld --mode=guided"),
+    ("store-item", "--page=store-item --arg=com.discordapp.Discord --machine=handheld --mode=guided"),
+    ("store-item-new", "--page=store-item --arg=com.spotify.Client --machine=handheld --mode=guided"),
+    ("store-item-update", "--page=store-item --arg=com.heroicgameslauncher.hgl --machine=handheld --mode=guided --offline"),
+    ("store-item-tile", "--page=store-item --arg=tile:netflix --machine=tv --mode=guided"),
+    ("store-item-decky", "--page=store-item --arg=decky --machine=handheld --mode=guided"),
     ("machine", "--page=machine --machine=handheld --mode=guided"),
     ("lighting", "--page=module:lighting --machine=handheld --mode=guided"),
     ("power", "--page=module:power --machine=handheld --mode=veteran"),
@@ -98,6 +118,19 @@ fn home(home: &Path) {
         w(&steam, &format!("steamapps/common/{dir}/game.exe"), "MZ");
         let _ = fs::create_dir_all(steam.join(format!("steamapps/compatdata/{id}/pfx")));
     }
+    // Three Protons: two of Steam's own (one needs a runtime, which is installed) and one the player added.
+    let manifest = |need: &str| format!("\"manifest\"\n{{\n  \"version\" \"2\"\n  \"commandline\" \"/proton %verb%\"\n{need}}}\n");
+    for name in ["Proton 11.0", "Proton - Experimental"] {
+        w(&steam, &format!("steamapps/common/{name}/proton"), "");
+        w(&steam, &format!("steamapps/common/{name}/toolmanifest.vdf"), &manifest("  \"require_tool_appid\" \"4183110\"\n"));
+    }
+    w(&steam, "steamapps/appmanifest_4183110.acf", "\"AppState\"\n{\n\t\"appid\"\t\t\"4183110\"\n\t\"name\"\t\t\"Steam Linux Runtime 4.0\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"SteamLinuxRuntime_4\"\n}\n");
+    w(&steam, "steamapps/common/SteamLinuxRuntime_4/toolmanifest.vdf", "\"manifest\"\n{\n  \"commandline\" \"/_v2-entry-point --verb=%verb% --\"\n}\n");
+    w(&steam, "compatibilitytools.d/GE-Proton10-4/proton", "");
+    w(&steam, "compatibilitytools.d/GE-Proton10-4/toolmanifest.vdf", &manifest(""));
+    w(&steam, "compatibilitytools.d/GE-Proton10-4/compatibilitytool.vdf", "\"compatibilitytools\"\n{\n  \"compat_tools\"\n  {\n    \"GE-Proton10-4\"\n    {\n      \"install_path\" \".\"\n    }\n  }\n}\n");
+    // Steam's own settings: its Proton for all games, one game on Turbine Hub's tool, one on Turbine Mod Manager's.
+    w(&steam, "config/config.vdf", &format!("\"InstallConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"CompatToolMapping\"\n{{\n\"0\"\n{{\n\"name\" \"proton_11\"\n}}\n\"1086940\"\n{{\n\"name\" \"{}\"\n}}\n\"367520\"\n{{\n\"name\" \"{}\"\n}}\n}}\n}}\n}}\n}}\n}}\n", crate::compat_tool::TOOL_NAME, crate::compat_tool::MOD_TOOL_NAME));
     w(home, "homebrew/services/PluginLoader", "");
     w(home, "homebrew/plugins/decky-css/plugin.json", "{\"name\":\"CSS Loader\"}");
     w(home, "homebrew/plugins/protondb/plugin.json", "{\"name\":\"ProtonDB Badges\"}");
@@ -110,6 +143,9 @@ fn cache(cache: &Path, now: u64, offline: bool) {
         w(cache, &format!("valve/{id}.json"), &format!("{{\"success\":1,\"results\":{{\"appid\":{id},\"resolved_category\":{cat}}}}}"));
     }
     w(cache, "checked", &(now - if offline { 3 * 86_400 } else { 600 }).to_string());
+    // What the host's flatpak said last about versions and sizes.
+    super::store::remember_installed(cache, "com.heroicgameslauncher.hgl\t2.17.2\t412.6\u{a0}MB\ncom.vysp3r.ProtonPlus\t0.5.9\t9.8\u{a0}MB\ncom.discordapp.Discord\t0.0.98\t318.4\u{a0}MB\n");
+    super::store::remember_remote(cache, "com.heroicgameslauncher.hgl\t2.18.0\t148.3\u{a0}MB\t415.0\u{a0}MB\ncom.spotify.Client\t1.2.60\t182.7\u{a0}MB\t511.9\u{a0}MB\ncom.discordapp.Discord\t0.0.98\t101.5\u{a0}MB\t318.4\u{a0}MB\n", now - if offline { 3 * 86_400 } else { 600 });
 }
 
 fn sensors(root: &Path, preset: Preset) -> Readings {
@@ -181,6 +217,18 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     ui.sample = true;
     ui.readings = Some(sensors(&root, preset));
     ui.installed = vec![super::store::HEROIC.into(), "com.vysp3r.ProtonPlus".into(), "com.discordapp.Discord".into()];
+    // The launch tool is set up and Steam has started since; one game has a switch on and a few snapshots.
+    let steam = ui.ctx.home.join(".local/share/Steam");
+    let _ = crate::compat_tool::install(&steam, &ui.folder());
+    ui.steam_started = Some(now + 60);
+    let mut switches = super::Switches::default();
+    switches.set("steam:1086940", crate::switches::Switch::Fsr4, true);
+    switches.save(&ui.folder());
+    for (ago, kind, bytes) in [(1800, "launch", 3_400_000), (86_400 * 2, "launch", 3_300_000), (86_400 * 9, "manual", 2_900_000)] {
+        let d = crate::snapshots::game_dir(&ui.data, "steam:1086940").join((now - ago).to_string());
+        let _ = fs::create_dir_all(&d);
+        let _ = fs::write(d.join("snapshot.json"), format!("{{\"game\":\"steam:1086940\",\"name\":\"Baldur's Gate 3\",\"at\":{},\"kind\":\"{kind}\",\"bytes\":{bytes},\"files\":12}}\n", now - ago));
+    }
     ui.updates = vec![super::store::HEROIC.into()];
     ui.decky_tag = Some("v3.1.10".into());
     ui.free_bytes = Some(640_000_000_000);
@@ -206,6 +254,10 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
 }
 
 impl Ui {
+    /// A sample run on a machine where the launch tool was never set up.
+    pub fn sample_without_tool(&mut self) {
+        let _ = fs::remove_dir_all(crate::compat_tool::tool_dir(&self.ctx.home.join(".local/share/Steam")));
+    }
     /// A sample run as if the internet were gone: the lists were fetched three days ago.
     pub fn sample_offline(&mut self) {
         self.offline = true;

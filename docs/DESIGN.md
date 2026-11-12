@@ -105,6 +105,7 @@ New:
 - `library`: owned games from Steam and Heroic, Valve ratings, anti-cheat status, the three labels and the alternative.
 - `bring`: stores, Game Pass, Windows drive scan (games and Ludusavi save plan), Windows app map.
 - `store`: Flathub (via `flatpak` on the host), Decky store, launchers, streaming tiles.
+- `saves`: the Windows drive's saves on top of the Ludusavi CLI: read with settings of Turbine Hub's own (the drive as an "other Windows" root, its Steam folders as Steam roots) and restored per game with every place on the drive sent to a folder on this machine, so nothing is ever written to the drive.
 - `snapshots`: the save time machine's snapshots on top of the Ludusavi CLI (one folder per snapshot, the newest few kept).
 - `agent`: every decision of the background agent (see below). `history`: its battery, sleep and session files and what the screens make of them. `lights`: lighting effects as frames for any RGB light.
 - `sources`: everything fetched online, each with a saved copy, a second host where one exists, and a built-in copy; `refresh` is the one place the app goes online for the anti-cheat list, the fixes and Valve's ratings.
@@ -118,7 +119,7 @@ Every decision (filtering, sorting, what to warn about, what a check means) is R
 ### app
 One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and takes presses (`Hub.act`, `Hub.confirm`). The steps of a confirmed dialog and the questions to the host and the internet run on their own threads and come back through `Hub.poll`, together with the controller (SDL). `app/qml/COMPONENTS.md` lists the parts.
 
-`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
+`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--arg=<the page's own>] [--act=<action>:<argument> [--value=<typed text>]] [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a] [--installed=<app id>] [--no-tool]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
 
 ### Background agent
 The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit, `~/.config/systemd/user/turbinehub-agent.service` (user-level, no password, survives SteamOS updates). Settings, Background helper writes the unit through `flatpak-spawn --host` and enables it; turning it off disables and removes it. Players see it as "the background helper".
@@ -139,8 +140,10 @@ It talks to the app through files in the app's data folder, no socket: `agent/st
 
 ### Steam integration
 - Adds itself to Steam with art (Turbine's shortcuts and steam_art).
-- Per-game settings go through **one** compatibility tool, shared with Turbine Mod Manager, because Steam allows one tool per game. The tool is Turbine's tool, extended: it reads Turbine's mod launch settings and Turbine Hub's per-game switches (env vars, frame generation, chosen Proton) from a shared folder. Whichever app is newer installs the tool, so either app works alone. No Launch Options edits and no Steam restarts.
-- Games with online anti-cheat are never given the tool or any switch.
+- Per-game switches reach a game through Turbine Hub's own compatibility tool, "Turbine Hub" (`engine/src/compat_tool.rs`, built the way Turbine Mod Manager builds its tool): three files in Steam's `compatibilitytools.d`, a folder Steam only reads. The player picks it once per game in the game's Properties, Compatibility; Steam lists a new tool after its next start, which the player does once. Turbine Hub never writes Steam's own files and never restarts Steam: it only reads `config.vdf` to see which tool a game uses.
+- The tool's script builds the line Steam builds itself (the Steam Linux Runtime the Proton asks for, that Proton, the game), then reads the game's line in Turbine Hub's games file (`games.json`, one game per line) and sets what each switch stands for: the FSR 4 upgrade, Handheld mode and the Proton log are environment variables, frame generation wraps the game's command in the Lossless Scaling plugin's launcher when that is installed. Which Proton: the player's pick for the game (a file in Turbine Hub's `launch` folder, with Undo), else Steam's choice for all games, else the newest installed. With Turbine Hub's files gone the game still starts.
+- Steam allows one tool per game. A game that uses Turbine Mod Manager's tool gets its switches from Turbine Mod Manager, and Turbine Hub says so instead of showing switches.
+- Native Linux games, games that won't run here and games with online anti-cheat are never offered the tool or any switch. The games with online anti-cheat are also listed for the script, which starts them as they are even if someone picks the tool for one.
 
 ### Decky quick panel
 Optional. TypeScript frontend, Python backend that only runs `flatpak run io.github.ravenor907.TurbineHub --json <verb>`. No logic of its own.

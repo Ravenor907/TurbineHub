@@ -48,7 +48,7 @@ Item {
     function press(k) {
         if (k === "b") { cancel(); return true }
         // The tabs, Help and the menu wait until the dialog is answered.
-        return ["lb", "rb", "lt", "view", "start", "x", "y"].indexOf(k) >= 0
+        return ["lb", "rb", "lt", "rt", "view", "start", "x", "y"].indexOf(k) >= 0
     }
 
     Rectangle {

@@ -136,12 +136,6 @@ pub fn apps_found(mount: &Path) -> Vec<&'static str> {
         .collect()
 }
 
-/// Ludusavi's settings for finding saves on the Windows drive: the drive as an "other Windows" root, so its backup
-/// can read them there. Saves are then restored into each game's SteamOS folders with Ludusavi's restore.
-pub fn ludusavi_root(mount: &Path) -> String {
-    format!("roots:\n  - path: \"{}\"\n    store: otherWindows\n", mount.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,10 +150,5 @@ mod tests {
                 assert!(id.split('.').count() >= 3, "{id}");
             }
         }
-    }
-
-    #[test]
-    fn the_ludusavi_root_is_quoted() {
-        assert_eq!(ludusavi_root(Path::new("/run/media/deck/Win \"C\"")), "roots:\n  - path: \"/run/media/deck/Win \\\"C\\\"\"\n    store: otherWindows\n");
     }
 }

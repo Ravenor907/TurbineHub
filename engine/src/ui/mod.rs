@@ -8,9 +8,11 @@ pub mod bring;
 pub mod games;
 mod help;
 mod home;
+pub mod launch;
 pub mod machine;
 pub mod plan;
 mod sample;
+pub mod saves;
 pub mod settings;
 mod setup;
 pub mod store;
@@ -101,6 +103,9 @@ pub struct Ui {
     pub offline: bool,
     /// A newer Turbine Hub, when the last check found one.
     pub update: Option<String>,
+    /// When the running Steam started, in seconds since 1970 (None: not running, or not known). Steam finds a new
+    /// launch tool only when it starts.
+    pub steam_started: Option<u64>,
     /// Turbine Hub's data folder: the background helper's history and reports, and the save snapshots.
     pub data: PathBuf,
     /// The background helper is set to start with the session (the host says). None until it was asked.
@@ -118,7 +123,7 @@ pub struct Ui {
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
-        Ui { data, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -210,6 +215,10 @@ impl Ui {
             "games" => games::page(self, arg),
             "library" => games::library(self),
             "store" => store::page(self, arg),
+            "store-item" => store::item(self, arg),
+            "tool" => launch::tool_page(self),
+            "proton" => launch::proton_page(self, arg),
+            "saves" => saves::page(self, arg),
             "settings" => settings::page(self, arg),
             "bring" => bring::hub(self),
             "windrive" => bring::drive(self),
@@ -345,5 +354,7 @@ pub(crate) fn size_words(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_play;
 #[cfg(test)]
 mod tests_background;

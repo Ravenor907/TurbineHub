@@ -401,7 +401,8 @@ impl Machine {
         let wake_devices = t
             .names("/sys/bus/usb/devices")
             .into_iter()
-            .filter(|n| !n.contains(':') && !n.starts_with("usb"))
+            // Interfaces, root hubs and hubs (class 09) aren't devices a player would block.
+            .filter(|n| !n.contains(':') && !n.starts_with("usb") && t.text(&format!("/sys/bus/usb/devices/{n}/bDeviceClass")) != "09")
             .filter_map(|n| {
                 let d = format!("/sys/bus/usb/devices/{n}");
                 let state = t.text(&format!("{d}/power/wakeup"));
@@ -417,7 +418,9 @@ impl Machine {
 
         let cpu = t.text("/proc/cpuinfo").lines().find_map(|l| l.strip_prefix("model name").map(|r| r.trim_start_matches([' ', '\t', ':']).to_string())).unwrap_or_default();
         let memory_gb = t.text("/proc/meminfo").lines().find_map(|l| l.strip_prefix("MemTotal:")?.split_whitespace().next()?.parse::<u64>().ok()).map(|kb| ((kb as f64) / 1_048_576.0).round() as u32).unwrap_or(0);
-        let steamos = t.text("/etc/os-release").lines().find_map(|l| l.strip_prefix("VERSION_ID=")).unwrap_or("").trim_matches('"').to_string();
+        // Inside the Flatpak (and a dev container) /etc is the sandbox's; the host's copy is under /run/host.
+        let os = ["/run/host/os-release", "/run/host/etc/os-release", "/etc/os-release"].iter().map(|p| t.text(p)).find(|s| !s.is_empty()).unwrap_or_default();
+        let steamos = os.lines().find_map(|l| l.strip_prefix("VERSION_ID=")).unwrap_or("").trim_matches('"').to_string();
 
         Machine {
             kind,

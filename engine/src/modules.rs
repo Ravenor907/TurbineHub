@@ -31,7 +31,9 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
     let tune = tuneup::plan(root, ledger);
     let tune_on = tune.iter().filter(|i| i.state != State::Off).count();
     let tune_value = format!("{tune_on} of {} on", tune.len());
-    let wake_off = m.wake_devices.iter().filter(|d| !d.enabled).count();
+    let blocked = ledger.settings().iter().filter(|s| matches!(s, Setting::Wake { wake: false, .. })).count();
+    let can_wake = m.wake_devices.iter().filter(|d| d.enabled).count();
+    let wake_value = if blocked > 0 { format!("{blocked} blocked") } else { format!("{can_wake} devices can wake it") };
 
     if matches!(m.kind, Kind::Handheld | Kind::Laptop) {
         if let Some(pl) = m.power_limits.first() {
@@ -53,7 +55,7 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
             };
             out.push(card("battery", "Battery", "battery", v, "Charge limit and battery health history."));
         }
-        out.push(card("sleep", "Sleep", "moon", if wake_off > 0 { format!("{wake_off} wake blocked") } else { "Watching".into() }, "What woke the machine and how much each sleep used."));
+        out.push(card("sleep", "Sleep", "moon", wake_value.clone(), "What woke the machine and how much each sleep used."));
         out.push(card("tuneup", "Tune-up", "shield", tune_value, "Memory and kernel settings from Bazzite and CachyOS."));
         if m.kind == Kind::Handheld {
             out.push(card("dock", "Dock", "dock", "Off".into(), "Lighting and HDMI audio when docked to a TV."));
@@ -79,7 +81,7 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
         let unused = m.drives.iter().filter(|d| d.role == DriveRole::Empty).count();
         out.push(card("drives", "Drives", "drive", if unused > 0 { format!("{unused} not set up") } else { format!("{} drives", m.drives.len()) }, "Add drives as game libraries. Windows drives are read only."));
         out.push(card("sound", "Sound", "speaker", "Output".into(), "Pick the output: speakers, headset or the TV."));
-        out.push(card("sleep", "Sleep and wake", "moon", if wake_off > 0 { format!("{wake_off} wake blocked") } else { "Defaults".into() }, "Wake from the controller, the network or the keyboard."));
+        out.push(card("sleep", "Sleep and wake", "moon", wake_value, "Wake from the controller, the network or the keyboard."));
         out.push(card("tuneup", "Tune-up", "shield", tune_value, "Memory and kernel settings from Bazzite and CachyOS."));
     }
     if m.windows_boot.is_some() {

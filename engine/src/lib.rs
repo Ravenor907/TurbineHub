@@ -3,6 +3,7 @@
 
 pub mod bring;
 pub mod checkup;
+pub mod cli;
 pub mod fake;
 pub mod games;
 pub mod glossary;
@@ -16,6 +17,8 @@ pub mod modules;
 pub mod net;
 pub mod report;
 pub mod selfupdate;
+pub mod sensors;
+pub mod settings;
 pub mod sha256;
 pub mod shortcuts;
 pub mod steam;

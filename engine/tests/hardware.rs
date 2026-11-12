@@ -76,8 +76,13 @@ fn a_desktop_on_a_tv_is_a_tv_pc() {
 
 #[test]
 fn only_windows_boot_manager_counts() {
-    assert_eq!(hardware::windows_boot_entry("Boot0000* SteamOS\nBoot000A* Windows Boot Manager\tHD()"), Some("000A".into()));
-    assert_eq!(hardware::windows_boot_entry("Boot0000* SteamOS\nBoot0001* UEFI OS\n"), None);
+    let u = "0a1b2c3d-0000-4000-8000-00000000000a".to_string();
+    let efi = format!("Boot0000* SteamOS\nBoot000A* Windows Boot Manager\tHD(1,GPT,{},0x800,0x32000)", u.to_uppercase());
+    assert_eq!(hardware::windows_boot_entry(&efi, std::slice::from_ref(&u)), Some("000A".into()));
+    // Windows wiped: the firmware still lists it, the partition is gone.
+    assert_eq!(hardware::windows_boot_entry(&efi, &[]), None);
+    assert_eq!(hardware::windows_boot_entry("Boot000A* Windows Boot Manager\tHD()", std::slice::from_ref(&u)), None);
+    assert_eq!(hardware::windows_boot_entry("Boot0000* SteamOS\nBoot0001* UEFI OS\n", &[u]), None);
 }
 
 #[test]

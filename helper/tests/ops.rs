@@ -199,9 +199,15 @@ fn decky_installs_only_a_build_matching_githubs_checksum() {
 #[test]
 fn restart_to_windows_only_picks_windows() {
     let mut sys = machine("efi");
-    sys.run.efi = "BootCurrent: 0000\nBoot0000* SteamOS\tHD(...)\nBoot0003* Windows Boot Manager\tHD(...)\n".into();
-    assert_eq!(ops::windows_entries(&sys.run.efi), vec!["0003"]);
+    let u = "0a1b2c3d-0000-4000-8000-00000000000a";
+    sys.run.efi = format!("BootCurrent: 0000\nBoot0000* SteamOS\tHD(1,GPT,{u},0x800,0x80000)\nBoot0003* Windows Boot Manager\tHD(1,GPT,{u},0x800,0x80000)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi\nBoot0004  Windows Boot Manager\tHD(1,GPT,{u},0x800,0x80000)\nBoot0005* Windows Boot Manager\n");
+    assert_eq!(ops::windows_entries(&sys.run.efi), vec![("0003".to_string(), u.to_string())]);
     assert!(sys.boot_next("0000").is_err());
+    // A Windows that was wiped: its entry stays in the firmware, its partition is gone.
+    assert!(sys.boot_next("0003").is_err());
+    assert!(!sys.run.calls.iter().any(|c| c.starts_with("efibootmgr -n")));
+    fs::create_dir_all(sys.p("/dev/disk/by-partuuid")).unwrap();
+    fs::write(sys.p(&format!("/dev/disk/by-partuuid/{u}")), b"").unwrap();
     sys.boot_next("0003").unwrap();
     assert!(sys.run.calls.iter().any(|c| c == "efibootmgr -n 0003"));
 }

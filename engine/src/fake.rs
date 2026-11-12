@@ -21,7 +21,9 @@ pub const MONITOR_EDID: &[u8] = include_bytes!("../tests/data/monitor-2560x1440.
 /// The home partition's device in every preset (the third partition of the system drive).
 pub const HOME_DEV: &str = "259:3";
 
-pub const EFI_WITH_WINDOWS: &str = "BootCurrent: 0000\nBootOrder: 0000,0003\nBoot0000* SteamOS\tHD(1,GPT,...)/\\EFI\\steamos\\steamcl.efi\nBoot0003* Windows Boot Manager\tHD(1,GPT,...)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi\n";
+pub const EFI_WITH_WINDOWS: &str = "BootCurrent: 0000\nBootOrder: 0000,0003\nBoot0000* SteamOS\tHD(1,GPT,5e0c1d2a-0000-4000-8000-000000000001,0x800,0x80000)/\\EFI\\steamos\\steamcl.efi\nBoot0003* Windows Boot Manager\tHD(1,GPT,0a1b2c3d-0000-4000-8000-00000000000a,0x800,0x32000)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi\n";
+/// The partition the made-up Windows Boot Manager entry starts from.
+pub const WINDOWS_ESP: &str = "0a1b2c3d-0000-4000-8000-00000000000a";
 
 fn w(root: &Path, p: &str, text: &str) {
     let f = root.join(p.trim_start_matches('/'));
@@ -77,6 +79,7 @@ pub fn tv_edid(name: &str, w_cm: u8, h_cm: u8) -> Vec<u8> {
 }
 
 fn common(root: &Path) {
+    w(root, "/run/udev/data/b259:90", &format!("E:ID_PART_ENTRY_UUID={WINDOWS_ESP}\n"));
     for p in ["policy0", "policy1"] {
         w(root, &format!("/sys/devices/system/cpu/cpufreq/{p}/energy_performance_preference"), "balance_performance\n");
     }

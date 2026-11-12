@@ -263,13 +263,20 @@ pub fn firmware_name(vendor: &str, product: &str, version: &str) -> String {
     if maker.is_empty() || placeholder(maker) || pick.starts_with(maker) { pick } else { format!("{maker} {pick}") }
 }
 
-/// The Windows Boot Manager entry in efibootmgr's list.
-pub fn windows_boot_entry(efibootmgr: &str) -> Option<String> {
-    efibootmgr.lines().find_map(|l| {
-        let rest = l.strip_prefix("Boot")?;
-        let (num, label) = rest.split_at(rest.find(|c: char| !c.is_ascii_hexdigit())?);
-        (num.len() == 4 && label.trim_start_matches('*').trim().starts_with("Windows Boot Manager")).then(|| num.to_string())
-    })
+/// The Windows Boot Manager entry in efibootmgr's list, only when the partition it starts from is in this machine
+/// (`partitions`: the GPT partition uuids udev knows). Firmware keeps the entry after Windows is wiped; offering it
+/// then would restart the machine into nothing.
+pub fn windows_boot_entry(efibootmgr: &str, partitions: &[String]) -> Option<String> {
+    turbinehub_helper::ops::windows_entries(efibootmgr).into_iter().find(|(_, u)| partitions.iter().any(|p| p == u)).map(|(n, _)| n)
+}
+
+/// The GPT partition uuids udev knows, in lower case.
+fn partition_uuids(t: &Tree) -> Vec<String> {
+    t.names("/run/udev/data")
+        .iter()
+        .filter(|n| n.starts_with('b'))
+        .filter_map(|n| udev_props(t, &n[1..]).into_iter().find(|(k, _)| k == "ID_PART_ENTRY_UUID").map(|(_, v)| v.to_ascii_lowercase()))
+        .collect()
 }
 
 fn udev_props(t: &Tree, dev: &str) -> Vec<(String, String)> {
@@ -451,7 +458,7 @@ impl Machine {
             cpu_epp: t.text("/sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences").split_whitespace().map(String::from).collect(),
             rgb_leds: t.names("/sys/class/leds").into_iter().filter(|n| n.contains(":rgb:")).collect(),
             wake_devices,
-            windows_boot: windows_boot_entry(efibootmgr),
+            windows_boot: windows_boot_entry(efibootmgr, &partition_uuids(&t)),
             steamos,
         }
     }

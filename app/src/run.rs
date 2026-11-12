@@ -2,7 +2,8 @@
 //! can give (installed apps, updates, the password state, sound outputs, ratings). Nothing here decides anything:
 //! the engine built the steps, and the facts go back to it as they are.
 
-use std::io::Write;
+use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -76,16 +77,54 @@ pub struct Output {
     pub stderr: String,
 }
 
-/// Runs one command line to its end, with `stdin` typed into it when given.
+/// How long a command may take before it is stopped: installs and downloads get half an hour, everything else two
+/// minutes. Nothing the app runs can leave it waiting for ever.
+fn time_limit(line: &[String]) -> Duration {
+    let long = line.iter().any(|a| ["flathub", "install", "update", "decky-install", "uninstall"].contains(&a.as_str()));
+    Duration::from_secs(if long { 30 * 60 } else { 120 })
+}
+
+/// Runs one command line to its end, with `stdin` typed into it when given. Stopped (TERM, then KILL) when it runs
+/// past its time limit.
 pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
+    let limit = time_limit(line);
     let mut c = command(line).ok_or("Nothing to run")?;
     c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = c.spawn().map_err(|e| format!("Couldn't start {}: {e}", line.first().map(String::as_str).unwrap_or("")))?;
     if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
         let _ = pipe.write_all(text.as_bytes());
     }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    Ok(Output { code: out.status.code().unwrap_or(-1), stdout: String::from_utf8_lossy(&out.stdout).into_owned(), stderr: String::from_utf8_lossy(&out.stderr).into_owned() })
+    let read = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let out = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = read(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(st) => break Some(st),
+            None if start.elapsed() > limit => break None,
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    let Some(status) = status else {
+        // flatpak-spawn passes TERM on to the host command; KILL would only end flatpak-spawn itself.
+        let _ = Command::new("kill").arg("-TERM").arg(child.id().to_string()).status();
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(5) && matches!(child.try_wait(), Ok(None)) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("It took too long, so Turbine Hub stopped it and skipped the rest.".into());
+    };
+    Ok(Output { code: status.code().unwrap_or(-1), stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default() })
 }
 
 fn host(args: &[&str]) -> Vec<String> {

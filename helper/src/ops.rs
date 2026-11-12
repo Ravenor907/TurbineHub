@@ -467,8 +467,12 @@ impl<R: Run> Sys<R> {
             return Err("That isn't a boot entry".into());
         }
         let list = self.run.run(EFIBOOTMGR, &[])?;
-        if !windows_entries(&list).iter().any(|e| e.eq_ignore_ascii_case(entry)) {
+        let Some((_, uuid)) = windows_entries(&list).into_iter().find(|(n, _)| n.eq_ignore_ascii_case(entry)) else {
             return Err("That boot entry isn't Windows".into());
+        };
+        // The partition it starts from has to be on a drive in this machine, or the next start would hang.
+        if !self.p(&format!("/dev/disk/by-partuuid/{uuid}")).exists() {
+            return Err("Windows isn't on any drive in this machine any more".into());
         }
         self.run.run(EFIBOOTMGR, &["-n", entry]).map(|_| ())
     }
@@ -519,14 +523,21 @@ impl<R: Run> Sys<R> {
     }
 }
 
-/// The boot entries efibootmgr lists as Windows Boot Manager.
-pub fn windows_entries(efibootmgr: &str) -> Vec<String> {
+/// The Windows Boot Manager entries efibootmgr lists as switched on, each with the GPT partition it starts from:
+/// (number, partition uuid in lower case). An entry without a partition is left out: firmware keeps entries for a
+/// Windows that was wiped long ago, and starting one of those can leave the machine stuck at a black screen.
+pub fn windows_entries(efibootmgr: &str) -> Vec<(String, String)> {
     efibootmgr
         .lines()
         .filter_map(|l| {
             let rest = l.strip_prefix("Boot")?;
             let (num, label) = rest.split_at(rest.find(|c: char| !c.is_ascii_hexdigit())?);
-            (num.len() == 4 && label.trim_start_matches('*').trim().starts_with("Windows Boot Manager")).then(|| num.to_string())
+            let label = label.strip_prefix('*')?.trim_start();
+            if num.len() != 4 || !label.starts_with("Windows Boot Manager") {
+                return None;
+            }
+            let uuid = label.split("GPT,").nth(1)?.split([',', ')']).next()?.to_ascii_lowercase();
+            (uuid.len() == 36 && uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')).then(|| (num.to_string(), uuid))
         })
         .collect()
 }

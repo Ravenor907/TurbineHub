@@ -44,6 +44,9 @@ impl Pads {
     /// Opens SDL's controller support. If SDL isn't available the app still runs, with keyboard, mouse and touch.
     pub fn open() -> Self {
         sdl2::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        // SDL would catch SIGTERM and SIGINT and turn them into a quit event nobody reads, so Steam, a logout or a
+        // shutdown couldn't close the app. Qt and the system keep their usual handling.
+        sdl2::hint::set("SDL_NO_SIGNAL_HANDLERS", "1");
         let sdl = sdl2::init().ok();
         let subsystem = sdl.as_ref().and_then(|s| s.game_controller().ok());
         let pump = sdl.as_ref().and_then(|s| s.event_pump().ok());

@@ -468,13 +468,31 @@ Item {
             fid: "hub-menu"
             aLabel: "Menu"
             sayName: "Turbine Hub, menu"
-            anchors { right: parent.right; rightMargin: page.app.px(10); bottom: parent.bottom; bottomMargin: page.app.px(2) }
+            anchors { right: closeFiles.left; rightMargin: page.app.px(6); bottom: parent.bottom; bottomMargin: page.app.px(2) }
             width: hubWord.implicitWidth + page.app.px(24); height: page.toolH
             ringRadius: page.app.px(8)
             ringGap: -page.app.px(1)
             onActivated: page.app.press("view")
             Text { id: hubWord; anchors.centerIn: parent; text: "TURBINE HUB"; color: page.app.colors.accentText; font.family: page.app.titleFont; font.pixelSize: page.app.fpx(13); font.letterSpacing: page.app.px(1.5) }
         }
+    }
+
+    // The cross at the top right, where Explorer has its own: leaves Files for Turbine Hub's Home (the window stays).
+    Focusable {
+        id: closeFiles
+        app: page.app
+        parent: strip
+        visible: page.dense
+        focusable: visible
+        fid: "files-close"
+        aLabel: "Close Files"
+        sayName: "Close Files, back to Turbine Hub"
+        anchors { right: parent.right; rightMargin: page.app.px(10); bottom: parent.bottom; bottomMargin: page.app.px(2) }
+        width: page.toolH; height: page.toolH
+        ringRadius: page.app.px(8)
+        ringGap: -page.app.px(1)
+        onActivated: page.app.goTab(0)
+        Icon { app: page.app; anchors.centerIn: parent; d: page.app.icons.close; size: 16; tint: page.app.colors.soft }
     }
 
     // ---------------------------------------------------------------- back, forward, up, refresh; address; search

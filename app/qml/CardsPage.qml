@@ -28,6 +28,8 @@ Item {
             spacing: page.app.px(16)
             PageHeader { app: page.app; Layout.fillWidth: true; title: page.model.title || ""; line: page.model.line || ""; small: page.embedded }
             Label { app: page.app; visible: text !== ""; text: page.model.note || ""; color: page.app.colors.muted; font.pixelSize: page.app.fpx(15); Layout.maximumWidth: page.width * 0.3; horizontalAlignment: Text.AlignRight; Layout.alignment: Qt.AlignBottom }
+            // The page's own actions (Undo all), beside the header.
+            PageButtons { app: page.app; options: page.embedded ? [] : (page.model.options || []); Layout.alignment: Qt.AlignBottom }
         }
         Flickable {
             id: flick
@@ -49,6 +51,9 @@ Item {
                     model: page.cards
                     CardTile {
                         required property var modelData
+                        required property int index
+                        // The highlight starts on the first card, not on the page's own buttons beside the header.
+                        firstFocus: index === 0
                         app: page.app
                         m: modelData
                         Layout.fillWidth: true

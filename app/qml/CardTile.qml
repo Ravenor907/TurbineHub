@@ -11,6 +11,9 @@ Focusable {
     id: card
     required property var m
     fid: "card:" + m.id
+    offers: m.offers || []
+    optionsTitle: m.title || ""
+    optionLabel: m.act === "open" && aLabel === "Open" ? "Open its page" : ""
     aLabel: m.act === "none" ? "" : (m.button || "Open")
     sayName: [m.title || "", m.value || "", m.badge || "", m.status || "", m.button || ""].filter(x => x !== "").join(", ")
     sayMore: m.line || ""

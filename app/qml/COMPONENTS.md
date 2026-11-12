@@ -38,13 +38,30 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
   can hold it. Directions move it to the nearest focusable on screen in that direction; `reveal` scrolls every
   list around it so the whole item shows (with its section heading on a section's first line, and the list's end
   after its last item). After a reload it returns to the item with the same `fid`.
-- **Presses.** `press(k)` takes every input: the controller (polled from `Hub.poll`), the keyboard (arrows or
-  W A S D, Enter, Esc, Q and E or Page Up and Page Down, X, Y, Tab, /, F1, F10), the mouse's Back button (B) and
-  right button (X), and taps on the footer. Order: the dialog, the highlighted item, the page, then the window
-  (tabs, Back, Help, Menu). While the highlight is being put back after a page or dialog change, presses wait for
-  it; for a moment after a new page or dialog appears, A, X, Y and Menu are left out (no double presses). A key
-  held down repeats only for the directions: Enter held is one A. Home and End jump to the first and last thing of
-  the list; Ctrl with = or -, or with the wheel, changes the interface size (and asks to keep it).
+- **Controls.** One scheme, Turbine Mod Manager's (docs/DESIGN.md, Controls; the table is `SCHEME` in
+  engine/src/ui/controls.rs). `press(k)` takes every input: the controller (polled from `Hub.poll`), the keyboard
+  (arrows or W A S D, Enter or Space, Esc, R for Options, F for Find, Q and E, Tab for the menu, Ctrl+Enter for
+  Start, F1 for Help), the mouse's Back button (B) and right button (Options for what it is on), and taps on the
+  footer. Order: the dialog, the highlighted item, the page, then the window (tabs, Back, Options, Find, the menu,
+  Start). While the highlight is being put back after a page or dialog change, presses wait for it; for a moment
+  after a new page or dialog appears, A, X, Y and Start are left out (no double presses). A key held down repeats
+  only for the directions: Enter held is one A. LT and RT jump a screenful (`jumpBy`), Home and End go to the first
+  and last thing of the list; Ctrl with = or -, or with the wheel, changes the interface size (and asks to keep
+  it). In a dialog Tab and Shift+Tab go from one thing to the next (`tabMove`).
+- **Options.** `openOptions(item)` builds the menu for one thing and shows it in the dialog: the thing's own press
+  first (its `aLabel`, carried out as A is), then its `offers` (from the engine: what the page it opens can do),
+  then the page's `options` (its own actions, its main button, Find, Help). An entry said twice is said once. No
+  page handles X or Y itself: pages only show `model.hints` and draw the options marked `button` (PageButtons).
+- **Find.** `find(text)` asks the page (`find` on SidePage and RowsPage): the search box takes the highlight and
+  the keyboard. A letter or digit with no meaning of its own, typed on such a page, starts it with that letter.
+- **Holds.** R3 held (Options), Start held and Space held (Play, on a page with `hold`) go through `holdBegin`,
+  `holdEnd` and `holdDone`; PointerLayer draws the ring that fills meanwhile. Let go early, each is its tap.
+- **The pointer.** `Hub.poll` says where the right stick has moved it (`ptr`); `pointerNews` turns that into mouse
+  events sent into the window (`Hub.pointerEvent`), so hovering, clicking, the gate, lists and dialogs treat it as
+  a mouse. While one of its events is delivered `ptrActing` is true: the last input stays the controller's and a
+  move counts at once. R3 is `r3()`: a click, or the right button when held; RT and LT are the two buttons while
+  it shows. A key or the real mouse sends it away (`pointerAway`); it rests while a text box has the keyboard in
+  Game Mode and while work runs. The left stick's wheel goes to the pointer, or to the highlight when it is hidden.
 - **Only in front.** The controller is read behind other windows too, but pad.rs passes on releases only while
   another window is in front, and for a quarter of a second after coming back (`onActiveChanged`, `Hub.front`).
   A held direction stops repeating when the window goes back, the page changes or the controller goes away.
@@ -89,9 +106,11 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | PageHeader | A page's title with where it was opened from. |
 | ScrollFade | Fades at the edges of a list that has more. |
 | TopBar | Tabs between LB and RB, the mode, the machine's name. |
-| BottomBar | The footer's hints; when narrow drops the page's extras first, then Help and Menu, never A or B. |
+| BottomBar | The footer's hints; when narrow drops the pointer's click and Find first, then Menu, Options and the main button, never A or B. |
+| PageButtons | The page's own actions as buttons (the options the engine marks `button`): under a list, beside a header. |
+| PointerLayer | The controller's pointer (an arrow drawn by Turbine Hub, its tip where R3 clicks) and the ring of a held button. Takes no input. |
 | Toast | A short note above the footer, or at the top when the highlight is down there. |
-| DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu. |
+| DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu and every Options menu (rows, each with its button where it has one). |
 | Motion | Every duration and curve, at the player's level (full, reduced, off). No other file names one. |
 | Backdrop | What takes the mouse and the finger away from everything under it: the dialog's backdrop and card, the busy cover. The only MouseArea. |
 | SelfCheck | The picture run's checks: layout, text size, contrast of the words as drawn, finger sizes, state chips, names for a screen reader (also asked from Qt's accessibility tree), all 80 palettes, and with `--motion=full` or `reduced` that everything comes to rest. With `--check=taps`, `hold`, `hover`, `typing` or `mouse` the same page is worked with real keys, a real mouse and a finger first. Loaded only with `--screenshot`. |
@@ -101,7 +120,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | File | Pages |
 |---|---|
 | HomePage | Home, Guided and Veteran. |
-| SidePage | Games, Store, Settings: a list on the left, its rows on the right. Games and Store have a search box above the list (RT, or / on a keyboard); every letter goes to the engine, which answers with the narrowed page. |
+| SidePage | Games, Store, Settings: a list on the left, its rows on the right. Games and Store have a search box above the list (Find: Y, or F on a keyboard); every letter goes to the engine, which answers with the narrowed page. The page's own actions are buttons under the list. |
 | CardsPage | My machine, Bring it over. |
 | RowsPage | Every card's controls, the library check, a Store item's own page, Turbine Hub in Steam, a game's Proton, a game's saves, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
 | PickPage | Guided or Veteran. |
@@ -113,5 +132,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 machine and runs SelfCheck. `tools/ci-shots.sh` takes them all at 1280x800, 1920x1080 and a 1600x900 Desktop Mode
 window. `--theme=`, `--accent=`, `--vision=` and `--scale=` pick the look; `--finger=<pixels>` stands in for a dense
 screen's finger size; `--motion=full` or `reduced` leaves
-animations on (pictures are otherwise taken with them off); `--spoken` prints what a screen reader is told. A
+animations on (pictures are otherwise taken with them off); `--pointer=<x>,<y>` shows the controller's pointer there
+(as parts of the window); `--check=taps|hold|hover|mouse|typing|pointer|options` works the page with real keys, a
+mouse, a finger and fed sticks first; `--spoken` prints what a screen reader is told. A
 picture named `motion-...` must end on the very picture the same presses give with animations off.

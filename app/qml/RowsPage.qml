@@ -12,9 +12,16 @@ Item {
     required property var app
     property var model: app.model
     property bool embedded: false
-    // The main button's key is one hint, with the button's own words.
-    readonly property var hints: (model.hints || []).filter(h => !model.primary || h.k !== model.primary.k).concat(model.primary ? [{ k: model.primary.k, label: model.primary.label }] : [])
+    readonly property var hints: model.hints || []
     function press(k) { return app.pageKey(model, k) }
+    // Find: the search box takes the highlight and the keyboard (`text`: a letter typed already).
+    function find(text) {
+        if (model.search !== true || embedded) return false
+        app.setFocus(searchBox, false)
+        searchBox.activated()
+        if (text !== "") { input.text = input.text + text; app.setArg(input.text) }
+        return true
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -113,12 +120,14 @@ Item {
         }
 
         RowLayout {
-            visible: !page.embedded && ((page.model.note || "") !== "" && (page.model.tiles || []).length === 0 || !!page.model.primary)
+            visible: !page.embedded && ((page.model.note || "") !== "" && (page.model.tiles || []).length === 0 || !!page.model.primary || pageButtons.count > 0)
             Layout.fillWidth: true
             spacing: page.app.px(16)
             Icon { app: page.app; visible: note.visible; d: page.app.icons.shield; size: 20 }
             Label { id: note; app: page.app; Layout.fillWidth: true; visible: (page.model.tiles || []).length === 0 && text !== ""; text: page.model.note || ""; color: page.app.colors.muted; font.pixelSize: page.app.fpx(15) }
             Item { Layout.fillWidth: true; visible: !note.visible }
+            // The page's own actions (Tick all, Undo all), beside its main button.
+            PageButtons { id: pageButtons; app: page.app; options: page.model.options || [] }
             ActionButton {
                 app: page.app
                 visible: !!page.model.primary

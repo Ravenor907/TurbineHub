@@ -66,7 +66,7 @@ fn the_games_search_narrows_the_list_and_says_when_nothing_matches() {
     let j = parse(&u.page("games", "")).unwrap();
     assert_eq!(side(&j).len(), 8);
     assert_eq!(j.get("search").unwrap().str_at("hint"), Some("Search games"));
-    assert!(hints(&j).contains(&"Search"));
+    assert!(hints(&j).contains(&"Find"));
     assert_eq!(parse(&u.act("search", "games", "el")).unwrap().get("refresh").and_then(Json::as_bool), Some(true));
     // The game that was picked isn't among the matches any more: the first match shows.
     let j = parse(&u.page("games", BG3)).unwrap();
@@ -99,7 +99,8 @@ fn a_game_that_wont_run_here_shows_only_the_other_ways_to_play() {
     // the highlight lands.
     assert_eq!(titles(&secs[0].1), vec!["GeForce NOW", "Xbox Cloud", "Restart to Windows"]);
     assert!(rows(&j).iter().all(|r| r.str_at("act") != Some("switch") && r.str_at("kind") != Some("toggle")));
-    assert!(!hints(&j).contains(&"Play") && j.get("x") == Some(&Json::Null));
+    assert!(!hints(&j).contains(&"Play") && j.get("hold") == Some(&Json::Null));
+    assert!(!j.get("options").unwrap().as_array().iter().any(|o| o.str_at("title") == Some("Play")));
     // Asking anyway changes nothing.
     let before = Switches::load(&u.folder());
     assert!(parse(&u.act("switch", &format!("{APEX}|fsr4"), "")).unwrap().get("toast").is_some());
@@ -801,14 +802,11 @@ fn a_window_without_a_controller_says_how_to_get_one_and_help_names_what_the_han
     assert!(tip.line.contains("Steam entry"));
     let guide = ui.act("checkup", tip.action.1, "");
     assert!(guide.contains("Using a controller in Desktop Mode"), "{guide}");
-    // Help: a window means keys until the window says the controller is in the hand, and the other way round.
-    ui.window = true;
-    assert!(ui.page("help", "home").contains("\"Esc\""));
-    ui.keys = Some(false);
-    let help = ui.page("help", "home");
-    assert!(help.contains("\"B\"") && !help.contains("\"Esc\""), "{help}");
-    ui.window = false;
-    ui.keys = Some(true);
-    assert!(ui.page("help", "home").contains("\"Esc\""));
+    // Help names the controller's button, the key and the mouse's way side by side, in a window and in Game Mode.
+    for window in [true, false] {
+        ui.window = window;
+        let help = ui.page("help", "home");
+        assert!(help.contains("B \u{b7} Esc or Backspace \u{b7} Back side button"), "{help}");
+    }
     done("controller");
 }

@@ -12,6 +12,8 @@ Rectangle {
     // Drawn on an accent fill (inside the main button): its outline and name take the fill's own text color.
     property bool onFill: false
     readonly property string words: app.glyph(k)
+    // A key that has no button on a controller (F1) has no cap there.
+    visible: words !== ""
     readonly property bool face: !app.keyboard && ["a", "b", "x", "y"].indexOf(k) >= 0
     // As big as the design says, and never smaller than its letter needs (the text floor keeps letters readable
     // at the smallest interface size).

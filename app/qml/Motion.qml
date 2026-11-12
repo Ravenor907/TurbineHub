@@ -45,6 +45,9 @@ QtObject {
     readonly property int spin: 1400
     readonly property int holdDelay: 380
     readonly property int holdRepeat: 110
+    // How long R3 is held for Options (a shorter press is a click), and how long Start or Space is held to play.
+    readonly property int holdClick: 450
+    readonly property int holdPlay: 1000
     // How long a page or dialog that just appeared leaves out A, X, Y and Menu (a double press stays on the first).
     readonly property int pressGuard: 250
     // How long after a key, a controller press or a rebuild the mouse resting on something isn't the mouse being used.

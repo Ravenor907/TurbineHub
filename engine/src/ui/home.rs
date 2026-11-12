@@ -1,5 +1,5 @@
 //! Home: Guided shows what needs a look first, then setup and a few readings; Veteran is a dashboard.
-use super::{Ui, activity, arr, b, hint, kind_word, n, obj, s};
+use super::{Ui, activity, arr, b, kind_word, n, obj, s};
 use crate::checkup::{self, Item, Level};
 use crate::hardware::Machine;
 use crate::history::{self, Sample};
@@ -86,6 +86,18 @@ fn setup_card(st: &Settings) -> Json {
     }
 }
 
+/// What the Guided Home offers besides its cards: the rest of the tips, and setup while steps are left.
+fn home_options(st: &Settings, tips: bool, all: bool) -> Vec<Json> {
+    let mut out = Vec::new();
+    if tips {
+        out.push(super::controls::option(if all { "Show fewer" } else { "Show all" }, "home-all", ""));
+    }
+    if SETUP_STEPS.iter().any(|x| !st.setup_done.iter().any(|d| d == x)) {
+        out.push(super::controls::option("Continue setup", "open", "setup"));
+    }
+    out
+}
+
 /// The eight quick switches of the dashboard: Game Boost and (where it works) FSR 4 as real switches, then this
 /// machine's cards.
 fn switches(ui: &Ui, m: &Machine, st: &Settings) -> Vec<Json> {
@@ -126,15 +138,15 @@ pub(crate) fn page(ui: &mut Ui) -> Json {
             "items": arr(items.iter().map(item_json)),
             "fine": s(if items.iter().any(|i| i.level == Level::Look) { "" } else { "Nothing needs a look." }),
             "activity": arr(activity::read(&ui.folder(), 8).into_iter().map(|(at, w)| obj! {"when": s(activity::ago(now, at)), "text": s(w)})),
-            "hints": arr([hint("y", "Refresh")]),
+            "options": arr([super::controls::local("Refresh", "reload", "f5")]),
         };
     }
     let shown = if ui.home_all { items.len() } else { SHOWN.min(items.len()) };
     let more = items.len() - shown;
     let tip = if ui.window {
-        ("Mouse and keyboard", "Everything works with a mouse too. Q and E switch tabs, Esc goes back.")
+        ("Mouse and keyboard", "Everything works with a mouse and with keys. Right-click or R shows what a thing can do, F finds, Q and E switch tabs, Esc goes back.")
     } else {
-        ("New here?", "Press View on any page for what it does. Looking for Task Manager or the C: drive? Help has \"Where's my...?\"")
+        ("New here?", "X on anything shows what it can do, with Help for the page at the end. Looking for Task Manager or the C: drive? View opens the menu, with \"Where's my...?\"")
     };
     obj! {
         "view": s("guided"),
@@ -147,6 +159,6 @@ pub(crate) fn page(ui: &mut Ui) -> Json {
         "tiles": tiles,
         "tip": obj! {"title": s(tip.0), "line": s(tip.1)},
         "kind": s(kind_word(&m)),
-        "hints": arr(if more > 0 || ui.home_all { vec![hint("x", if ui.home_all { "Show fewer" } else { "Show all" })] } else { vec![] }),
+        "options": arr(home_options(&st, more > 0 || ui.home_all, ui.home_all)),
     }
 }

@@ -115,7 +115,6 @@ pub(crate) fn item(ui: &Ui) -> Json {
         "title": s(NAME),
         "intro": s(ABOUT),
         "sections": arr([section("", actions), section("About", about)]),
-        "hints": arr([]),
     }
 }
 

@@ -5,7 +5,9 @@ import TurbineHub
 // The one dialog. Every question Turbine Hub asks looks like this: a title, what will happen in plain words, the
 // exact changes as a list, the password box when one is needed, and the buttons pinned at the bottom with the
 // controller's button inside each. It sizes to what it holds and scrolls the list when that is long. The same
-// card shows the menu (a list of places to go) and plain explanations (one Close button).
+// card shows the menu (a list of places to go), an Options menu (`options`: what one thing and its page can do,
+// each row with the button that does it directly, where it has one) and plain explanations (one Close button).
+// At a keyboard Tab and Shift+Tab go from one thing in it to the next.
 //
 // A dark backdrop covers the page behind it (the footer stays clear, it says what A and B do here), and nothing
 // behind it takes a press while it is open.
@@ -80,10 +82,10 @@ Item {
         app.typingDone()
         confirm()
     }
-    // A place in the menu: the menu closes, then the place opens (the row is gone by then, so the dialog does it).
-    function choose(act, arg) {
+    // A row of a menu: the menu closes, then the row is carried out (the row is gone by then, so the window does it).
+    function choose(row) {
         close()
-        app.doAct(act, arg, "")
+        app.chosen(row)
     }
     // Scrolls the words and the list by most of what shows; false at the end.
     function scroll(dir) {
@@ -96,10 +98,12 @@ Item {
     readonly property bool scrolls: list.contentHeight > list.height + 1
     function press(k) {
         if (k === "b") { cancel(); return true }
+        // The button that opened a menu closes it again.
+        if (d && d.rows && ((k === "x" && d.options === true) || (k === "view" && d.options !== true))) { cancel(); return true }
         // Down from the buttons, where nothing is below, reads on in the list.
         if (k === "down" && scrolls && app.focusItem && (app.focusItem.fid === "cancel" || app.focusItem.fid === "confirm")) return scroll(1)
         // The tabs, Help and the menu wait until the dialog is answered.
-        return ["lb", "rb", "lt", "rt", "view", "start", "x", "y"].indexOf(k) >= 0
+        return ["lb", "rb", "lt", "rt", "view", "start", "play", "f1", "x", "y"].indexOf(k) >= 0
     }
     // A change that goes back by itself counts down out loud.
     property int remaining: 0
@@ -201,18 +205,27 @@ Item {
                                 app: dlg.app
                                 fid: "menu:" + index
                                 firstFocus: index === 0
-                                aLabel: "Open"
+                                aLabel: dlg.d && dlg.d.options === true ? "Choose" : "Open"
                                 sayRole: Accessible.MenuItem
-                                sayName: (modelData.title || "") + ", " + (index + 1) + " of " + (dlg.d ? (dlg.d.rows || []).length : 0)
+                                readonly property string keyName: modelData.key ? dlg.app.glyph(modelData.key) : ""
+                                sayName: (modelData.title || "") + (keyName !== "" && modelData.key !== "a" ? ", " + (modelData.key === "play" ? "hold " : "") + keyName : "") + ", " + (index + 1) + " of " + (dlg.d ? (dlg.d.rows || []).length : 0)
                                 width: listCol.width - dlg.app.px(8)
                                 x: dlg.app.px(4)
-                                height: dlg.app.tpx(48)
+                                height: Math.max(dlg.app.tpx(48), rowTitle.implicitHeight + dlg.app.px(16))
                                 ringRadius: dlg.app.px(8)
                                 ringGap: -dlg.app.px(1)
-                                onActivated: dlg.choose(modelData.act, modelData.arg)
+                                onActivated: dlg.choose(modelData)
                                 Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.raised }
-                                Label { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; x: dlg.app.px(16); text: menuRow.modelData.title; font.weight: Font.DemiBold }
-                                Icon { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: dlg.app.px(12); d: dlg.app.icons.chevron; size: 18 }
+                                Label { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; x: dlg.app.px(16); id: rowTitle; width: parent.width - x - rowKey.width - dlg.app.px(20); text: menuRow.modelData.title; font.weight: Font.DemiBold }
+                                // The button that does this directly, where it has one (its key at a keyboard); else the mark of a row that leads on.
+                                Row {
+                                    id: rowKey
+                                    anchors { verticalCenter: parent.verticalCenter; right: parent.right; rightMargin: dlg.app.px(12) }
+                                    spacing: dlg.app.px(6)
+                                    Text { visible: menuRow.modelData.key === "play" && menuRow.keyName !== ""; text: "Hold"; color: dlg.app.colors.muted; font.family: dlg.app.bodyFont; font.pixelSize: dlg.app.fpx(13); anchors.verticalCenter: parent.verticalCenter }
+                                    KeyCap { app: dlg.app; visible: menuRow.keyName !== ""; k: menuRow.modelData.key || ""; small: true; anchors.verticalCenter: parent.verticalCenter }
+                                    Icon { app: dlg.app; visible: menuRow.keyName === ""; d: dlg.app.icons.chevron; size: 18; anchors.verticalCenter: parent.verticalCenter }
+                                }
                             }
                         }
                     }
@@ -257,6 +270,8 @@ Item {
                             Keys.onEscapePressed: dlg.app.keysBack()
                             Keys.onReturnPressed: (e) => dlg.entered(e, pw)
                             Keys.onEnterPressed: (e) => dlg.entered(e, pw)
+                            Keys.onTabPressed: dlg.app.tabMove(1)
+                            Keys.onBacktabPressed: dlg.app.tabMove(-1)
                         }
                     }
                     ActionButton {
@@ -298,6 +313,8 @@ Item {
                         Keys.onEscapePressed: dlg.app.keysBack()
                         Keys.onReturnPressed: (e) => dlg.entered(e, pw2)
                         Keys.onEnterPressed: (e) => dlg.entered(e, pw2)
+                        Keys.onTabPressed: dlg.app.tabMove(1)
+                        Keys.onBacktabPressed: dlg.app.tabMove(-1)
                     }
                 }
                 Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "No keyboard on screen? Steam button and X opens it."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }

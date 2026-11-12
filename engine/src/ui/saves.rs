@@ -70,7 +70,7 @@ fn chooser(ui: &Ui) -> Json {
         })
         .collect();
     let empty = if rows.is_empty() { "No games found. Install one in Steam or Heroic and it shows up here." } else { "" };
-    obj! {"crumb": s("Games"), "title": s("Saves"), "intro": s("Pick a game to see its snapshots."), "sections": arr([with(with(section("", rows), "columns", super::n(2.0)), "empty", s(empty))]), "hints": arr([])}
+    obj! {"crumb": s("Games"), "title": s("Saves"), "intro": s("Pick a game to see its snapshots."), "sections": arr([with(with(section("", rows), "columns", super::n(2.0)), "empty", s(empty))])}
 }
 
 /// One game's saves. `arg` is the game; without one, the list of games.
@@ -106,7 +106,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "intro": s(if auto { "A snapshot is taken each time the game starts. Restoring one keeps the current saves first, so Undo always leads back." } else { "Restoring a snapshot keeps the current saves first, so Undo always leads back." }),
         "sections": arr([section("", first), with(section(&title, rows), "empty", s(empty))]),
         "note": s(format!("The newest {} of each kind are kept. The game's saves change only when you restore one.", snapshots::KEEP)),
-        "hints": arr([]),
     }
 }
 

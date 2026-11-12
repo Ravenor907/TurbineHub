@@ -1,6 +1,7 @@
 //! Controllers through SDL. In Game Mode, Steam hands non-Steam apps a virtual Xbox pad, the same path games use;
-//! SDL's controller mappings cover Xbox pads and the handhelds' built-in controls the same way. Buttons, the triggers
-//! and the left stick pushed one way all become plain presses ("a", "lt", "up").
+//! SDL's controller mappings cover Xbox pads and the handhelds' built-in controls the same way. Buttons and the
+//! triggers become plain presses ("a", "lt", "r3"); the sticks are kept as places for the controller pointer
+//! (pointer.rs): the right stick moves it, the left stick is the D-pad when pushed and a wheel when swept.
 //!
 //! Presses only count while Turbine Hub's window is in front: SDL keeps reading the controller behind a game (so
 //! what is held and let go stays true), but only releases are passed on then, and for a moment after the window
@@ -19,110 +20,6 @@ const RELEASE_AT: i16 = 12_000;
 const TWIN_MS: u128 = 40;
 /// The left stick in `dedupe`'s books: a pad of its own, so a direction held on the D-pad and on the stick counts once.
 const STICK: u32 = u32::MAX;
-
-/// Left stick, as a part of its full travel: past `PUSH_ON` it counts as pushed (a worn stick resting off center
-/// never gets there), and it has let go once it is back under `LET_GO`.
-pub const PUSH_ON: f64 = 0.5;
-pub const LET_GO: f64 = 0.35;
-/// A push must last this long to be a press, so a flick across the middle is nothing.
-pub const COMMIT_MS: f64 = 80.0;
-/// A held push turns into another direction only once it points this far (degrees) from the one it holds, well past
-/// the diagonal, so a thumb resting near a corner never flips between two.
-pub const TURN_DEG: f64 = 55.0;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum Push {
-    #[default]
-    Idle,
-    /// Pushed, for this many milliseconds so far.
-    Pending(f64),
-    Held(&'static str),
-    /// Ignored until it has been back in the middle (it was pushed while the window was away).
-    Spent,
-}
-
-/// The left stick as a D-pad: one direction per push, the larger axis wins.
-#[derive(Default)]
-pub struct Stick {
-    push: Push,
-}
-
-/// The direction a stick position points (y down): the larger axis wins.
-pub fn direction(x: f64, y: f64) -> &'static str {
-    if x.abs() >= y.abs() {
-        if x >= 0.0 { "right" } else { "left" }
-    } else if y >= 0.0 {
-        "down"
-    } else {
-        "up"
-    }
-}
-
-/// How far (degrees) a stick position points away from a direction's own axis.
-fn off_axis(dir: &str, x: f64, y: f64) -> f64 {
-    let (ax, ay) = match dir {
-        "right" => (1.0, 0.0),
-        "left" => (-1.0, 0.0),
-        "down" => (0.0, 1.0),
-        _ => (0.0, -1.0),
-    };
-    let m = x.hypot(y);
-    if m <= 0.0 {
-        return 0.0;
-    }
-    ((x * ax + y * ay) / m).clamp(-1.0, 1.0).acos().to_degrees()
-}
-
-impl Stick {
-    /// The stick is at (x, y), each -1 to 1 with y down, `dt_ms` after the last look. Answers the direction let go
-    /// and the direction pressed, if any (both when a held push turned on to another direction).
-    pub fn step(&mut self, x: f64, y: f64, dt_ms: f64) -> (Option<&'static str>, Option<&'static str>) {
-        let m = x.hypot(y);
-        let (mut up, mut down) = (None, None);
-        self.push = match self.push {
-            Push::Idle if m >= PUSH_ON => Push::Pending(0.0),
-            Push::Idle => Push::Idle,
-            Push::Pending(_) if m < LET_GO => Push::Idle,
-            Push::Pending(ms) if ms + dt_ms >= COMMIT_MS => {
-                // Where it points now: a push that curved on the way out still counts.
-                let dir = direction(x, y);
-                down = Some(dir);
-                Push::Held(dir)
-            }
-            Push::Pending(ms) => Push::Pending(ms + dt_ms),
-            Push::Held(dir) if m < LET_GO => {
-                up = Some(dir);
-                Push::Idle
-            }
-            Push::Held(dir) => {
-                let now = direction(x, y);
-                if now != dir && off_axis(dir, x, y) >= TURN_DEG {
-                    up = Some(dir);
-                    down = Some(now);
-                    Push::Held(now)
-                } else {
-                    Push::Held(dir)
-                }
-            }
-            Push::Spent if m < LET_GO => Push::Idle,
-            Push::Spent => Push::Spent,
-        };
-        (up, down)
-    }
-
-    /// The window stopped listening (it went to the back, or just came to the front): a held direction is let go
-    /// (answered, to pass on as a release) and a stick still pushed does nothing until it has been in the middle.
-    pub fn let_go(&mut self) -> Option<&'static str> {
-        let held = match self.push {
-            Push::Held(dir) => Some(dir),
-            _ => None,
-        };
-        if self.push != Push::Idle {
-            self.push = Push::Spent;
-        }
-        held
-    }
-}
 
 /// Whether presses count right now: only while Turbine Hub's window is in front, and not for a moment after it
 /// came back. Releases always pass, so nothing stays held down in the interface.
@@ -166,10 +63,8 @@ pub struct Pads {
     last_up: HashMap<&'static str, (u32, Instant)>,
     /// Triggers currently counted as pressed, per pad.
     axis_down: HashMap<(u32, &'static str), bool>,
-    /// Each pad's left stick: x and y (SDL's -32768..32767, y down).
-    sticks: HashMap<u32, [i16; 2]>,
-    stick: Stick,
-    last_tick: Instant,
+    /// Each pad's sticks: left x, left y, right x, right y (SDL's -32768..32767, y down).
+    sticks: HashMap<u32, [i16; 4]>,
     last_rescan: Instant,
     gate: Gate,
     /// A controller went away since the last `take_lost`.
@@ -204,11 +99,6 @@ fn input_report() -> String {
     format!("{} input device(s), {readable} readable by Turbine Hub", events.len())
 }
 
-/// An axis value as -1 to 1.
-fn unit(v: i16) -> f64 {
-    (f64::from(v) / 32767.0).clamp(-1.0, 1.0)
-}
-
 impl Pads {
     /// Opens SDL's controller support. If SDL isn't available the app still runs, with keyboard, mouse and touch.
     pub fn open() -> Self {
@@ -225,7 +115,7 @@ impl Pads {
             note("SDL isn't available: keyboard, mouse and touch only");
         }
         let now = Instant::now();
-        let mut pads = Pads { sdl, subsystem, pump, open: Vec::new(), held: HashMap::new(), last_up: HashMap::new(), axis_down: HashMap::new(), sticks: HashMap::new(), stick: Stick::default(), last_tick: now, last_rescan: now, gate: Gate::new(), lost: false };
+        let mut pads = Pads { sdl, subsystem, pump, open: Vec::new(), held: HashMap::new(), last_up: HashMap::new(), axis_down: HashMap::new(), sticks: HashMap::new(), last_rescan: now, gate: Gate::new(), lost: false };
         pads.enumerate(true);
         pads
     }
@@ -297,36 +187,40 @@ impl Pads {
             ups = self.read().into_iter().filter(|(_, down)| !*down).collect();
         }
         self.gate.set_front(front, Instant::now(), quiet);
-        if let Some(dir) = self.stick.let_go()
-            && self.dedupe(STICK, dir, false, Instant::now())
-        {
-            ups.push((dir, false));
-        }
         ups
+    }
+
+    /// Where the sticks are now, each -1 to 1 with y down. With more than one pad (Steam's virtual pad and the raw
+    /// one report the same stick), each stick is taken from the pad that has it pushed furthest.
+    pub fn sticks(&self) -> crate::pointer::Sticks {
+        let mut s = crate::pointer::Sticks::default();
+        for v in self.sticks.values() {
+            let (lx, ly, rx, ry) = (crate::pointer::unit(v[0]), crate::pointer::unit(v[1]), crate::pointer::unit(v[2]), crate::pointer::unit(v[3]));
+            if lx.hypot(ly) > s.lx.hypot(s.ly) {
+                (s.lx, s.ly) = (lx, ly);
+            }
+            if rx.hypot(ry) > s.rx.hypot(s.ry) {
+                (s.rx, s.ry) = (rx, ry);
+            }
+        }
+        s
+    }
+
+    /// A direction the left stick pressed or let go (pointer.rs decides which): passed on like a button's, so the
+    /// D-pad and the stick holding the same direction count once, and nothing is pressed behind another window.
+    pub fn stick_event(&mut self, dir: &'static str, pressed: bool) -> Option<(&'static str, bool)> {
+        let now = Instant::now();
+        if !self.dedupe(STICK, dir, pressed, now) {
+            return None;
+        }
+        self.gate.pass(vec![(dir, pressed)], now).pop()
     }
 
     /// Everything that happened since the last call, as (button, pressed) pairs. Behind another window, and for a
     /// moment after coming back, only the releases: nothing stays held down in the interface, and nothing is pressed.
     pub fn poll(&mut self) -> Vec<(&'static str, bool)> {
-        let mut events = self.read();
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_tick).as_secs_f64() * 1000.0;
-        self.last_tick = now;
-        // The stick pushed furthest speaks (Steam's virtual pad and the raw one report the same stick).
-        let (mut x, mut y) = (0.0_f64, 0.0_f64);
-        for v in self.sticks.values() {
-            let (vx, vy) = (unit(v[0]), unit(v[1]));
-            if vx.hypot(vy) > x.hypot(y) {
-                (x, y) = (vx, vy);
-            }
-        }
-        let (up, down) = self.stick.step(x, y, dt.clamp(0.0, 100.0));
-        for (dir, pressed) in up.map(|d| (d, false)).into_iter().chain(down.map(|d| (d, true))) {
-            if self.dedupe(STICK, dir, pressed, now) {
-                events.push((dir, pressed));
-            }
-        }
-        self.gate.pass(events, now)
+        let events = self.read();
+        self.gate.pass(events, Instant::now())
     }
 
     /// Reads SDL's queue: controllers coming and going, buttons, the triggers and the stick's place.
@@ -351,8 +245,10 @@ impl Pads {
                     }
                     Event::ControllerAxisMotion { which, axis, value, .. } => {
                         match axis {
-                            Axis::LeftX => self.sticks.entry(which).or_insert([0; 2])[0] = value,
-                            Axis::LeftY => self.sticks.entry(which).or_insert([0; 2])[1] = value,
+                            Axis::LeftX => self.sticks.entry(which).or_insert([0; 4])[0] = value,
+                            Axis::LeftY => self.sticks.entry(which).or_insert([0; 4])[1] = value,
+                            Axis::RightX => self.sticks.entry(which).or_insert([0; 4])[2] = value,
+                            Axis::RightY => self.sticks.entry(which).or_insert([0; 4])[3] = value,
                             _ => {}
                         }
                         for (name, v) in axis_names(axis, value) {
@@ -437,12 +333,14 @@ fn button_name(b: Button) -> Option<&'static str> {
         Button::DPadDown => "down",
         Button::DPadLeft => "left",
         Button::DPadRight => "right",
+        // The right stick pressed in: the pointer's click.
+        Button::RightStick => "r3",
         // The Steam / Guide button belongs to Steam.
         _ => return None,
     })
 }
 
-/// The triggers act as buttons (the left stick is read as a place instead, see `Stick`). Yields (name, strength),
+/// The triggers act as buttons (the sticks are read as places instead, see `sticks`). Yields (name, strength),
 /// 0 when idle.
 fn axis_names(axis: Axis, value: i16) -> Vec<(&'static str, i16)> {
     let pos = value.max(0);
@@ -456,17 +354,6 @@ fn axis_names(axis: Axis, value: i16) -> Vec<(&'static str, i16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Holds the stick at one place for `ms`, a frame at a time, and collects what it sent.
-    fn hold(s: &mut Stick, x: f64, y: f64, ms: u32) -> Vec<(&'static str, bool)> {
-        let mut out = Vec::new();
-        for _ in 0..(ms / 16).max(1) {
-            let (up, down) = s.step(x, y, 16.0);
-            out.extend(up.map(|d| (d, false)));
-            out.extend(down.map(|d| (d, true)));
-        }
-        out
-    }
 
     #[test]
     fn behind_another_window_only_releases_pass() {
@@ -489,57 +376,5 @@ mod tests {
         assert_eq!(g.pass(vec![("a", false)], back + Duration::from_millis(120)), vec![("a", false)]);
         assert_eq!(g.pass(vec![("a", true)], back + Duration::from_millis(249)), vec![]);
         assert_eq!(g.pass(vec![("a", true)], back + Duration::from_millis(251)), vec![("a", true)]);
-    }
-
-    #[test]
-    fn a_diagonal_push_is_one_direction_the_larger_axis() {
-        let mut s = Stick::default();
-        assert_eq!(hold(&mut s, 0.9, -0.7, 300), vec![("right", true)]);
-        assert_eq!(hold(&mut s, 0.0, 0.0, 50), vec![("right", false)]);
-        assert_eq!(hold(&mut s, -0.6, 0.8, 300), vec![("down", true)]);
-    }
-
-    #[test]
-    fn a_worn_stick_resting_off_center_presses_nothing() {
-        let mut s = Stick::default();
-        assert!(hold(&mut s, 0.3, -0.35, 2000).is_empty());
-    }
-
-    #[test]
-    fn a_flick_shorter_than_a_press_is_nothing() {
-        let mut s = Stick::default();
-        assert!(hold(&mut s, 1.0, 0.0, 48).is_empty());
-        assert!(hold(&mut s, 0.0, 0.0, 100).is_empty());
-    }
-
-    #[test]
-    fn it_lets_go_lower_than_it_pushes() {
-        let mut s = Stick::default();
-        assert_eq!(hold(&mut s, 0.0, -0.8, 200), vec![("up", true)]);
-        // Easing off to under the push line but over the let-go line still holds.
-        assert!(hold(&mut s, 0.0, -0.4, 200).is_empty());
-        assert_eq!(hold(&mut s, 0.0, -0.3, 50), vec![("up", false)]);
-        // And that far isn't enough to push again.
-        assert!(hold(&mut s, 0.0, -0.45, 300).is_empty());
-    }
-
-    #[test]
-    fn a_thumb_near_the_corner_keeps_its_direction_and_a_turn_changes_it() {
-        let mut s = Stick::default();
-        assert_eq!(hold(&mut s, 0.1, -0.9, 200), vec![("up", true)]);
-        // Just past the diagonal: still up.
-        assert!(hold(&mut s, 0.75, -0.65, 300).is_empty());
-        // Round to the right: up is let go, right is pressed, once.
-        assert_eq!(hold(&mut s, 0.95, -0.2, 300), vec![("up", false), ("right", true)]);
-    }
-
-    #[test]
-    fn pushed_while_away_does_nothing_until_it_was_in_the_middle() {
-        let mut s = Stick::default();
-        assert_eq!(hold(&mut s, 0.0, 0.9, 200), vec![("down", true)]);
-        assert_eq!(s.let_go(), Some("down"));
-        assert!(hold(&mut s, 0.0, 0.9, 500).is_empty());
-        assert!(hold(&mut s, 0.0, 0.0, 50).is_empty());
-        assert_eq!(hold(&mut s, 0.0, 0.9, 200), vec![("down", true)]);
     }
 }

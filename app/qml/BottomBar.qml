@@ -3,12 +3,13 @@ import QtQuick
 // The one footer: what each button does right now. Hints arrive most important first; when the bar is too narrow
 // the least important are left out, and A and B never are. Each hint is also a button for a finger or the mouse.
 //
-// app (required): Main.qml's window. hints: [{k, label}], A and B first.
+// app (required): Main.qml's window. hints: [{k, label, hold}], A and B first (`hold`: the button is held for it).
 Rectangle {
     id: bar
     required property var app
     property var hints: []
-    // The hints left out for room: the page's own extras first (from the last), then Help and Menu; never A or B.
+    // The hints left out for room: the pointer's click and Find first, then Menu, Options and the page's main
+    // button; never A or B.
     property var hidden: []
     readonly property var shownKeys: hints.filter((h, i) => hidden.indexOf(i) < 0).map(h => h.k)
     // Tall enough for its words and for a finger at every interface size.
@@ -25,10 +26,11 @@ Rectangle {
             for (let i = 0; i < hints.length && i < measure.count; i++) if (out.indexOf(i) < 0 && measure.itemAt(i)) w += Math.max(measure.itemAt(i).implicitWidth, app.touchFloor) + gap
             return w
         }
-        // Who gives way first: the page's extras from the last one back, then Help, then Menu.
+        // Who gives way first: anything unlisted from the last one back, then these in turn.
+        const last = ["r3", "y", "view", "x", "play", "start"]
         const order = []
-        for (let i = hints.length - 1; i >= 0; i--) if (["a", "b", "view", "start"].indexOf(hints[i].k) < 0) order.push(i)
-        for (const k of ["view", "start"]) { const i = hints.findIndex(h => h.k === k); if (i >= 0) order.push(i) }
+        for (let i = hints.length - 1; i >= 0; i--) if (["a", "b"].concat(last).indexOf(hints[i].k) < 0) order.push(i)
+        for (const k of last) { const i = hints.findIndex(h => h.k === k); if (i >= 0) order.push(i) }
         for (const i of order) { if (total() <= room) break; out.push(i) }
         hidden = out
     }
@@ -60,10 +62,11 @@ Rectangle {
                 // Something to tap, and for a screen reader a button: "A: Turn on".
                 readonly property bool tapTarget: true
                 Accessible.role: Accessible.Button
-                Accessible.name: bar.app.glyph(modelData.k) + ": " + modelData.label
+                readonly property string words: (modelData.hold === true ? "Hold: " : "") + modelData.label
+                Accessible.name: bar.app.glyph(modelData.k) + ": " + words
                 Accessible.onPressAction: if (bar.app.gate(hint, hint.modelData.k)) { if (bar.app.typing) bar.app.typingDone(); else bar.app.press(hint.modelData.k) }
                 KeyCap { app: bar.app; k: hint.modelData.k; anchors.verticalCenter: parent.verticalCenter }
-                Text { text: hint.modelData.label; color: bar.app.colors.text; font.family: bar.app.bodyFont; font.pixelSize: bar.app.fpx(16); anchors.verticalCenter: parent.verticalCenter }
+                Text { text: hint.words; color: bar.app.colors.text; font.family: bar.app.bodyFont; font.pixelSize: bar.app.fpx(16); anchors.verticalCenter: parent.verticalCenter }
                 TapHandler { onTapped: if (bar.app.gate(hint, hint.modelData.k)) { if (bar.app.typing) bar.app.typingDone(); else bar.app.press(hint.modelData.k) } }
             }
         }

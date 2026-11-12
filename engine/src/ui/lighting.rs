@@ -3,7 +3,7 @@
 //! check. The background helper plays the look (`lights`).
 
 use super::plan::{Plan, Step, dialog, guide, refresh, toast, with_helper};
-use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
+use super::{Ui, arr, b, n, obj, row, s, section, with};
 use crate::hardware::Machine;
 use crate::helper;
 use crate::json::{self, Json};
@@ -775,7 +775,6 @@ pub(crate) fn page(ui: &mut Ui, m: &Machine) -> Json {
     let route = route_in_use(&l, &ui.host_lights);
     let leds = lights::driven(&ui.ctx.root, &m.rgb_leds, &route);
     let veteran = ui.veteran();
-    let mut hints = Vec::new();
     let mut sections = Vec::new();
     let t = |key: &str, title: &str, line: &str, on: bool| with(row("light", key, "toggle", title, line), "on", b(on));
     let huesync = huesync_installed(&ui.ctx.home);
@@ -783,7 +782,7 @@ pub(crate) fn page(ui: &mut Ui, m: &Machine) -> Json {
     if let Some(name) = l.left_to() {
         let r = if l.huesync { &HUESYNC } else { &ALLYHUB };
         sections.push(section("", vec![handoff_row(r, true)]));
-        return obj! {"crumb": s("My machine"), "title": s("Lighting"), "intro": s(format!("{name} runs the lights. Turn this off to set them here.")), "sections": arr(sections), "hints": arr([])};
+        return obj! {"crumb": s("My machine"), "title": s("Lighting"), "intro": s(format!("{name} runs the lights. Turn this off to set them here.")), "sections": arr(sections)};
     }
 
     // With colors per game on, the look picked while a game runs is that game's own.
@@ -912,11 +911,10 @@ pub(crate) fn page(ui: &mut Ui, m: &Machine) -> Json {
     for (i, sec) in first.into_iter().enumerate() {
         sections.insert(i, sec);
     }
-    hints.push(hint("x", "Test lights"));
     obj! {
         "crumb": s("My machine"), "title": s("Lighting"),
         "intro": s(if ui.light_test.is_some() { "The light test is running: answer what you see on the lights." } else if game_name.is_some() { "A game is running: the look and color you pick are its own." } else { "Pick a look with A. The background helper plays it." }),
-        "sections": arr(sections), "hints": arr(hints), "x": obj! {"act": s("light-test"), "arg": s("")}
+        "sections": arr(sections)
     }
 }
 

@@ -42,8 +42,20 @@ import TurbineHub
 //           resting mouse it stays where the key put it; moving the mouse again takes it back
 //   typing  with a search box typed in (Game Mode), the controller's presses do nothing but B, which only ends
 //           the typing; Enter, Esc and a tap elsewhere end it too, and none of them goes back a page
-//   mouse   the wheel scrolls, the Back button is B, the right button is X, Ctrl with the wheel and Ctrl with -
-//           ask for another interface size, W A S D, Page Up, Home and End do what they say
+//   mouse   the wheel scrolls, the Back button is B, the right button opens Options, Ctrl with the wheel and Ctrl
+//           with - ask for another interface size, W A S D, Page Up, Home and End do what they say
+//   pointer the right stick (fed through Hub.testSticks, looked at as the real sticks are) shows the pointer and
+//           moves it, a resting stick doesn't; the pointer on a row takes the highlight; R3 clicks through the
+//           same gate as a tap, once; R3 held fills the ring and opens Options for what is under the pointer, and
+//           letting go then does nothing; it clicks a row of a dialog, and never what lies under a dialog; LT is
+//           the right button while it shows; a key, the D-pad and the left stick send it away; the left stick
+//           swept round scrolls and presses no direction; with the pointer hidden R3 is A and R3 held is Options
+//   drag    a slider's knob follows a mouse that drags it and the value is sent once, when it is let go; the
+//           controller's pointer drags it the same way with RT held
+//   options R opens Options for the highlighted game with its own press first, Play with its button and Help
+//           last, and R closes it again; a right-click opens them for the row under the mouse and for the page
+//           beside every row; F and a typed letter start Find; Tab opens the menu and moves through it; F1 is
+//           Help; RT jumps further than Down; Space is A and Space held plays; Ctrl+Enter is Start
 // Each prints "INPUTCHECK ok: <name>" when nothing failed.
 //
 // app (required): Main.qml's window. target (required): where the picture goes.
@@ -320,7 +332,8 @@ Item {
                 [200, () => { pressed("up", "W"); if (app.lastFid !== v.home) fail("mouse: W didn't move the highlight back up"); key(Qt.Key_A) }],
                 [200, () => { pressed("left", "A"); key(Qt.Key_D) }],
                 [200, () => { pressed("right", "D"); click(mid, Qt.RightButton) }],
-                [200, () => { pressed("x", "the right button"); v.scale = app.st.scale; Hub.testMouse(3, mid.x, mid.y, 0, Qt.ControlModifier, -1) }],
+                [ready, () => { pressed("x", "the right button"); if (!dialog.open || dialog.d.options !== true) fail("mouse: the right button didn't open Options"); key(Qt.Key_Escape) }],
+                [ready, () => { if (dialog.open) fail("mouse: Esc didn't close Options"); v.scale = app.st.scale; Hub.testMouse(3, mid.x, mid.y, 0, Qt.ControlModifier, -1) }],
                 [ready, () => { if (app.st.scale !== v.scale + 10 || !dialog.open) fail("mouse: Ctrl with the wheel didn't ask for a bigger interface (" + v.scale + " to " + app.st.scale + ")"); key(Qt.Key_Escape) }],
                 [ready, () => { if (app.st.scale !== v.scale || dialog.open) fail("mouse: Esc didn't put the size back"); key(Qt.Key_Minus, Qt.ControlModifier) }],
                 [ready, () => { if (app.st.scale !== v.scale - 10 || !dialog.open) fail("mouse: Ctrl with - didn't ask for a smaller interface (" + v.scale + " to " + app.st.scale + ")"); key(Qt.Key_Escape) }],
@@ -373,8 +386,314 @@ Item {
                 [ready, () => { typingOver("Esc"); samePlace("Esc") }],
             ]
         }
+        if (name === "drag") {
+            const slider = () => every(app.parts.view.item).find(x => x.kind === "slider") || null
+            // Where the knob is, and a place a third of the track away from it, toward the roomier side.
+            const knob = (t) => { const tr = t.trackItem; return tr.mapToItem(null, (tr.width - app.px(22)) * tr.part + app.px(11), tr.height / 2) }
+            const away = (t) => { const k = knob(t); return Qt.point(k.x + t.trackItem.width * (t.trackItem.part > 0.5 ? -0.33 : 0.33), k.y) }
+            return [
+                [ready, () => { const t = slider(); if (!t) { fail("drag: the page has no slider"); return } v.fid = t.fid; app.setFocus(t, false) }],
+                [ready, () => {
+                    const t = byFid(v.fid); if (!t) return
+                    v.val = t.m.value; v.sent = 0
+                    app.modelChanged.connect(() => { v.sent++ })
+                    const from = knob(t), to = away(t)
+                    // A real mouse: down on the knob, moved with the button held, let go.
+                    Hub.pointerEvent(0, from.x, from.y, 0, 0, 0)
+                    Hub.pointerEvent(1, from.x, from.y, Qt.LeftButton, Qt.LeftButton, 0)
+                    for (let i = 1; i <= 10; i++) Hub.pointerEvent(0, from.x + (to.x - from.x) * i / 10, from.y, 0, Qt.LeftButton, 0)
+                    if (t.val === v.val) fail("drag: the knob didn't follow the mouse (" + t.val + ")")
+                    if (v.sent > 0) fail("drag: the value was sent while the knob was still held")
+                    Hub.pointerEvent(2, to.x, to.y, Qt.LeftButton, 0, 0)
+                }],
+                [ready, () => {
+                    const t = byFid(v.fid)
+                    if (!t || t.m.value === v.val) fail("drag: letting go didn't send the new value")
+                    if (!t) return
+                    v.val = t.m.value
+                    // The controller's pointer: RT held is the button held.
+                    if (!steer(knob(t))) return
+                    app.padEvent("rt", true)
+                    steer(away(t))
+                    if (t.val === v.val) fail("drag: the knob didn't follow the pointer with RT held (" + t.val + ")")
+                    app.padEvent("rt", false)
+                }],
+                [ready, () => {
+                    const t = byFid(v.fid)
+                    if (!t || t.m.value === v.val) fail("drag: RT let go didn't send the new value")
+                    if (!app.ptr.shown) fail("drag: the pointer hid while it dragged")
+                    if (app.ptrButtons !== 0) fail("drag: a button is still held at the pointer")
+                }],
+            ]
+        }
+        if (name === "pointer") {
+            const r3 = () => { app.padEvent("r3", true); app.padEvent("r3", false) }
+            const hasHint = (k) => app.parts.bottomBar.hints.some(h => h.k === k)
+            // (The switch named by --focus first: one that simply flips, without a question.)
+            const toggles = () => every(app.parts.view.item).filter(x => x.kind === "toggle").sort((a, b) => (b.fid === Hub.option("focus") ? 1 : 0) - (a.fid === Hub.option("focus") ? 1 : 0))
+            const isOn = () => switchOn(app.model, v.fid)
+            return [
+                [ready, () => {
+                    if (app.ptr.shown) fail("pointer: it shows before the right stick moved")
+                    sticks(0, 0, 0.1, -0.08, 400)
+                    if (app.ptr.shown) fail("pointer: a stick resting a little off center showed it")
+                    if (hasHint("r3")) fail("pointer: the footer offers its click while it is hidden")
+                    sticks(0, 0, 1, 0, 160)
+                }],
+                [100, () => {
+                    if (!app.ptr.shown || app.ptr.x <= app.width / 2 + 20) fail("pointer: the right stick didn't show it and move it right")
+                    if (Math.abs(app.ptr.y - app.height / 2) > 1) fail("pointer: a push to the right also moved it up or down")
+                    if (!hasHint("r3")) fail("pointer: the footer doesn't say what R3 does while it shows")
+                    const t = toggles()[0]
+                    if (!t) { fail("pointer: the page has no switch to try"); return }
+                    v.fid = t.fid; v.title = t.optionsTitle; v.label = t.optionLabel || t.aLabel; v.on = isOn()
+                    steer(middle(t))
+                }],
+                // On a row it takes the highlight, as the mouse does; R3 presses it, through the gate, once.
+                [100, () => {
+                    if (app.lastFid !== v.fid) fail("pointer: moved onto a row it didn't take the highlight (" + v.fid + ", it is on " + app.lastFid + ")")
+                    if (app.keyboard) fail("pointer: its moves turned the hints to a keyboard's")
+                    v.taken = app.taken
+                    r3()
+                }],
+                [ready, () => {
+                    if (app.taken !== v.taken + 1) fail("pointer: R3 didn't ask the gate exactly once (" + (app.taken - v.taken) + " times)")
+                    if (isOn() === v.on) fail("pointer: R3 didn't press what is under it (" + v.fid + ")")
+                    if (!app.ptr.shown) fail("pointer: it hid at its own click")
+                    if (app.keyboard) fail("pointer: its click turned the hints to a keyboard's")
+                    v.on = isOn()
+                    // The row was built again by its press: the pointer is still on it.
+                    const t = byFid(v.fid); if (t) { v.label = t.optionLabel || t.aLabel; steer(middle(t)) }
+                }],
+                // Held: the ring fills, then Options for what is under it; letting go afterwards does nothing more.
+                [Math.round(app.motion.holdClick * 0.6), () => { app.padEvent("r3", true) }],
+                [Math.round(app.motion.holdClick * 0.6) + 100, () => { if (app.holding !== "r3" || app.holdPart < 0.4) fail("pointer: no ring fills while R3 is held (" + app.holding + " " + app.holdPart + ")"); if (dialog.open) fail("pointer: Options came before the hold was through") }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.options !== true) { fail("pointer: R3 held didn't open Options"); return }
+                    if (dialog.d.title !== v.title) fail("pointer: Options aren't for what is under it (" + dialog.d.title + ", not " + v.title + ")")
+                    if (dialog.d.rows[0].title !== v.label || dialog.d.rows[0].local !== "a") fail("pointer: the thing's own press isn't first in its Options (" + dialog.d.rows[0].title + ")")
+                    app.padEvent("r3", false)
+                }],
+                [ready, () => {
+                    if (!dialog.open) fail("pointer: letting go of the held R3 closed Options")
+                    if (isOn() !== v.on) fail("pointer: R3 held also pressed what is under it")
+                    const row = every(dialog).find(x => x.fid === "menu:0")
+                    if (!row || !steer(middle(row))) return
+                    r3()
+                }],
+                // It works over a dialog: the first row of Options is the switch's own press.
+                [ready, () => {
+                    if (dialog.open) fail("pointer: R3 on a row of Options didn't choose it")
+                    if (isOn() === v.on) fail("pointer: the first row of Options didn't press the switch")
+                    app.doAct("menu", "", "")
+                }],
+                // And never through one: R3 on an entry that lies under the backdrop only closes the dialog.
+                [ready, () => {
+                    const t = closedEntries().find(x => onBackdrop(middle(x)))
+                    if (!t) { fail("pointer: no list entry lies under the backdrop"); return }
+                    v.index = app.model.index; v.focus = app.lastFid
+                    steer(middle(t))
+                    if (app.model.index !== v.index) fail("pointer: moved over the backdrop it opened the entry under it")
+                    r3()
+                    if (app.model.index !== v.index) fail("pointer: R3 on the backdrop pressed the entry under it")
+                }],
+                [ready, () => {
+                    if (dialog.open) fail("pointer: R3 on the backdrop didn't close the dialog")
+                    if (app.model.index !== v.index) fail("pointer: R3 on the backdrop opened the entry under it")
+                    // Off the list (the entry it rests on shows as soon as it moves again, as under a mouse).
+                    steer(Qt.point(app.width * 0.75, app.parts.topBar.height + 6))
+                }],
+                [ready, () => {
+                    const t = every(app.parts.view.item).find(x => x.kind !== undefined && x.aLabel !== "")
+                    if (!t) { fail("pointer: the page has nothing to press"); return }
+                    v.title = t.optionsTitle; v.hits = 0
+                    t.activated.connect(() => { v.hits++ })
+                    steer(middle(t))
+                }],
+                // While it shows LT is the right button.
+                [100, () => { app.padEvent("lt", true); app.padEvent("lt", false) }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.options !== true || dialog.d.title !== v.title) fail("pointer: LT didn't open Options for what is under it (" + (dialog.open ? dialog.d.title : "no dialog") + ", not " + v.title + ")")
+                    if (v.hits > 0) fail("pointer: LT also pressed what is under it")
+                    // A key: the keyboard is in use, the pointer goes.
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => {
+                    if (dialog.open) fail("pointer: Esc didn't close Options")
+                    if (app.ptr.shown) fail("pointer: a key didn't send it away")
+                    sticks(0, 0, -1, 0, 80)
+                    if (!app.ptr.shown) fail("pointer: the right stick didn't bring it back")
+                    // The left stick pushed one way is the D-pad: one direction, and the pointer goes.
+                    v.moves = 0; app.lastPress = ""
+                    sticks(0, 1, 0, 0, 200)
+                    if (app.lastPress !== "down") fail("pointer: the left stick pushed down wasn't Down (" + (app.lastPress || "nothing") + ")")
+                    if (app.ptr.shown) fail("pointer: the D-pad didn't send it away")
+                    if (hasHint("r3")) fail("pointer: the footer still offers its click once it is hidden")
+                    sticks(0, 0, 0, 0, 60)
+                    if (app.heldDir !== "") fail("pointer: the left stick let go still holds " + app.heldDir)
+                }],
+                // Swept round the rim it is a scroll wheel, and presses no direction.
+                [200, () => {
+                    v.list = null
+                    for (let p = app.focusItem; p; p = p.parent) if (p.contentY !== undefined && p.contentItem !== undefined) { v.list = p; break }
+                    if (v.list) v.list.contentY = 0
+                    v.y = 0; app.lastPress = ""
+                    for (let a = -90; a <= 90; a += 12) sticks(Math.cos(a * Math.PI / 180) * 0.9, Math.sin(a * Math.PI / 180) * 0.9, 0, 0, 16)
+                    sticks(0, 0, 0, 0, 40)
+                    if (app.lastPress !== "") fail("pointer: the left stick swept round pressed " + app.lastPress)
+                }],
+                [300, () => {
+                    if (v.list && v.list.contentHeight > v.list.height + 240 && v.list.contentY <= v.y) fail("pointer: the left stick swept round didn't scroll the list")
+                    if (v.list) v.list.contentY = 0
+                    // Hidden, R3 is A on the highlight, and R3 held is its Options.
+                    const t = every(app.parts.view.item).find(x => x.kind !== undefined && x.aLabel !== "")
+                    if (!t) { fail("pointer: the page has nothing to press"); return }
+                    v.fid = t.fid; v.title = t.optionsTitle; v.own = 0
+                    t.activated.connect(() => { v.own++ })
+                    app.setFocus(t, false)
+                    r3()
+                    if (v.own !== 1) fail("pointer: with it hidden R3 wasn't A on the highlight (" + v.own + " presses)")
+                }],
+                [ready, () => {
+                    const t = byFid(v.fid)
+                    if (!t) { fail("pointer: the pressed row is gone"); return }
+                    v.held = 0
+                    t.activated.connect(() => { v.held++ })
+                    app.setFocus(t, false)
+                }],
+                [app.motion.holdClick + 150, () => { app.padEvent("r3", true) }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.options !== true || dialog.d.title !== v.title) fail("pointer: with it hidden R3 held didn't open Options for the highlight (" + (dialog.open ? dialog.d.title : "no dialog") + ", not " + v.title + ")")
+                    app.padEvent("r3", false)
+                    if (v.held > 0) fail("pointer: with it hidden R3 held also pressed the highlight")
+                    app.padPress("b")
+                }],
+                [ready, () => { if (dialog.open) fail("pointer: B didn't close Options") }],
+            ]
+        }
+        if (name === "options") {
+            const mid = (it) => middle(it)
+            const rowsOf = () => dialog.open && dialog.d.rows ? dialog.d.rows : []
+            const closed = (what) => { if (dialog.open) fail("options: " + what + " didn't close the menu") }
+            return [
+                [ready, () => { v.entry = app.focusItem; v.title = v.entry ? v.entry.optionsTitle : ""; key(Qt.Key_R) }],
+                [ready, () => {
+                    const rows = rowsOf()
+                    if (!dialog.open || dialog.d.options !== true) { fail("options: R didn't open Options"); return }
+                    if (v.title === "" || dialog.d.title !== v.title) fail("options: the menu isn't named after the highlighted game (" + dialog.d.title + ")")
+                    if (rows[0].local !== "a" || rows[0].title !== (v.entry.optionLabel || v.entry.aLabel)) fail("options: the game's own press isn't first (" + rows[0].title + ")")
+                    if (!rows.some(r => r.title === "Play" && r.key === "play")) fail("options: Play isn't there with its button")
+                    if (!rows.some(r => r.title === "Library check")) fail("options: the page's own action isn't there")
+                    if (!rows.some(r => r.local === "find")) fail("options: Find isn't there")
+                    if (rows[rows.length - 1].key !== "f1") fail("options: Help isn't last")
+                    const titles = rows.map(r => r.title)
+                    if (titles.some((t, i) => titles.indexOf(t) !== i)) fail("options: an entry is there twice (" + titles.join(", ") + ")")
+                    key(Qt.Key_R)
+                }],
+                // A right-click on a row is its Options; beside every row, the page's.
+                [ready, () => {
+                    closed("R again")
+                    const t = every(app.parts.view.item).find(x => x.kind === "toggle")
+                    if (!t) { fail("options: the game has no switch to try"); return }
+                    v.row = t.optionsTitle; v.label = t.optionLabel || t.aLabel
+                    click(mid(t), Qt.RightButton)
+                }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.title !== v.row || rowsOf()[0].title !== v.label) fail("options: a right-click on a row didn't open its Options (" + (dialog.open ? dialog.d.title : "nothing") + ")")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => {
+                    closed("Esc")
+                    const p = Qt.point(app.width - 6, app.parts.topBar.height + 6)
+                    if (app.focusableAt(p)) { fail("options: something to press lies at the page's very corner"); return }
+                    click(p, Qt.RightButton)
+                }],
+                [ready, () => {
+                    if (!dialog.open || dialog.d.options !== true) fail("options: a right-click beside every row didn't open the page's Options")
+                    else if (rowsOf().some(r => r.local === "a")) fail("options: the page's own Options start with a press of something")
+                    key(Qt.Key_Escape)
+                }],
+                // Find: F, and a letter that is no key of its own.
+                [ready, () => { closed("Esc"); key(Qt.Key_F) }],
+                [200, () => { if (!app.typing) fail("options: F didn't start Find"); key(Qt.Key_Escape) }],
+                [ready, () => { if (app.typing) fail("options: Esc didn't end the typing"); v.count = (app.model.side || []).length; key(Qt.Key_B) }],
+                [300, () => {
+                    if (!app.typing || !app.model.search || app.model.search.value !== "b") fail("options: a typed letter didn't start Find with it (" + (app.model.search ? app.model.search.value : "") + ")")
+                    if ((app.model.side || []).length >= v.count) fail("options: the typed letter didn't narrow the list")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => { key(Qt.Key_Escape) }],
+                [ready, () => { if (app.model.search.value !== "") fail("options: Esc didn't empty the search"); key(Qt.Key_Tab) }],
+                // Tab: the menu, with Help first; inside it Tab goes from row to row.
+                [ready, () => {
+                    if (!dialog.open || dialog.d.options === true || rowsOf().length < 5) { fail("options: Tab didn't open the menu"); return }
+                    if (rowsOf()[0].key !== "f1") fail("options: the menu doesn't start with Help")
+                    v.fid = app.lastFid
+                    key(Qt.Key_Tab)
+                    if (app.lastFid === v.fid) fail("options: Tab didn't move on inside the menu")
+                    key(Qt.Key_Backtab, Qt.ShiftModifier)
+                    if (app.lastFid !== v.fid) fail("options: Shift+Tab didn't move back inside the menu")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => { closed("Esc"); v.depth = app.stack.length; key(Qt.Key_F1) }],
+                [ready, () => { if (app.current.page !== "help") fail("options: F1 didn't open Help (" + app.current.page + ")"); key(Qt.Key_Escape) }],
+                // RT jumps further down the list than Down does.
+                [ready, () => {
+                    if (app.stack.length !== v.depth) fail("options: Esc didn't come back from Help")
+                    const list = every(app.parts.view.item).filter(x => x.sideEntry === true && x.modelData !== undefined)
+                    if (list.length < 4) { fail("options: the list is too short to jump in"); return }
+                    app.setFocus(list[0], false)
+                    app.padPress("rt")
+                }],
+                [ready, () => {
+                    const list = every(app.parts.view.item).filter(x => x.sideEntry === true && x.modelData !== undefined)
+                    const at = list.indexOf(app.focusItem)
+                    if (at < 2) fail("options: RT didn't jump further than one step (it is on entry " + at + ")")
+                    app.padPress("lt")
+                }],
+                // Space is A; held on a game it is Start held: Play.
+                [ready, () => {
+                    const list = every(app.parts.view.item).filter(x => x.sideEntry === true && x.modelData !== undefined)
+                    if (list.indexOf(app.focusItem) !== 0) fail("options: LT didn't jump back up")
+                    if (!app.canHold) { fail("options: this game can't be played, so holding can't be tried"); return }
+                    v.fid = app.lastFid
+                    key(Qt.Key_Space)
+                }],
+                [ready, () => {
+                    if (app.lastFid === v.fid) fail("options: Space let go at once wasn't A")
+                    if (dialog.open || app.parts.toast.up) fail("options: Space let go at once did more than A")
+                    Hub.testKey(Qt.Key_Space, 0, true, false)
+                }],
+                [Math.round(app.motion.holdPlay * 0.5), () => { if (app.holding !== "space" || app.holdPart < 0.3) fail("options: no ring fills while Space is held") }],
+                [Math.round(app.motion.holdPlay * 0.5) + 200, () => {}],
+                [ready, () => {
+                    if (!dialog.open && !app.parts.toast.up) fail("options: Space held didn't play the game")
+                    Hub.testKey(Qt.Key_Space, 0, false, false)
+                    if (dialog.open) key(Qt.Key_Escape)
+                }],
+                // Ctrl+Enter is Start: with no main button on the page, Settings.
+                [ready, () => { key(Qt.Key_Return, Qt.ControlModifier) }],
+                [ready, () => { if (app.tab !== 4) fail("options: Ctrl+Enter (Start) on a page with no main button didn't open Settings"); app.goTab(1) }],
+                [ready, () => {}],
+            ]
+        }
         fail("no input check is called " + name)
         return []
+    }
+
+    // The sticks held somewhere for a while, looked at every 16 ms as the real ones are (Hub.testSticks), and what
+    // came of it handed to the window as Hub.poll's answer is.
+    function sticks(lx, ly, rx, ry, ms) { const t = Hub.testSticks(lx, ly, rx, ry, ms); if (t === "") fail("the sticks can't be fed"); else app.took(JSON.parse(t)) }
+    // The right stick steering the pointer to a place, a look at a time, as a thumb does.
+    function steer(to) {
+        for (let i = 0; i < 600; i++) {
+            const dx = to.x - app.ptr.x, dy = to.y - app.ptr.y, d = Math.hypot(dx, dy)
+            if (app.ptr.shown && d < 5) return true
+            const m = d > 150 ? 1 : d > 40 ? 0.55 : 0.32
+            sticks(0, 0, dx / Math.max(d, 0.001) * m, dy / Math.max(d, 0.001) * m, 16)
+        }
+        fail("the right stick couldn't bring the pointer to " + Math.round(to.x) + "," + Math.round(to.y) + " (it is at " + Math.round(app.ptr.x) + "," + Math.round(app.ptr.y) + ")")
+        return false
     }
 
     function fail(text) { if (problems.indexOf(text) < 0 && problems.length < 25) problems.push(text) }

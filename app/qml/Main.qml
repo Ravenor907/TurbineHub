@@ -4,7 +4,13 @@ import TurbineHub
 
 // Turbine Hub's window: the look, sizes and icons every component draws with, the pages and their stack, one
 // highlight that the controller, the keyboard, the mouse and a finger all move, the one dialog, the toast and the
-// footer's hints. What each page shows and what each press does comes from the engine through Hub; nothing here
+// footer's hints.
+//
+// The controls are Turbine Mod Manager's (docs/DESIGN.md, Controls): A selects, B goes back, X opens Options for
+// what the highlight is on, Y is Find, LB and RB turn the tabs, View opens the menu, Start presses the page's main
+// button (held on a game: Play), LT and RT jump a screenful, the right stick moves a pointer and R3 clicks (held:
+// Options). Every one has a key and a way with the mouse. Which actions a page has comes from the engine
+// (`options`, `hints`); only A and B, which follow the highlight, are worked out here. What each page shows and what each press does comes from the engine through Hub; nothing here
 // decides anything about the machine.
 Window {
     id: app
@@ -141,17 +147,19 @@ Window {
     // where Steam's own pad stands in for whichever is held.)
     readonly property bool oldPad: !Hub.gamemode && /360/.test(Hub.padName) && !/steam|virtual/i.test(Hub.padName)
     function glyph(k) {
-        if (keyboard) return ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "Tab", rt: "/", view: "F1", start: "F10", move: "Arrows" })[k] || k.toUpperCase()
-        return ({ view: oldPad ? "BACK" : "VIEW", start: oldPad ? "START" : "MENU", move: "D-PAD" })[k] || k.toUpperCase()
+        // (Start is called Start on every pad: Turbine Hub's own menu is on View, so "MENU" would name two things.
+        // F1 and F5 have no button on a controller: no cap there.)
+        const names = keyboard ? { a: "Enter", b: "Esc", x: "R", y: "F", lb: "Q", rb: "E", lt: "Home", rt: "End", view: "Tab", start: "Ctrl+Enter", play: "Space", r3: "Click", f1: "F1", f5: "F5", move: "Arrows" }
+            : { view: oldPad ? "BACK" : "VIEW", start: "START", play: "START", move: "D-PAD", f1: "", f5: "" }
+        return names[k] !== undefined ? names[k] : k.toUpperCase()
     }
     // When a key or the controller was last pressed, or the page last rebuilt: for a moment after, the mouse
     // resting on something isn't the mouse being used (see hoverAt).
     property double quietAt: 0
-    // The engine's Help page names keys or buttons to match.
-    onKeyboardChanged: Hub.input(keyboard)
-    function keyUsed() { if (lastInput !== "keys") lastInput = "keys"; quietAt = Date.now() }
+    function keyUsed() { if (lastInput !== "keys") lastInput = "keys"; quietAt = Date.now(); pointerAway() }
     function padUsed() { if (lastInput !== "pad") lastInput = "pad"; quietAt = Date.now() }
-    function mouseUsed() { if (lastInput !== "mouse") lastInput = "mouse" }
+    // (The controller's pointer makes mouse events too: those are the controller being used.)
+    function mouseUsed() { if (ptrActing) { if (lastInput !== "pad") lastInput = "pad" } else if (lastInput !== "mouse") lastInput = "mouse" }
 
     // ---------------------------------------------------------------- pages
     readonly property var tabs: [
@@ -320,7 +328,10 @@ Window {
         // Everything under the pointer hears of the same move: the place is kept once all of them have.
         mouseNext = Qt.point(pos.x, pos.y)
         Qt.callLater(keepMouse)
-        if (!moved || Date.now() - quietAt < mo.hoverQuiet) return
+        // (The controller's pointer only ever moves on purpose: no press before it makes its move a resting one.)
+        if (!moved || (!ptrActing && Date.now() - quietAt < mo.hoverQuiet)) return
+        // The real mouse in use: the controller's pointer steps aside.
+        if (!ptrActing) pointerAway()
         if (Hub.busy || (item && dialog.open && !under(item, dialog))) return
         // While a text box is being typed in, the highlight stays with it: a tap elsewhere ends the typing, the
         // mouse drifting over the page doesn't.
@@ -533,43 +544,249 @@ Window {
         if (fresh && ["a", "x", "y", "start"].indexOf(k) >= 0) return
         if (dialog.open && dialog.press(k)) return
         if (focusItem && focusItem.press && focusItem.press(k)) return
-        if (k === "up" || k === "down" || k === "left" || k === "right") {
-            // A page with two sides keeps the highlight on one side until asked across.
-            if (!dialog.open && view.item && view.item.move && view.item.move(k)) return
-            moveFocus(k)
-            return
-        }
+        if (k === "up" || k === "down" || k === "left" || k === "right") { step(k); return }
+        // LT and RT: a screenful up or down the list the highlight is in.
+        if (k === "lt" || k === "rt") { jumpBy(k === "rt"); return }
         if (dialog.open) return
         if (view.item && view.item.press && view.item.press(k)) return
         if (k === "lb") switchTab(-1)
         else if (k === "rb") switchTab(1)
         else if (k === "b") { if (!back()) askClose() }
-        // Help: what this page is and what its buttons do, with Where's my...? one press further.
-        else if (k === "view") { if (current.page === "help") open("wheres"); else if (current.page !== "wheres") open("help|" + current.page + "@" + pageArg) }
+        // Options: everything the highlighted thing and this page can do.
+        else if (k === "x") openOptions(focusItem)
+        // Find: the search box of a page that has a list.
+        else if (k === "y") find("")
         // The menu leads to the tabs' places, so it waits until first run is through.
-        else if (k === "start" && !bare) doAct("menu", "", "")
+        else if (k === "view" && !bare) doAct("menu", current.page + "@" + pageArg, "")
+        // The page's main button; where there is none, Settings (and from Settings, back).
+        else if (k === "start") { if (!pageKey(model, k) && !bare) { if (stack.length === 0 && tab === 4) back(); else goTab(4) } }
+        // What holding Start does, at once (a click on its hint in the footer).
+        else if (k === "play") play()
+        else if (k === "f1") help()
     }
-    // A page's own keys: X and Y from its model, and the primary button's key.
+    // One step of the highlight. A page with two sides keeps it on one side until asked across.
+    function step(k) {
+        if (!dialog.open && view.item && view.item.move && view.item.move(k)) return
+        moveFocus(k)
+    }
+    // The page's main button is Start's.
     function pageKey(m, k) {
         if (!m) return false
-        if ((k === "x" || k === "y") && m[k]) { doAct(m[k].act, m[k].arg, ""); return true }
-        if (m.primary && m.primary.k === k) { doAct(m.primary.act, m.primary.arg, ""); return true }
+        if (k === "start" && m.primary) { doAct(m.primary.act, m.primary.arg, ""); return true }
         return false
     }
+    // Help: what this page is and what its controls do, with Where's my...? one press further.
+    function help() {
+        if (dialog.open) return
+        if (current.page === "help") open("wheres"); else if (current.page !== "wheres") open("help|" + current.page + "@" + pageArg)
+    }
+    // Find: the highlight goes to the page's search box and typing starts (in Game Mode Steam's keyboard opens).
+    // `text`: what was typed already (a letter typed on the list starts the search with it).
+    function find(text) {
+        if (dialog.open || !view.item || !view.item.find) return false
+        return view.item.find(text || "")
+    }
+    // What holding Start (or Space) does on this page: Play, on a game.
+    readonly property bool canHold: !!model.hold && !dialog.open && !typing && !Hub.busy
+    function play() { if (model.hold && !dialog.open && !Hub.busy) doAct(model.hold.act, model.hold.arg, "") }
+    // LT and RT: the highlight goes on that way until it is most of a screen further, or at the end of its list.
+    function jumpBy(down) {
+        const k = down ? "down" : "up"
+        const from = focusItem
+        if (!from) { step(k); return }
+        let list = null
+        for (let p = from.parent; p; p = p.parent) if (p.contentY !== undefined && p.contentItem !== undefined) { list = p; break }
+        const place = (it) => list ? it.mapToItem(list.contentItem, 0, 0).y : it.mapToItem(null, 0, 0).y
+        const far = (list ? list.height : height) * 0.8
+        const y0 = place(from)
+        for (let i = 0; i < 60; i++) {
+            const before = focusItem
+            step(k)
+            if (focusItem === before || !focusItem) break
+            // Out of the list (onto the search box over it, the buttons under it): its end was the end of the jump.
+            if (list && !under(focusItem, list)) { setFocus(before, false); break }
+            if (Math.abs(place(focusItem) - y0) >= far) break
+        }
+    }
 
-    // The keyboard is as good as the controller: arrows or W A S D move, Enter or Space is A, Esc or Backspace is B,
-    // Q and E (Page Up and Page Down too) switch tabs, Tab is LT, / is RT, X and Y are themselves, F1 is Help, F10
-    // the menu, Home and End jump to the first and the last thing of the list, Ctrl with = or - changes the
-    // interface size. A text box that is being typed in has the keys itself: none of these reach here then.
+    // ---------------------------------------------------------------- Options
+    // X, R, a right-click or R3 held: a menu for one thing, with its own press first (what A does), then what else
+    // it offers (`offers` on the thing, from the engine), then what the page offers (the page's `options`: its own
+    // actions, its main button, Find, Help). Nothing in it is new: it is everything that is one press or one page
+    // away, listed, each with its own button where it has one. `item`: the thing (null: the page alone).
+    property Item optionsFor: null
+    function openOptions(item) {
+        if (dialog.open || Hub.busy) return
+        const it = item && item.focusable === true ? item : null
+        const rows = []
+        if (it && it.aLabel) rows.push({ title: it.optionLabel || it.aLabel, key: "a", local: "a" })
+        // Said once: what the page offers may be among the thing's own already (then it only brings its button).
+        const add = (o) => {
+            const at = rows.findIndex(r => r.title === o.title || (!!o.act && r.act === o.act && r.arg === o.arg))
+            if (at < 0) rows.push(o)
+            else if (o.key && !rows[at].key) rows[at] = Object.assign({}, rows[at], { key: o.key })
+        }
+        for (const o of (it && it.offers) || []) add(o)
+        for (const o of model.options || []) add(o)
+        if (rows.length === 0) return
+        optionsFor = it
+        dialog.show({ title: (it && it.optionsTitle) || model.title || (shownTab >= 0 ? tabs[shownTab].title : "") || "Options", text: "", items: [], confirm: "", cancel: "Close", ask: "", danger: false, rows: rows, options: true })
+    }
+    // What was picked in a menu (the dialog has closed by now).
+    function chosen(row) {
+        if (row.local === "a") {
+            const it = optionsFor
+            // The thing's own press, as A makes it.
+            if (it && it.visible && it.press) { setFocus(it, true); if (it.fid !== "") lastFid = it.fid; it.press("a") }
+        } else if (row.local === "find") Qt.callLater(find, "")
+        else if (row.local === "reload") reloadPage()
+        else doAct(row.act, row.arg, "")
+        optionsFor = null
+    }
+    // The thing that takes the highlight at a place in the window: the one drawn last, and only where its list
+    // shows it (a row scrolled out of view isn't there).
+    function focusableAt(pos) {
+        const list = focusables(scopeRoot)
+        for (let i = list.length - 1; i >= 0; i--) {
+            const it = list[i]
+            const p = it.mapFromItem(null, pos.x, pos.y)
+            if (p.x < 0 || p.y < 0 || p.x > it.width || p.y > it.height) continue
+            let seen = true
+            for (let c = it.parent; c && seen; c = c.parent) {
+                if (c.clip !== true) continue
+                const q = c.mapFromItem(null, pos.x, pos.y)
+                seen = q.x >= 0 && q.y >= 0 && q.x <= c.width && q.y <= c.height
+            }
+            if (seen) return it
+        }
+        return null
+    }
+    // A right-click: Options for what is under the mouse, or for the page when nothing is.
+    function optionsAt(pos) {
+        lastPress = "x"
+        if (dialog.open) { dialog.press("x"); return }
+        const it = focusableAt(pos)
+        if (it) setFocus(it, true)
+        openOptions(it)
+    }
+
+    // ---------------------------------------------------------------- holds: R3, Start and Space
+    // R3 pressed is a click and R3 held is Options; Start (Space on a keyboard) held on a game plays it. While one
+    // is held a small ring fills (PointerLayer.qml), so letting go early is plainly a tap.
+    property string holding: ""
+    property real holdPart: 0
+    property double holdAt: 0
+    Timer {
+        id: holdTick
+        interval: 16; repeat: true
+        onTriggered: {
+            app.holdPart = Math.min(1, (Date.now() - app.holdAt) / (app.holding === "r3" ? mo.holdClick : mo.holdPlay))
+            if (app.holdPart >= 1) app.holdDone()
+        }
+    }
+    function holdBegin(what) { holding = what; holdAt = Date.now(); holdPart = 0; holdTick.start() }
+    // Let go: true when it was let go before the hold was through (a tap).
+    function holdEnd(what) {
+        if (holding !== what) return false
+        holdStop()
+        return true
+    }
+    function holdStop() { holding = ""; holdPart = 0; holdTick.stop() }
+    function holdDone() {
+        const what = holding
+        holdStop()
+        if (what === "r3") {
+            Hub.pointer(4)
+            // Options for what is under the pointer; with the pointer hidden, for the highlight.
+            if (ptr.shown) pointerClick(Qt.RightButton); else press("x")
+        } else play()
+    }
+
+    // ---------------------------------------------------------------- the controller's pointer
+    // The right stick moves a pointer that Turbine Hub draws itself (PointerLayer.qml; Game Mode has no cursor).
+    // Where it is comes from pointer.rs through Hub.poll; what it does is made here, as the mouse events a real
+    // mouse would make (Hub.pointerEvent), so its moves take the highlight as the mouse's do and its clicks pass
+    // the same gate as a tap: R3 clicks, R3 held is the right button (Options), and while it shows RT holds the
+    // left button down (to drag a slider) and LT is the right button. It hides after a few seconds, and at once
+    // when a button, the D-pad, the left stick, a key or the real mouse is used. The left stick swept round is a
+    // scroll wheel: at the pointer while it shows, else at the highlight.
+    property var ptr: ({ x: -1, y: -1, shown: false })
+    // A mouse event of the pointer's is being delivered right now.
+    property bool ptrActing: false
+    // Mouse buttons the triggers hold down at the pointer (Qt's values: 1 left, 2 right).
+    property int ptrButtons: 0
+    function ptrSend(kind, x, y, button, buttons, wheel) {
+        ptrActing = true
+        Hub.pointerEvent(kind, x, y, button, buttons, wheel)
+        ptrActing = false
+    }
+    function pointerNews(p) {
+        const was = ptr.shown
+        ptr = { x: p.x, y: p.y, shown: p.shown === true }
+        if (was && !ptr.shown) pointerGone()
+        if (p.moved) ptrSend(0, ptr.x, ptr.y, 0, ptrButtons, 0)
+        if (p.wheel) {
+            // No pointer on screen: the wheel turns the list the highlight is in.
+            const at = ptr.shown || !focusItem ? Qt.point(ptr.x, ptr.y) : focusItem.mapToItem(null, focusItem.width / 2, focusItem.height / 2)
+            ptrSend(3, at.x, at.y, 0, ptrButtons, p.wheel)
+        }
+    }
+    function pointerClick(button) {
+        ptrSend(0, ptr.x, ptr.y, 0, 0, 0)
+        ptrSend(1, ptr.x, ptr.y, button, button, 0)
+        ptrSend(2, ptr.x, ptr.y, button, 0, 0)
+    }
+    // Hidden: a button the triggers still hold at it is let go.
+    function pointerGone() {
+        if (ptrButtons !== 0) { const b = ptrButtons; ptrButtons = 0; ptrSend(2, ptr.x, ptr.y, b, 0, 0) }
+        if (holding === "r3") holdStop()
+    }
+    // A key or the real mouse is in use: the pointer goes.
+    function pointerAway() {
+        if (!ptr.shown) return
+        Hub.pointer(0)
+        ptr = { x: ptr.x, y: ptr.y, shown: false }
+        pointerGone()
+    }
+    // While a text box has the keyboard in Game Mode (the controller belongs to Steam's keyboard) and while work
+    // runs, the sticks rest.
+    readonly property bool ptrPaused: (typing !== null && Hub.gamemode) || Hub.busy
+    onPtrPausedChanged: { Hub.pointer(ptrPaused ? 1 : 2); if (ptrPaused && ptr.shown) { ptr = { x: ptr.x, y: ptr.y, shown: false }; pointerGone() } }
+    function r3(down) {
+        if (down) {
+            if (Hub.busy || holding !== "") return
+            // (The pointer stays while R3 is down.)
+            Hub.pointer(3)
+            holdBegin("r3")
+        } else {
+            // (Let go, the pointer may hide again, unless a trigger still holds a button at it.)
+            if (ptrButtons === 0) Hub.pointer(4)
+            // A click on what is under the pointer; with the pointer hidden, A on the highlight.
+            if (holdEnd("r3")) { if (ptr.shown) pointerClick(Qt.LeftButton); else press("a") }
+        }
+    }
+
+    // The keyboard is as good as the controller, with Turbine Mod Manager's keys: arrows or W A S D move, Enter or
+    // Space is A, Esc or Backspace is B, R is Options (X, the Menu key and Shift+F10 too), F is Find (Ctrl+F, / and
+    // Y too), Q and E switch tabs (Page Up and Page Down, [ and ] too), Tab opens the menu (V and F10 too; in a
+    // dialog Tab and Shift+Tab go from one thing to the next), Ctrl+Enter is Start (P too), Space held is Start
+    // held, F1 is Help, F5 reads the page again, Home and End jump to the first and the last thing of the list,
+    // Ctrl with = or - changes the interface size. A letter or digit with no meaning of its own starts Find with
+    // it on a page that has a list. A text box that is being typed in has the keys itself: none of these reach
+    // here then.
     readonly property var keyMap: {
         const map = {}
         map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
         map[Qt.Key_W] = "up"; map[Qt.Key_S] = "down"; map[Qt.Key_A] = "left"; map[Qt.Key_D] = "right"
         map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
         map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
-        map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_PageUp] = "lb"; map[Qt.Key_PageDown] = "rb"; map[Qt.Key_Tab] = "lt"
-        map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F1] = "view"; map[Qt.Key_F10] = "start"; map[Qt.Key_F5] = "f5"
-        map[Qt.Key_Slash] = "rt"; map[Qt.Key_Home] = "home"; map[Qt.Key_End] = "end"
+        map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"; map[Qt.Key_PageUp] = "lb"; map[Qt.Key_PageDown] = "rb"
+        map[Qt.Key_BracketLeft] = "lb"; map[Qt.Key_BracketRight] = "rb"
+        map[Qt.Key_R] = "x"; map[Qt.Key_X] = "x"; map[Qt.Key_Menu] = "x"
+        map[Qt.Key_F] = "y"; map[Qt.Key_Y] = "y"; map[Qt.Key_Slash] = "y"
+        map[Qt.Key_Tab] = "tab"; map[Qt.Key_Backtab] = "backtab"; map[Qt.Key_V] = "view"; map[Qt.Key_F10] = "view"
+        map[Qt.Key_P] = "start"; map[Qt.Key_F1] = "f1"; map[Qt.Key_F5] = "f5"
+        map[Qt.Key_Home] = "home"; map[Qt.Key_End] = "end"
         return map
     }
     readonly property var dirs: ["up", "down", "left", "right"]
@@ -585,18 +802,32 @@ Window {
                 app.sizeBy(e.key === Qt.Key_Minus ? -1 : 1)
                 return
             }
-            // A key with Ctrl, Alt or the system key belongs to the desktop.
-            if (ctrl || (e.modifiers & (Qt.AltModifier | Qt.MetaModifier)) !== 0) return
-            const k = app.keyMap[e.key]
-            if (!k) return
+            const shift = (e.modifiers & Qt.ShiftModifier) !== 0
+            // Ctrl+F finds, Ctrl+Enter is Start, Shift+F10 is Options.
+            let k = ctrl ? (e.key === Qt.Key_F ? "y" : e.key === Qt.Key_Return || e.key === Qt.Key_Enter ? "start" : "") : shift && e.key === Qt.Key_F10 ? "x" : shift && e.key === Qt.Key_Tab ? "backtab" : ""
+            // Any other key with Ctrl, Alt or the system key belongs to the desktop.
+            if (k === "" && (ctrl || (e.modifiers & (Qt.AltModifier | Qt.MetaModifier)) !== 0)) return
+            if (k === "") k = app.keyMap[e.key] || ""
+            if (k === "") {
+                // A letter or a digit that is no key of its own: on a page with a list it starts Find.
+                if (!e.isAutoRepeat && e.text.length === 1 && /[0-9a-z]/i.test(e.text) && app.ready && !Hub.busy && app.find(e.text)) { e.accepted = true; app.keyUsed() }
+                return
+            }
             e.accepted = true
             // A key held down repeats only where a held D-pad does: the directions. Enter held is one A, so it
             // never flips a switch back and forth or answers the dialog its first press opened.
             if (e.isAutoRepeat && app.dirs.indexOf(k) < 0) return
             app.keyUsed()
+            // Space held on a game is Start held (Play); let go early, it is A.
+            if (e.key === Qt.Key_Space && !ctrl && app.canHold && app.ready && app.holding === "") { app.holdBegin("space"); return }
             if (k === "f5") app.reloadPage()
             else if (k === "home" || k === "end") app.jump(k === "end")
+            // Tab: from one thing of a dialog to the next; on a page, the menu.
+            else if (k === "tab" || k === "backtab") { if (dialog.open) app.tabMove(k === "tab" ? 1 : -1); else if (k === "tab") app.press("view") }
             else app.press(k)
+        }
+        Keys.onReleased: (e) => {
+            if (e.key === Qt.Key_Space && !e.isAutoRepeat && app.holdEnd("space")) { e.accepted = true; app.press("a") }
         }
         // Where the mouse is, also over nothing that takes the highlight.
         HoverHandler { id: mouseTrack; onPointChanged: app.hoverAt(null, mouseTrack.point.scenePosition, mouseTrack.point.device.pointerType === PointerDevice.Finger) }
@@ -605,6 +836,17 @@ Window {
     readonly property bool softwareDraw: keys.GraphicsInfo.api === GraphicsInfo.Software
     // A text box had the keyboard; this gives it back to the window (and closes Steam's keyboard).
     function keysBack() { typingDone() }
+    // Tab and Shift+Tab in a dialog: the next thing and the one before, round and round; a text box that gets the
+    // highlight this way is typed in at once.
+    function tabMove(d) {
+        const list = focusables(scopeRoot)
+        if (list.length === 0) return
+        const at = list.indexOf(focusItem)
+        const next = list[((at < 0 ? (d > 0 ? -1 : 0) : at) + d + list.length) % list.length]
+        typingDone()
+        setFocus(next, false)
+        if (next.sayRole === Accessible.EditableText) next.activated()
+    }
     // Home and End: the first and the last thing in the list the highlight is in.
     function jump(toEnd) {
         if (Hub.busy || restoring) return
@@ -621,13 +863,13 @@ Window {
         if (v !== st.scale) doAct("scale", "", v)
     }
     // Over everything, taking nothing from what is under it: the mouse's Back button is B and its right button is
-    // X wherever the pointer is, and Ctrl with the wheel changes the interface size. (A finger has no buttons, so
-    // these two listen to mice only: a tap of a finger is never Back or X.)
+    // Options for what it is on, and Ctrl with the wheel changes the interface size. (A finger has no buttons, so
+    // these two listen to mice only: a tap of a finger is never Back or Options.)
     Item {
         anchors.fill: parent
         z: 100
         TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; acceptedButtons: Qt.BackButton; onTapped: if (app.gate(null, "b")) app.press("b") }
-        TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; acceptedButtons: Qt.RightButton; onTapped: if (app.gate(null, "x")) app.press("x") }
+        TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; acceptedButtons: Qt.RightButton; onTapped: (p) => { if (app.gate(null, "x")) app.optionsAt(p.position) } }
         WheelHandler {
             property real turned: 0
             acceptedModifiers: Qt.ControlModifier
@@ -648,10 +890,32 @@ Window {
     onActiveChanged: windowActive(active)
     function windowActive(front) {
         stopHolds()
+        holdStop()
+        if (ptr.shown) { ptr = { x: ptr.x, y: ptr.y, shown: false }; pointerGone() }
         Hub.front(front)
     }
     // A held direction stops repeating: the window went to the back, the page changed, the controller went away.
     function stopHolds() { heldDir = ""; repeatDelay.stop(); repeatTick.stop() }
+    // A button of the controller went down or up.
+    function padEvent(k, down) {
+        // While a text box has the keyboard in Game Mode the controller is Steam's keyboard's: only B counts.
+        if (typing && Hub.gamemode && k !== "b") return
+        if (k === "r3") { if (down) padUsed(); r3(down); return }
+        // While the pointer shows, RT is the left mouse button (held: a drag) and LT the right one.
+        const mouse = k === "rt" ? Qt.LeftButton : k === "lt" ? Qt.RightButton : 0
+        if (mouse !== 0 && (down ? ptr.shown : (ptrButtons & mouse) !== 0)) {
+            if (down) { padUsed(); Hub.pointer(3); ptrButtons |= mouse; ptrSend(0, ptr.x, ptr.y, 0, 0, 0); ptrSend(1, ptr.x, ptr.y, mouse, ptrButtons, 0) }
+            else { ptrButtons &= ~mouse; ptrSend(2, ptr.x, ptr.y, mouse, ptrButtons, 0); if (ptrButtons === 0 && holding !== "r3") Hub.pointer(4) }
+            return
+        }
+        // Start held on a game plays it; let go early, it is Start.
+        if (k === "start" && (down ? canHold && ready && holding === "" : holding === "start")) {
+            if (down) { padUsed(); holdBegin("start") } else if (holdEnd("start")) padPress("start")
+            return
+        }
+        if (down) padPress(k)
+        else if (k === heldDir) stopHolds()
+    }
     // One press on the controller.
     function padPress(k) {
         padUsed()
@@ -674,11 +938,7 @@ Window {
             const text = Hub.poll()
             if (text === "") return
             const r = JSON.parse(text)
-            if (r.lost) app.stopHolds()
-            for (const kd of (r.keys || [])) {
-                if (kd[1]) app.padPress(kd[0])
-                else if (kd[0] === app.heldDir) app.stopHolds()
-            }
+            app.took(r)
             // Turbine Hub was started a second time: this window comes to the front instead.
             if (r.show) {
                 if (app.visibility === Window.Minimized) { if (Hub.gamemode) app.showFullScreen(); else app.showNormal() }
@@ -689,6 +949,12 @@ Window {
                 if (r.done.toast) toast.show(r.done.toast)
             } else if (r.tick && !dialog.open) app.reloadPage()
         }
+    }
+    // What the controller did since the last look: its buttons, and the pointer.
+    function took(r) {
+        if (r.lost) { stopHolds(); holdStop() }
+        if (r.ptr) pointerNews(r.ptr)
+        for (const kd of (r.keys || [])) padEvent(kd[0], kd[1])
     }
     // A direction held down keeps moving.
     Timer { id: repeatDelay; interval: mo.holdDelay; onTriggered: repeatTick.start() }
@@ -723,7 +989,8 @@ Window {
         enabled: !Hub.busy
         hints: app.footerHints()
     }
-    // The footer's hints, most important first: A and B always, then the page's own, then Help and Menu.
+    // The footer's hints, most important first: A and B (they follow the highlight), the pointer's click while it
+    // shows, then the page's own as the engine worked them out (its main button, Find, Options, Menu).
     function footerHints() {
         const out = []
         const item = focusItem
@@ -733,6 +1000,7 @@ Window {
             // On the cancel button A and B do the same thing: B says it.
             if (item && item.aLabel && item.fid !== "cancel") out.push({ k: "a", label: item.aLabel })
             out.push({ k: "b", label: dialog.cancelLabel })
+            if (ptr.shown) out.push({ k: "r3", label: "Click" })
             return out
         }
         // A shows only where it does something: words to read take the highlight too, so a long page scrolls.
@@ -741,12 +1009,9 @@ Window {
         // question to close at the very start.
         const pageB = view.item && view.item.bLabel ? view.item.bLabel : ""
         out.push({ k: "b", label: pageB !== "" ? pageB : atRoot ? "Close" : "Back" })
-        const own = (view.item && view.item.hints ? view.item.hints : []).concat(item && item.hints ? item.hints : [])
-        // A hint that says what A says already (the main button under the highlight) is said once.
-        for (const h of own) if (!(item && item.aLabel && h.label === item.aLabel)) out.push(h)
-        if (current.page !== "wheres") out.push({ k: "view", label: "Help" })
-        // A page whose main button is on Start keeps Start for it.
-        if (!bare && !own.some(h => h.k === "start")) out.push({ k: "start", label: "Menu" })
+        if (ptr.shown) out.push({ k: "r3", label: "Click" })
+        // (No menu until a mode is picked: it leads to the tabs' places.)
+        for (const h of (view.item && view.item.hints ? view.item.hints : [])) if (!(h.k === "view" && bare)) out.push(h)
         return out
     }
     // A note above the footer, or at the top when the highlight is down there: it never covers the highlight.
@@ -766,6 +1031,8 @@ Window {
         toastHigh = at.y + it.height > low - px(8) && at.y < bottomBar.y
     }
     DialogCard { id: dialog; app: app; enabled: !Hub.busy; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top } }
+    // The controller's pointer and the ring of a held button, over everything.
+    PointerLayer { app: app }
 
     // While a confirmed dialog's steps run: one line saying what is happening, nothing else to press.
     Rectangle {
@@ -811,7 +1078,6 @@ Window {
             loadPage()
         } else loadPage()
         keys.forceActiveFocus()
-        Hub.input(keyboard)
         if (shot.on) {
             selfCheck.setSource("SelfCheck.qml", { app: app, target: shot.path })
             scripted.start()
@@ -826,10 +1092,16 @@ Window {
             // Each press waits until the page before it is ready, as a hand would.
             if (!app.ready) return
             if (app.scriptedAt < shot.keys.length) { app.press(shot.keys[app.scriptedAt]); app.scriptedAt++ }
-            else { stop(); selfCheck.item.start() }
+            else {
+                stop()
+                // A picture with the controller's pointer on it ("--pointer=0.6,0.4": where, as parts of the window).
+                const at = Hub.option("pointer").split(",")
+                if (at.length === 2) { Hub.pointerPlace(app.width * parseFloat(at[0]), app.height * parseFloat(at[1])); app.pointerNews({ x: app.width * parseFloat(at[0]), y: app.height * parseFloat(at[1]), shown: true, moved: true, wheel: 0 }) }
+                selfCheck.item.start()
+            }
         }
     }
     onStChanged: Qt.callLater(function () { if (view.item) app.reloadPage() })
     // What the build's checks reach.
-    readonly property var parts: ({ view: view, bottomBar: bottomBar, dialog: dialog, topBar: topBar })
+    readonly property var parts: ({ view: view, bottomBar: bottomBar, dialog: dialog, topBar: topBar, toast: toast })
 }

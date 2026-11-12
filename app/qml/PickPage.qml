@@ -11,7 +11,7 @@ Item {
     id: page
     required property var app
     readonly property var model: app.model
-    readonly property var hints: []
+    readonly property var hints: model.hints || []
     // Side by side while each card keeps a readable width, so Left and Right always switch.
     readonly property bool sideBySide: width >= app.px(640)
 

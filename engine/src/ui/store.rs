@@ -4,7 +4,7 @@
 //! from its own script (ui/nsl.rs), and TV and cloud services become library tiles.
 use super::games::{matches, query, search_box};
 use super::plan::{Plan, Step, dialog, guide, helper_plan, toast, with_helper};
-use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
+use super::{Ui, arr, b, n, obj, row, s, section, with};
 use crate::helper::{self, Setting};
 use crate::json::{self, Json, quote};
 use std::collections::BTreeMap;
@@ -282,10 +282,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     };
     let updates = APPS.iter().filter(|a| ui.updates.iter().any(|u| u == a.id)).count();
     let (title, line) = if searching { ("Search", match list.len() { 1 => format!("1 match for \"{}\"", q.trim()), c => format!("{c} matches for \"{}\"", q.trim()) }) } else { (title, line.to_string()) };
-    let mut hints = vec![hint("rt", "Search")];
-    if updates > 0 {
-        hints.push(hint("y", "Update all"));
-    }
     obj! {
         // While searching, the sections step aside: the matches come from all of them.
         "side": arr(SECTIONS.iter().filter(|_| !searching).map(|(id, title, _)| obj! {"id": s(*id), "title": s(*title), "chip": s(""), "tone": s(""), "lock": b(false)})),
@@ -294,8 +290,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "search": search_box(ui, "store", "Search the Store"),
         "header": obj! {"title": s(title), "chips": arr(if ui.offline { vec![obj! {"text": s("Offline now. This is what was found last; installing needs the internet."), "tone": s("warn")}] } else { vec![] }), "line": s(line)},
         "sections": arr([with(with(section("", list), "columns", n(2.0)), "empty", s(empty))]),
-        "hints": arr(hints),
-        "y": if updates > 0 { obj! {"act": s("update-all"), "arg": s("")} } else { Json::Null },
+        "options": arr(if updates > 0 { vec![super::controls::page_button("Update all", "update-all", "")] } else { vec![] }),
     }
 }
 
@@ -378,7 +373,7 @@ fn info(title: &str, line: &str) -> Json {
 }
 
 fn missing_item() -> Json {
-    obj! {"crumb": s("Store"), "title": s("Not found"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("The Store has nothing by that name."))]), "hints": arr([])}
+    obj! {"crumb": s("Store"), "title": s("Not found"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("The Store has nothing by that name."))])}
 }
 
 /// One thing's own page: what it is, where it comes from, its size and version when known, and install, update or
@@ -401,8 +396,7 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
             "title": s("Decky Loader"),
             "intro": s("Adds plugins to Steam's quick menu: themes, extra controls, frame generation and more."),
             "sections": arr([section("", vec![action]), section("About", vec![state, info("Newest", &newest), info("Source", "Its official release on github.com/SteamDeckHomebrew/decky-loader, checked against the checksum GitHub publishes"), info("Remove", "Decky Loader's own settings have Uninstall. Plugins on, in Store, Decky plugins, turns it off without removing anything.")])]),
-            "hints": arr([]),
-        };
+            };
     }
     if let Some(t) = arg.strip_prefix("tile:").and_then(tile) {
         let added = tile_added(ui, t);
@@ -414,8 +408,7 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
             "title": s(t.name),
             "intro": s(format!("{}. It becomes a tile in your Steam library.", t.line)),
             "sections": arr([section("", vec![action]), section("About", vec![state, info("Opens in", opens), info("Source", t.url), info("Size", "A tile takes no room. Chrome is about 400 MB when it isn't installed yet.")])]),
-            "hints": arr([]),
-        };
+            };
     }
     let Some(a) = APPS.iter().find(|a| a.id == arg) else { return missing_item() };
     let installed = is_installed(ui, a.id);
@@ -464,7 +457,6 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
         "intro": s(a.about),
         "sections": arr([section("", actions), section("About", about), section(if remove.is_empty() { "" } else { "Remove" }, remove)]),
         "note": s(fresh),
-        "hints": arr([]),
     }
 }
 

@@ -2,7 +2,7 @@
 //! the library check. Games whose anti-cheat runs online are locked: they get no switch and no change at all.
 use super::launch::{self, Uses};
 use super::plan::{Plan, Step, dialog, guide, refresh, toast};
-use super::{Ui, arr, b, hint, n, obj, row, s, section, with};
+use super::{Ui, arr, b, n, obj, row, s, section, with};
 use crate::compat_tool as tool;
 use crate::games::{Game, Runtime, Store};
 use crate::json::Json;
@@ -262,9 +262,9 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             // it is the page's one row then.
             let unseen = unseen_section(ui);
             let empty = if unseen.is_some() { "No games found yet. Steam lists a library Turbine Hub isn't allowed to read." } else { "No games found. Install one in Steam or Heroic and it shows up here." };
-            return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s(empty), "sections": arr(unseen), "hints": arr([])};
+            return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s(empty), "sections": arr(unseen)};
         }
-        return obj! {"side": arr([]), "sideTitle": s(format!("0 of {total} games")), "index": n(0.0), "search": search, "empty": s(format!("No game matches \"{}\".", q.trim())), "sections": arr([]), "hints": arr([hint("rt", "Search")])};
+        return obj! {"side": arr([]), "sideTitle": s(format!("0 of {total} games")), "index": n(0.0), "search": search, "empty": s(format!("No game matches \"{}\".", q.trim())), "sections": arr([]), "options": arr([library_check()])};
     };
     let side_title = match (q.trim().is_empty(), total) {
         (true, 1) => "Installed \u{b7} 1 game".to_string(),
@@ -276,10 +276,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         chips.push(obj! {"text": s("Uses Turbine Hub"), "tone": s("ok")});
     }
     let playable = l.verdict.label != Label::WontRun;
-    let mut hints = vec![hint("rt", "Search"), hint("y", "Library check")];
-    if playable {
-        hints.insert(0, hint("x", "Play"));
-    }
     obj! {
         "side": side,
         "sideTitle": s(side_title),
@@ -291,10 +287,15 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             "line": s(format!("{} \u{b7} {} \u{b7} {}", l.game.store.label(), runs_with(&l.game), l.verdict.note)),
         },
         "sections": arr(panel(ui, l, &tv).into_iter().chain(unseen_section(ui))),
-        "hints": arr(hints),
-        "x": if playable { obj! {"act": s("game"), "arg": s(format!("play|{}", game_id(&l.game)))} } else { Json::Null },
-        "y": obj! {"act": s("open"), "arg": s("library")},
+        // Holding Start plays the game the highlight is on.
+        "hold": if playable { obj! {"label": s("Play"), "act": s("game"), "arg": s(format!("play|{}", game_id(&l.game)))} } else { Json::Null },
+        "options": arr([library_check()]),
     }
+}
+
+/// The Games tab's own action: the check of every game, also a button under the list.
+fn library_check() -> Json {
+    super::controls::page_button("Library check", "open", "library")
 }
 
 /// "Games missing?": one row per Steam library Turbine Hub isn't allowed to read, each with Allow, and the restart
@@ -387,8 +388,7 @@ pub(crate) fn library(ui: &mut Ui) -> Json {
         "fresh": s(super::checked_words(crate::now(), super::checked_at(&ui.cache), ui.offline)),
         "stale": b(ui.offline),
         "sections": arr([section("", vec![pick]), with(section("", rows), "empty", s(empty))]),
-        "primary": if fix > 0 { obj! {"label": s(format!("Fix all {fix}")), "k": s("x"), "act": s("fix-all"), "arg": s("")} } else { Json::Null },
-        "hints": arr(if fix > 0 { vec![hint("x", "Fix all")] } else { vec![] }),
+        "primary": if fix > 0 { obj! {"label": s(format!("Fix all {fix}")), "act": s("fix-all"), "arg": s("")} } else { Json::Null },
     }
 }
 

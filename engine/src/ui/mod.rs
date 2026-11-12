@@ -6,6 +6,7 @@
 mod activity;
 mod after;
 pub mod bring;
+pub mod controls;
 pub mod games;
 mod help;
 mod home;
@@ -62,7 +63,7 @@ pub(crate) fn with(mut j: Json, k: &str, v: Json) -> Json {
     j
 }
 
-/// A footer hint: the button and its words.
+/// A footer hint: the button and its words. Only `controls::finish` makes them.
 pub(crate) fn hint(k: &str, label: &str) -> Json {
     obj! {"k": s(k), "label": s(label)}
 }
@@ -85,9 +86,6 @@ pub struct Ui {
     pub sample: bool,
     /// A Desktop Mode window: hints name keys, tips mention the mouse.
     pub window: bool,
-    /// What the player used last, when the window knows: keys (true) or the controller (false). Help names the
-    /// buttons from it; unknown, a Desktop Mode window means keys.
-    pub keys: Option<bool>,
     pub facts: Facts,
     /// App ids installed on the host (Flathub), and the ones with an update.
     pub installed: Vec<String>,
@@ -146,7 +144,7 @@ impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { keys: None, host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -264,9 +262,16 @@ impl Ui {
         .to_text()
     }
 
-    /// One page as JSON. `arg` is the page's own (a section, a game, a search).
+    /// One page as JSON. `arg` is the page's own (a section, a game, a search). Every page leaves here with its
+    /// Options menu and its footer hints worked out the same way (`controls::finish`).
     pub fn page(&mut self, name: &str, arg: &str) -> String {
-        let j = match name {
+        let j = self.raw(name, arg);
+        controls::finish(self, name, arg, j).to_text()
+    }
+
+    /// A page as its own file builds it: what it shows and what it offers, before the shared controls are added.
+    pub(crate) fn raw(&mut self, name: &str, arg: &str) -> Json {
+        match name {
             "home" => home::page(self),
             "machine" => machine::cards_page(self),
             "games" => games::page(self, arg),
@@ -290,8 +295,7 @@ impl Ui {
                 Some(id) => machine::module(self, id),
                 None => obj! {"title": s("Not found"), "sections": arr([])},
             },
-        };
-        j.to_text()
+        }
     }
 
     /// One press. Answers JSON: `toast` (a note), `open` (a page), `back`, `dialog` (the one dialog), `refresh`

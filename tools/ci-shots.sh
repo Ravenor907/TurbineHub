@@ -5,8 +5,9 @@
 # The app lists its pictures (turbinehub --shots: one "<name> <arguments>" line each) and draws them with fake data
 # of its own, so nothing here depends on this PC. Each picture lands in <out>/<size>/<name>.png with its log beside
 # it. 1600x900 is a Desktop Mode window (--window). Fails when a picture is missing or a check fails. The pictures
-# named check-... are taken after the page was worked with real keys, a real mouse and a finger: taps never go
-# through a dialog, a held key acts once, a resting mouse never takes the highlight (app/qml/SelfCheck.qml).
+# named check-... are taken after the page was worked with real keys, a real mouse, a finger and the controller's
+# sticks: taps never go through a dialog, a held key acts once, a resting mouse never takes the highlight, the right
+# stick's pointer clicks what a tap may click, Options and Find open from every input (app/qml/SelfCheck.qml).
 # The pictures named motion-... are taken with animations on, after presses made while things move: each must come
 # to rest, and on the same picture its presses give with animations off (<name>-still.png, taken beside it).
 # Every picture also measures what it shows: words at 4.5 to 1 on what they are drawn on, nothing under the text

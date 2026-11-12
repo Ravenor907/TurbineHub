@@ -18,6 +18,9 @@ Focusable {
     required property var m
     readonly property string kind: m.kind
     fid: m.id
+    offers: m.offers || []
+    optionsTitle: m.title || ""
+    optionLabel: kind === "button" && m.act === "open" && aLabel === "Open" ? "Open its page" : ""
     focusable: kind !== "preview"
     aLabel: kind === "toggle" ? (m.on ? "Turn off" : "Turn on") : kind === "check" ? (m.on ? "Untick" : "Tick") : kind === "slider" ? (m.live ? "" : "Apply") : kind === "choice" ? "Choose" : kind === "button" ? (m.button || "Open") : ""
     // As tall as its words need, and where it takes a press never shorter than a finger.
@@ -43,6 +46,8 @@ Focusable {
     readonly property real cardWidth: app.px(158)
     readonly property int cardsAcross: Math.max(1, Math.floor((choices.width + app.px(10)) / (cardWidth + app.px(10))))
 
+    // A slider's track, for the build's checks.
+    readonly property Item trackItem: track
     function send(value) { app.doAct(m.act, m.arg, value) }
     function step(d) {
         const v = Math.max(m.min, Math.min(m.max, val + d * (m.step || 1)))
@@ -136,15 +141,33 @@ Focusable {
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: r.app.px(8); radius: height / 2; color: r.app.colors.raised; border.width: 1; border.color: r.app.colors.line }
                 Rectangle { anchors.verticalCenter: parent.verticalCenter; width: Math.max(height, parent.width * track.part); height: r.app.px(8); radius: height / 2; color: r.app.colors.accent }
                 Rectangle { x: (parent.width - width) * track.part; anchors.verticalCenter: parent.verticalCenter; width: r.app.px(22); height: width; radius: width / 2; color: r.app.colors.accentHi; border.width: Math.max(1, r.app.px(2)); border.color: r.app.colors.ground }
+                // The value at a place along the track, on one of the slider's steps.
+                function valueAt(x) {
+                    const steps = Math.round((r.m.max - r.m.min) * Math.max(0, Math.min(1, x / track.width)) / (r.m.step || 1))
+                    return Math.max(r.m.min, Math.min(r.m.max, r.m.min + steps * (r.m.step || 1)))
+                }
                 TapHandler {
                     // The track is thin; a finger a little above or below it still lands on it.
                     margin: Math.max(0, (r.app.touchFloor - track.height) / 2)
                     onTapped: (p) => {
                         if (!r.app.gate(r)) return
-                        const steps = Math.round((r.m.min + (r.m.max - r.m.min) * Math.max(0, Math.min(1, p.position.x / track.width)) - r.m.min) / (r.m.step || 1))
-                        const v = Math.max(r.m.min, Math.min(r.m.max, r.m.min + steps * (r.m.step || 1)))
+                        const v = track.valueAt(p.position.x)
                         if (v !== r.val) { r.val = v; r.send(v) }
                     }
+                }
+                // Dragged with the mouse, a finger or the controller's pointer (RT held): the knob follows, and the
+                // value is sent once, when it is let go. It obeys what a press obeys, asked as the drag begins.
+                DragHandler {
+                    id: slide
+                    target: null
+                    yAxis.enabled: false
+                    margin: Math.max(0, (r.app.touchFloor - track.height) / 2)
+                    property bool taken: false
+                    onActiveChanged: {
+                        if (active) { taken = r.app.gate(r); if (taken) r.app.setFocus(r, true) }
+                        else if (taken) { taken = false; if (r.val !== r.m.value) r.send(r.val) }
+                    }
+                    onCentroidChanged: if (active && taken) r.val = track.valueAt(centroid.position.x)
                 }
             }
             Label { app: r.app; visible: text !== ""; text: r.m.high || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }

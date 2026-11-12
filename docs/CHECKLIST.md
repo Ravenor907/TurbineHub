@@ -27,8 +27,11 @@ or feels off; that's the list to tweak from.
 
 ## 3. Game Mode
 1. Switch to Game Mode and open Turbine Hub from your library.
-2. Move around with the controller only: LB/RB for tabs, D-pad, A, B, VIEW (help), MENU, RT (search in Games and Store).
+2. Move around with the controller only: LB/RB for tabs, D-pad or left stick, A, B, X (Options) on a game, a Store row and a card, Y (Find) in Games and Store, View (the menu), Start on a page with a main button, Start held on a game (Play), LT and RT in a long list.
    - Nothing opens a new window. The highlight is always fully on screen. The hints at the bottom match the buttons.
+   - Options always starts with what A does, and ends with Help.
+3. Move the right stick: a pointer shows and the highlight follows it. R3 clicks, R3 held (a ring fills) opens Options for what is under it. Try it on a row, on a dialog's button and on a slider (RT held drags). Sweep the left stick round its rim: the list scrolls.
+   - The pointer hides after a few seconds and as soon as the D-pad is used. Nothing under a dialog takes its click.
 3. Settings, Look: try interface size 50% and 150%, and the themes.
    - Layouts re-flow; no text is cut off.
 

@@ -9,6 +9,9 @@ pub struct Term {
 }
 
 pub const TERMS: &[Term] = &[
+    Term { term: "Options", means: "A menu of everything the highlighted thing and its page can do. X on a controller, R on a keyboard, a right-click with a mouse.", windows: "The right-click menu" },
+    Term { term: "Find", means: "The search box of a page with a list. Y on a controller, F on a keyboard.", windows: "Ctrl+F" },
+    Term { term: "Pointer", means: "The arrow the right stick moves. R3 clicks with it, and R3 held opens Options.", windows: "The mouse pointer" },
     Term { term: "Game Mode", means: "The full-screen console view SteamOS starts in.", windows: "Steam Big Picture, but it's the whole system" },
     Term { term: "Desktop Mode", means: "A regular desktop with windows, a mouse and a file manager.", windows: "The Windows desktop" },
     Term { term: "Proton", means: "What lets Windows games run on SteamOS. Steam picks one per game.", windows: "" },

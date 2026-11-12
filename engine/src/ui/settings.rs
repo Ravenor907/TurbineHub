@@ -141,7 +141,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "index": n(index as f64),
         "header": obj! {"title": s(title), "chips": arr([]), "line": s("")},
         "sections": arr([section("", rows)]),
-        "hints": arr([]),
     }
 }
 
@@ -231,8 +230,7 @@ pub(crate) fn changes(ui: &mut Ui) -> Json {
         "title": s("Review changes"),
         "intro": s("Everything Turbine Hub changed, system changes newest first. Undo puts back what was there before."),
         "sections": arr(sections),
-        "hints": arr(if any { vec![super::hint("y", "Undo all")] } else { vec![] }),
-        "y": if any { obj! {"act": s("undo-all"), "arg": s("")} } else { Json::Null },
+        "options": arr(if any { vec![super::controls::page_button("Undo all", "undo-all", "")] } else { vec![] }),
     }
 }
 
@@ -471,8 +469,10 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             return Some(if ui.window { obj! {"dialog": d, "restart": b(true)} } else { obj! {"dialog": d} });
         }
         "menu" => {
-            let rows = [("Where's my...?", "open", "wheres"), ("Bring it over", "open", "bring"), ("Review changes", "open", "changes"), ("Settings", "tab", "settings"), ("Close Turbine Hub", "quit", "")];
-            return Some(obj! {"dialog": obj! {"title": s("Menu"), "text": s(""), "items": arr([]), "confirm": s(""), "cancel": s("Close"), "ask": s(""), "danger": b(false), "rows": arr(rows.iter().map(|(t, a, g)| obj! {"title": s(*t), "act": s(*a), "arg": s(*g)}))}});
+            // `arg` is the page the menu was opened on ("page@its argument"): Help is about that page.
+            let help = format!("help|{arg}");
+            let rows = [("Help for this page", "open", help.as_str(), "f1"), ("Where's my...?", "open", "wheres", ""), ("Bring it over", "open", "bring", ""), ("Review changes", "open", "changes", ""), ("Settings", "tab", "settings", ""), ("Close Turbine Hub", "quit", "", "")];
+            return Some(obj! {"dialog": obj! {"title": s("Menu"), "text": s(""), "items": arr([]), "confirm": s(""), "cancel": s("Close"), "ask": s(""), "danger": b(false), "rows": arr(rows.iter().map(|(t, a, g, k)| obj! {"title": s(*t), "act": s(*a), "arg": s(*g), "key": s(*k)}))}});
         }
         _ => return None,
     };

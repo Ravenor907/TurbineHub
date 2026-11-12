@@ -61,10 +61,28 @@ pub mod qobject {
         #[qinvokable]
         fn front(self: Pin<&mut Self>, active: bool);
 
-        /// What the player used last: keys or the mouse (true), or the controller (false). Help names the buttons
-        /// from it.
+        /// The controller pointer's click, move or wheel step, sent into the window like a real mouse's (Main.qml
+        /// makes them from what `poll` says about the pointer and R3). kind: 0 move, 1 press, 2 release, 3 wheel.
         #[qinvokable]
-        fn input(self: Pin<&mut Self>, keys: bool);
+        #[cxx_name = "pointerEvent"]
+        fn pointer_event(self: &Self, kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32);
+
+        /// The pointer: 0 hides it (a key was used), 1 pauses it and the left stick (a text box has the keyboard,
+        /// or work runs), 2 lets them go on, 3 a button is held at it (it stays), 4 the button was let go.
+        #[qinvokable]
+        fn pointer(self: Pin<&mut Self>, what: i32);
+
+        /// Shows the pointer at a place in the window (R3 held with the pointer hidden: at the highlight).
+        #[qinvokable]
+        #[cxx_name = "pointerPlace"]
+        fn pointer_place(self: Pin<&mut Self>, x: f64, y: f64);
+
+        /// For the build's checks (screenshot runs only): the sticks held at these places (each -1 to 1, y down)
+        /// for `ms`, looked at every 16 ms as the real ones are. Answers what `poll` would have: the pointer and
+        /// the left stick's directions.
+        #[qinvokable]
+        #[cxx_name = "testSticks"]
+        fn test_sticks(self: Pin<&mut Self>, lx: f64, ly: f64, rx: f64, ry: f64, ms: i32) -> QString;
 
         /// For the build's checks (screenshot runs only): a keyboard key with Qt's code and modifiers, delivered
         /// to the window like a real one. `repeat`: the key is held down and this is the keyboard repeating it.
@@ -100,6 +118,8 @@ unsafe extern "C" {
     fn turbinehub_test_mouse(kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) -> i32;
     fn turbinehub_test_touch(kind: i32, x: f64, y: f64) -> i32;
     fn turbinehub_test_spoken(what: i32) -> i32;
+    fn turbinehub_pointer_event(kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) -> i32;
+    fn turbinehub_window_size(w: *mut f64, h: *mut f64) -> i32;
 }
 
 use crate::pad::Pads;
@@ -135,6 +155,11 @@ pub struct HubRust {
     in_front: bool,
     /// Releases found while the window changed places, for the next `poll`.
     let_go: Vec<(&'static str, bool)>,
+    /// The controller pointer and the left stick, when they were last looked at, and whether they rest (a text box
+    /// has the keyboard, or work runs).
+    pointer: crate::pointer::Pointer,
+    pointer_at: Option<std::time::Instant>,
+    pointer_paused: bool,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     /// The plan whose steps are running.
@@ -305,7 +330,7 @@ impl Default for HubRust {
         let ui = make_ui();
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), pads: false, pad_name: QString::default(), ui, reader: None, asked_pads: None, said_no_pad: false, in_front: true, let_go: Vec::new(), tx, rx, running: None, looked: std::time::Instant::now() };
+        let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), pads: false, pad_name: QString::default(), ui, reader: None, asked_pads: None, said_no_pad: false, in_front: true, let_go: Vec::new(), pointer: crate::pointer::Pointer::default(), pointer_at: None, pointer_paused: false, tx, rx, running: None, looked: std::time::Instant::now() };
         hub.gather(false);
         hub
     }
@@ -421,6 +446,30 @@ fn with_pad_hint(page: &str) -> String {
     Json::Obj(fields).to_text()
 }
 
+/// The window's size, when it is there.
+fn window_size() -> Option<(f64, f64)> {
+    let (mut w, mut h) = (0.0f64, 0.0f64);
+    // SAFETY: a plain call into qtglue.cpp on the interface thread; it only reads the window's size into the two
+    // numbers handed to it.
+    let ok = unsafe { turbinehub_window_size(&mut w, &mut h) } == 1;
+    (ok && w > 0.0 && h > 0.0).then_some((w, h))
+}
+
+impl HubRust {
+    /// One look at the sticks, `dt_ms` after the last: the pointer's news as JSON (None when nothing changed) and
+    /// the directions the left stick let go and pressed.
+    fn look(&mut self, sticks: &crate::pointer::Sticks, dt_ms: f64, w: f64, h: f64) -> (Option<String>, Vec<(&'static str, bool)>) {
+        let t = self.pointer.tick(sticks, dt_ms, w, h);
+        let dirs: Vec<(&'static str, bool)> = t.release.map(|d| (d, false)).into_iter().chain(t.press.map(|d| (d, true))).collect();
+        let news = (t.moved || t.hid || t.wheel != 0).then(|| self.pointer_json(t.moved, t.wheel));
+        (news, dirs)
+    }
+
+    fn pointer_json(&self, moved: bool, wheel: i32) -> String {
+        format!("{{\"x\":{:.1},\"y\":{:.1},\"shown\":{},\"moved\":{moved},\"wheel\":{wheel}}}", self.pointer.x, self.pointer.y, self.pointer.shown)
+    }
+}
+
 fn answer(pairs: &[(&str, String)]) -> QString {
     let body: Vec<String> = pairs.iter().map(|(k, v)| format!("{}:{v}", quote(k))).collect();
     QString::from(format!("{{{}}}", body.join(",")).as_str())
@@ -446,17 +495,74 @@ impl qobject::Hub {
     pub fn front(mut self: Pin<&mut Self>, active: bool) {
         self.as_mut().rust_mut().in_front = active;
         let mut this = self.as_mut().rust_mut();
+        // A stick still pushed from the game presses nothing until it has been back in the middle, and the pointer
+        // doesn't stay on screen behind a game.
+        let stick = this.pointer.let_go();
+        this.pointer.hide();
+        this.pointer.holding = false;
         let Some(r) = this.reader.as_mut() else { return };
         if active {
             // No controller yet: ask SDL again now (after leaving Game Mode, or one switched on meanwhile).
             r.rescan(Duration::from_secs(2));
         }
-        let ups = r.set_front(active, QUIET_AFTER_BACK);
+        let mut ups = r.set_front(active, QUIET_AFTER_BACK);
+        ups.extend(stick.and_then(|dir| r.stick_event(dir, false)));
         this.let_go.extend(ups);
     }
 
-    pub fn input(mut self: Pin<&mut Self>, keys: bool) {
-        self.as_mut().rust_mut().ui.keys = Some(keys);
+    pub fn pointer_event(&self, kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) {
+        // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to this window.
+        unsafe { turbinehub_pointer_event(kind, x, y, button, buttons, wheel) };
+    }
+
+    pub fn pointer(mut self: Pin<&mut Self>, what: i32) {
+        let mut this = self.as_mut().rust_mut();
+        match what {
+            0 => {
+                this.pointer.hide();
+            }
+            1 => {
+                this.pointer_paused = true;
+                this.pointer.hide();
+                this.pointer.holding = false;
+                // A direction the stick holds is let go, so it doesn't go on repeating under the keyboard.
+                if let Some(dir) = this.pointer.let_go()
+                    && let Some(up) = this.reader.as_mut().and_then(|r| r.stick_event(dir, false))
+                {
+                    this.let_go.push(up);
+                }
+            }
+            2 => this.pointer_paused = false,
+            3 => this.pointer.holding = true,
+            _ => this.pointer.holding = false,
+        }
+    }
+
+    pub fn pointer_place(mut self: Pin<&mut Self>, x: f64, y: f64) {
+        self.as_mut().rust_mut().pointer.place(x, y);
+    }
+
+    pub fn test_sticks(mut self: Pin<&mut Self>, lx: f64, ly: f64, rx: f64, ry: f64, ms: i32) -> QString {
+        if option("screenshot").is_none() {
+            return QString::default();
+        }
+        let Some((w, h)) = window_size() else { return QString::default() };
+        let sticks = crate::pointer::Sticks { lx, ly, rx, ry };
+        let (mut moved, mut wheel, mut keys) = (false, 0, Vec::new());
+        let mut this = self.as_mut().rust_mut();
+        for _ in 0..(ms / 16).max(1) {
+            let t = this.pointer.tick(&sticks, 16.0, w, h);
+            moved |= t.moved;
+            wheel += t.wheel;
+            keys.extend(t.release.map(|d| format!("[{},false]", quote(d))));
+            keys.extend(t.press.map(|d| format!("[{},true]", quote(d))));
+            // As in `poll`: the D-pad (the left stick is one) sends the pointer away.
+            if t.press.is_some() {
+                this.pointer.hide();
+            }
+        }
+        let ptr = this.pointer_json(moved, wheel);
+        answer(&[("ptr", ptr), ("keys", format!("[{}]", keys.join(",")))])
     }
 
     pub fn test_key(&self, key: i32, mods: i32, pressed: bool, repeat: bool) {
@@ -574,10 +680,40 @@ impl qobject::Hub {
         // What was let go while the window changed places comes first.
         let mut events = std::mem::take(&mut self.as_mut().rust_mut().let_go);
         let mut seen: Option<(bool, String, bool)> = None;
+        let mut sticks = None;
         if let Some(p) = self.as_mut().rust_mut().reader.as_mut() {
             p.rescan(Duration::from_secs(10));
             events.extend(p.poll());
             seen = Some((p.connected(), p.name(), p.take_lost()));
+            sticks = Some(p.sticks());
+        }
+        // The sticks: the right one moves the pointer, the left one is a D-pad when pushed and a wheel when swept.
+        // Only in front (the sticks belong to the game otherwise) and not while a text box has the keyboard.
+        let now = std::time::Instant::now();
+        let dt = self.rust().pointer_at.map(|t| now.duration_since(t).as_secs_f64() * 1000.0).unwrap_or(16.0);
+        self.as_mut().rust_mut().pointer_at = Some(now);
+        let was_shown = self.rust().pointer.shown;
+        let mut news = None;
+        if let Some(sticks) = sticks.filter(|_| self.rust().in_front && !self.rust().pointer_paused)
+            && let Some((w, h)) = window_size()
+        {
+            let mut this = self.as_mut().rust_mut();
+            let (ptr, dirs) = this.look(&sticks, dt, w, h);
+            news = ptr;
+            for (dir, pressed) in dirs {
+                events.extend(this.reader.as_mut().and_then(|r| r.stick_event(dir, pressed)));
+            }
+        }
+        // Any button but the pointer's own (R3, and the triggers while it shows) means the buttons are in use: the
+        // pointer goes, out of the highlight's way.
+        if events.iter().any(|(k, down)| *down && !["r3", "lt", "rt"].contains(k)) && !self.rust().pointer.holding && self.as_mut().rust_mut().pointer.hide() {
+            news = Some(self.rust().pointer_json(false, 0));
+        }
+        if news.is_none() && was_shown != self.rust().pointer.shown {
+            news = Some(self.rust().pointer_json(false, 0));
+        }
+        if let Some(ptr) = news {
+            out.push(("ptr", ptr));
         }
         if let Some((connected, name, lost)) = seen {
             if *self.pads() != connected || self.pad_name().to_string() != name {

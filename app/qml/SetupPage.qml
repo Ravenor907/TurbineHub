@@ -16,15 +16,16 @@ Item {
     // The page shown inside this step, asked again whenever this page is.
     readonly property var inner: embed !== "" ? JSON.parse(Hub.page((page.model, embed), "")) : ({})
     readonly property var buttons: model.buttons || []
-    readonly property var hints: buttons.filter(b => b.k !== "a").map(b => ({ k: b.k, label: b.label })).concat(inner.hints || [])
+    readonly property var hints: model.hints || []
 
     // B goes to the step before; on the first step it leaves (to the mode picker when that is where setup began).
     readonly property int step: model.index || 0
     function press(k) {
         if (k === "b" && step > 0 && (model.rail || []).length > step) { app.setArg(model.rail[step - 1].id); return true }
-        const b = buttons.find(x => x.k === k && k !== "a")
+        // The step's main button is Start's (what the page inside a step offers is in Options).
+        const b = k === "start" ? buttons.find(x => x.k === "start") : undefined
         if (b) { app.doAct(b.act, b.arg, ""); return true }
-        return embed !== "" && app.pageKey(inner, k)
+        return false
     }
 
     RowLayout {
@@ -129,7 +130,7 @@ Item {
                         fid: "step:" + modelData.label
                         firstFocus: index === 0 && page.embed === "" && (page.model.sections || []).length === 0
                         label: modelData.label
-                        cap: modelData.k
+                        cap: modelData.k === "start" || focused ? modelData.k : ""
                         primary: modelData.primary
                         onActivated: page.app.doAct(modelData.act, modelData.arg, "")
                     }

@@ -13,14 +13,7 @@ Item {
     readonly property var model: app.model
     readonly property bool guided: model.view !== "veteran"
     readonly property bool wide: width >= app.px(980)
-    readonly property var hints: (model.hints || []).concat(guided && model.setup && model.setup.show ? [{ k: "y", label: "Continue setup" }] : [])
-
-    function press(k) {
-        if (guided && k === "x" && (model.hints || []).length > 0) { app.doAct("home-all", "", ""); return true }
-        if (guided && k === "y" && model.setup && model.setup.show) { app.open("setup"); return true }
-        if (!guided && k === "y") { app.reloadPage(); return true }
-        return false
-    }
+    readonly property var hints: model.hints || []
 
     // One reading: a big value over a few words.
     component Tile: Rectangle {
@@ -144,7 +137,7 @@ Item {
                             }
                             Label { app: page.app; Layout.fillWidth: true; text: "Next: " + (setupCard.s.next || []).join(", "); color: page.app.colors.soft; font.pixelSize: page.app.fpx(15) }
                         }
-                        ActionButton { app: page.app; plain: true; label: "Continue"; cap: setupCard.focused ? "a" : "y" }
+                        ActionButton { app: page.app; plain: true; label: "Continue"; cap: setupCard.focused ? "a" : "" }
                     }
                 }
 
@@ -159,7 +152,7 @@ Item {
                     spacing: page.app.px(10)
                     Icon { app: page.app; d: page.app.icons.check; size: 18; tint: page.app.colors.ok }
                     Label { app: page.app; Layout.fillWidth: true; text: page.model.all ? "That's everything." : (page.model.more || ""); color: page.app.colors.muted; font.pixelSize: page.app.fpx(15) }
-                    ActionButton { app: page.app; fid: "showall"; label: page.model.all ? "Show fewer" : "Show all"; cap: "x"; onActivated: page.app.doAct("home-all", "", "") }
+                    ActionButton { app: page.app; fid: "showall"; label: page.model.all ? "Show fewer" : "Show all"; onActivated: page.app.doAct("home-all", "", "") }
                 }
             }
             ColumnLayout {

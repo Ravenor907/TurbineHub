@@ -20,7 +20,7 @@ Machines, all first-class:
 ## 2. Product
 
 ### Tabs
-Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs.
+Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs. The controls are the same on every page (see Controls below).
 
 ### First run
 1. Mode picker (Guided or Veteran).
@@ -42,7 +42,7 @@ Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pas
 - Your Windows drive: found automatically, read only, never written. Copies Steam games into a SteamOS library (no re-download) and saves into the right Proton prefixes. Saves use Ludusavi's CLI with the Windows drive added as an "other Windows" root.
 - Your Windows apps: pick the Windows apps you use, get the SteamOS version of each in one install (Discord, MangoHud and MangoJuice for MSI Afterburner, Steam Input for DS4Windows, Xbox Cloud for the Xbox app, and so on).
 - TV and streaming: Netflix, YouTube, Disney+, Twitch, Plex as controller-ready tiles.
-- "Where's my...?": Windows things and where they are on SteamOS, and the glossary. VIEW (Help) on any page first explains that page and its buttons, with "Where's my...?" one press further.
+- "Where's my...?": Windows things and where they are on SteamOS, and the glossary. Help (in every Options menu and in the menu, F1 on a keyboard) first explains the page it was asked on and every control, with "Where's my...?" one press further.
 
 ### Games
 Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, write a report that stays on the machine), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
@@ -114,10 +114,45 @@ Phone remote and Wake-on-LAN web page: after the core is solid.
 - No placeholder art: game and app art only where real art exists (Steam's art, Flathub icons), otherwise the name alone.
 - No em or en dashes.
 
-### Controls and layout (from Turbine)
-- One footer hint bar with a fixed priority order. A and B are never dropped, VIEW and START have short labels, LB/RB show tab names. The hints follow the last input: keys (Enter, Esc, Q/E, F1) after a key or the mouse in a window, the controller's after a press on it, and always the controller's in Game Mode.
+### Controls
+One control scheme, shared with Turbine Mod Manager: whoever knows one app knows the other. It holds on every page and in every dialog, and each line has a way on the controller, with a keyboard alone and with a mouse alone. `engine/src/ui/controls.rs` holds it (`SCHEME`); Help shows it from there, and a test holds this table and the README's to it.
+
+| Do | Controller | Keyboard | Mouse |
+|---|---|---|---|
+| Move | D-pad or left stick | Arrows or W A S D | Move the mouse |
+| Select | A | Enter or Space | Click |
+| Back | B | Esc or Backspace | Back side button |
+| Options | X | R | Right-click |
+| Find | Y | F, Ctrl+F or / | Click the search box |
+| Tabs | LB / RB | Q / E, or Page Up / Page Down | Click a tab |
+| Menu | View | Tab | Click Menu in the footer |
+| Main button | Start | Ctrl+Enter | Click the button |
+| Play | Hold Start | Hold Space | Click Play |
+| Jump | LT / RT | Home / End | Wheel |
+| Pointer | Right stick |  |  |
+| Click | R3 |  | Click |
+| Pointer options | Hold R3 |  | Right-click |
+| Scroll | Sweep the left stick round |  | Wheel |
+| Help | X, then Help | F1 | Right-click, then Help |
+| Size |  | Ctrl+= / Ctrl+- | Ctrl and the wheel |
+
+- **Options (X)** is a menu for the highlighted thing: its own press first (what A does there), then what else it offers, then what the page offers (its own actions, its main button, Find), then Help. A game lists Play and everything its panel holds, a Store row what its own page does (Install, Open, Update, Remove), a card of My machine the switches and buttons of its page. Each row shows the button that does it directly where it has one. With nothing under a right-click it is the page's menu.
+- **Find (Y)** is on every page with a list (Games, Store, Where's my...?): the search box takes the highlight and typing starts, with Steam's keyboard in Game Mode. At a keyboard a letter or digit that is no key of its own starts it too.
+- **No page owns a button.** A page says what it offers (`options`, `primary`, `search`, `hold`) and `controls::finish` turns that into the Options menu's rows and the footer's hints for every page alike. What used to sit on X and Y (Library check, Update all, Undo all, Tick all, Load setup, Show all, Continue setup, Refresh) is in Options, and on the page as a button.
+- **The pointer.** The right stick moves a pointer drawn by Turbine Hub (Game Mode has no cursor), as in Turbine Mod Manager (`app/src/pointer.rs`: a dead zone, slow near the middle and across the screen in under a second at the edge, hidden after three seconds without it and at once when a button, the D-pad, the left stick, a key or the real mouse is used). Its moves take the highlight as a mouse's do and its clicks are real mouse events, so they pass the same gate as a tap and work over lists and dialogs. R3 clicks; R3 held for 450 ms (a ring fills) is the right button: Options for what is under it. With the pointer hidden R3 is A and R3 held is Options for the highlight. The left stick pushed one way is the D-pad (one direction per push); swept round the rim it is a scroll wheel.
+
+Decided where Turbine Hub has something Turbine Mod Manager doesn't, or the other way round:
+- **View** opens the quick wheel in Turbine Mod Manager; here it opens the menu, which is the same thing as a list (Help for this page, Where's my...?, Bring it over, Review changes, Settings, Close). Tab opens it at a keyboard (a tap, not a hold: a list has nothing to point at while held).
+- **Start** is the main button of the page it is on, as on Turbine Mod Manager's sheets (Continue, Apply, Copy, Fix all), and Play when held for a second on a game, as there. A tap with no main button opens Settings, as there.
+- **Help** had View to itself. It is now the last row of every Options menu and the first row of the menu, and F1 at a keyboard.
+- **LT and RT** were "list or details" and "search". Search is Find (Y); the two sides of a page are Left, Right and A, as before. LT and RT jump a screenful, as in Turbine Mod Manager's lists, and while the pointer shows RT holds the left button (drag a slider) and LT is the right button, as there.
+- **R3 held** is the right button here (the owner's choice); in Turbine Mod Manager R3 held drags. RT drags in both.
+- Start is called START on every pad's hints: "MENU", its name on newer pads, would stand beside the menu that View opens.
+
+### Layout (from Turbine)
+- One footer hint bar with a fixed priority order. A and B are never dropped; Find, Menu, Options and the main button give way in that order when the bar is too narrow, and LB/RB sit beside the tabs. The hints follow the last input: keys (Enter, Esc, R, F, Tab) after a key or the mouse in a window, the controller's after a press on it (the pointer counts as the controller), and always the controller's in Game Mode.
 - One dialog template: sizes to its content, buttons pinned, controller glyph inside each button.
-- Input that can't surprise: the controller only counts while Turbine Hub is in front (not behind a game, and not for a moment after coming back); a tap or click obeys what a press obeys and never reaches what lies under a dialog or the busy cover; a held key or button acts once (only directions repeat); the mouse moves the highlight only when it really moves; the left stick gives one direction per push; one window at a time (a second start brings the open one forward). The build tries these with real keys, a real mouse and a finger (the check-... pictures).
+- Input that can't surprise: the controller only counts while Turbine Hub is in front (not behind a game, and not for a moment after coming back); a tap or click (the controller pointer's too) obeys what a press obeys and never reaches what lies under a dialog or the busy cover; a held key or button acts once (only directions repeat); the mouse moves the highlight only when it really moves; the left stick gives one direction per push; one window at a time (a second start brings the open one forward). The build tries these with real keys, a real mouse, a finger and sticks fed in as the real ones are read (the check-... pictures).
 - Distinct focus, selected and primary styles. Every action has its own icon.
 - Scroll fades, the focused item always fully in view, toasts inside the content area, top insets, dark scrims behind overlays.
 - Body text at least 14 px at 1280x800. Interface size 50 to 150% re-flows instead of truncating: text is never under 12 px nor under 90% of its design size, and anything to press is never under 44 px or 6 mm, at any interface size and in any window.
@@ -163,14 +198,14 @@ New:
 - `applog`: Turbine Hub's own log and crash log (see 5): what is hidden in every line, the size caps, how a run that never closed is told from Game Mode ending. `drawing`: software drawing where there is no graphics card to draw with.
 - `files`: the file explorer (see 2, Files): `fs` (the one door to the disk and the sandbox map), `places` (the Windows-like places and the two-way path mapping), `list`, `guard` (what is refused and why), `trash`, `ops` (plans, progress, undo), `preview`, `quick` (pinned folders and recent files, in `files.json` in Turbine Hub's folder). `fake::files` gives the made-up machines a home folder, games, apps, a card and a Recycle Bin for it.
 - `cli`: `--json` verbs for the Decky backend and scripts.
-- `ui`: what every screen shows and what every press does. Each page is one JSON object; each press answers with a note, a page to open, or the one dialog with its exact steps (`Plan`, `Step`). It also holds the per-game switches file, the lighting file, the Store's list, the setup file and the made-up machine used for pictures and tests.
+- `ui`: what every screen shows and what every press does. Each page is one JSON object; each press answers with a note, a page to open, or the one dialog with its exact steps (`Plan`, `Step`). `ui/controls.rs` gives every page its Options menu and its footer hints from what the page offers. It also holds the per-game switches file, the lighting file, the Store's list, the setup file and the made-up machine used for pictures and tests.
 
 Every decision (filtering, sorting, what to warn about, what a check means) is Rust with tests. QML only shows what the engine says.
 
 ### app
-One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and takes presses (`Hub.act`, `Hub.confirm`). The steps of a confirmed dialog and the questions to the host and the internet run on their own threads and come back through `Hub.poll`, together with the controller (SDL). `app/qml/COMPONENTS.md` lists the parts.
+One cxx-qt bridge object, `Hub`, hands QML the engine's pages (`Hub.page`) and takes presses (`Hub.act`, `Hub.confirm`). The steps of a confirmed dialog and the questions to the host and the internet run on their own threads and come back through `Hub.poll`, together with the controller (SDL): its buttons, and where the sticks have moved the pointer (`pointer.rs`, Turbine Mod Manager's). `app/qml/COMPONENTS.md` lists the parts.
 
-`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--arg=<the page's own>] [--act=<action>:<argument> [--value=<typed text>]] [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a] [--installed=<app id>] [--no-tool] [--theme=...] [--accent=...] [--vision=...] [--scale=50..150] [--motion=full|reduced]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, contrast, finger sizes, what a screen reader is told, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
+`turbinehub --screenshot=<png> --size=<W>x<H> --page=<page> [--arg=<the page's own>] [--act=<action>:<argument> [--value=<typed text>]] [--machine=handheld|desktop|tv] [--mode=guided|veteran] [--window] [--keys=down,a] [--pointer=<x>,<y> as parts of the window] [--check=<input check>] [--installed=<app id>] [--no-tool] [--theme=...] [--accent=...] [--vision=...] [--scale=50..150] [--motion=full|reduced]` renders a page on a made-up machine and loads SelfCheck.qml, which checks cut-off text, overflow, text size, contrast, finger sizes, what a screen reader is told, the footer's hints and the highlight. `turbinehub --shots` lists the pictures the build takes.
 
 ### Background agent
 The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit, `~/.config/systemd/user/turbinehub-agent.service` (user-level, no password, survives SteamOS updates). Settings, Background helper writes the unit through `flatpak-spawn --host` and enables it; turning it off disables and removes it. Players see it as "the background helper".

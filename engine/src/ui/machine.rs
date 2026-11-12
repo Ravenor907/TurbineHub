@@ -1,7 +1,7 @@
 //! My machine: the cards for what this machine has, and one page of controls per card. Every control that changes
 //! the system becomes a dialog with the exact settings the helper will write.
 use super::plan::{Plan, Step, change_item, dialog, guide, helper_plan, refresh, toast, with_helper};
-use super::{Ui, arr, b, cpu_short, gpu_name, hint, kind_word, n, obj, row, s, section, size_words, with};
+use super::{Ui, arr, b, cpu_short, gpu_name, kind_word, n, obj, row, s, section, size_words, with};
 use crate::hardware::{Display, DriveRole, GpuVendor, Kind, Machine};
 use crate::helper::{self, Setting};
 use crate::json::{self, Json};
@@ -67,8 +67,7 @@ pub(crate) fn cards_page(ui: &mut Ui) -> Json {
             };
             obj! {"id": s(c.id), "title": s(c.title), "icon": s(c.icon), "value": s(value), "line": s(if c.id == "lighting" { "Effects, colors per game and the battery level.".to_string() } else if veteran { c.line.to_string() } else { c.line.replace(" (TDP)", "") }), "badge": s(if c.experimental { "Experimental" } else { "" }), "act": s("open"), "arg": s(format!("module:{}", c.id)), "button": s("")}
         })),
-        "hints": arr(if undo { vec![hint("y", "Undo all")] } else { vec![] }),
-        "y": if undo { obj! {"act": s("undo-all"), "arg": s("")} } else { Json::Null },
+        "options": arr(if undo { vec![super::controls::page_button("Undo all", "undo-all", "")] } else { vec![] }),
     }
 }
 
@@ -129,7 +128,6 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
     // Game Boost only happens with Turbine Hub's helper installed and the background helper running.
     let boost_waits = st.game_boost && !(helper::installed(&ui.ctx.root) && ui.agent_running());
     let boost = with(with(with(row("boost", "", "toggle", "Game Boost", "Full processor speed while a game runs, quiet the rest of the time."), "on", b(st.game_boost)), "badge", s(if boost_waits { "Not active yet" } else { "" })), "tone", s("warn"));
-    let mut hints: Vec<Json> = Vec::new();
     let mut extra: Vec<(&str, Json)> = Vec::new();
     let (title, intro, sections): (String, String, Vec<Json>) = match id {
         "power" => {
@@ -206,8 +204,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
         "tuneup" => {
             let (rows, off) = tuneup_rows(ui);
             if off > 0 {
-                extra.push(("primary", obj! {"label": s(format!("Turn on all {off}")), "k": s("x"), "act": s("tuneup"), "arg": s("all")}));
-                hints.push(hint("x", "Turn on all"));
+                extra.push(("primary", obj! {"label": s(format!("Turn on all {off}")), "act": s("tuneup"), "arg": s("all")}));
             }
             ("Tune-up".into(), "Memory and kernel settings that make games smoother. Each one is saved first and can be undone.".into(), vec![section("", rows)])
         }
@@ -280,7 +277,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
         }
         _ => ("Not found".into(), String::new(), Vec::new()),
     };
-    let mut j = obj! {"crumb": s("My machine"), "title": s(title), "intro": s(intro), "sections": arr(sections), "hints": arr(hints)};
+    let mut j = obj! {"crumb": s("My machine"), "title": s(title), "intro": s(intro), "sections": arr(sections)};
     for (k, v) in extra {
         j = with(j, k, v);
     }

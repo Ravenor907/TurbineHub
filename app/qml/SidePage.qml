@@ -2,13 +2,13 @@ import QtQuick
 import QtQuick.Layouts
 
 // A list on the left, what the picked entry holds on the right: Games (every game, then its switches), Store and
-// Settings (their sections). Moving the highlight down the list shows each entry at once; Right or A goes into it,
-// Left comes back, and LT jumps between the two sides. The picked entry keeps an accent bar ("selected") while the
-// highlight is on the right.
+// Settings (their sections). Moving the highlight down the list shows each entry at once; Right or A goes into it
+// and Left comes back. The picked entry keeps an accent bar ("selected") while the highlight is on the right. The
+// page's own actions (Library check, Update all) are buttons under the list.
 //
-// When the page's model has `search`, a search box sits above the list. RT (or / on a keyboard) jumps to it, A
-// starts typing (in Game Mode Steam's on-screen keyboard opens, and closes again when the typing is done), and every
-// letter goes to the engine, which answers with the narrowed page. B empties the box before it leaves the page.
+// When the page's model has `search`, a search box sits above the list. Find (Y, or F on a keyboard) jumps to it
+// and starts typing (in Game Mode Steam's on-screen keyboard opens, and closes again when the typing is done), and
+// every letter goes to the engine, which answers with the narrowed page. B empties the box before it leaves the page.
 //
 // app (required): Main.qml's window (its model is the page).
 Item {
@@ -18,7 +18,7 @@ Item {
     readonly property var side: model.side || []
     readonly property int picked: model.index || 0
     readonly property bool inSide: app.focusItem !== null && app.focusItem.sideEntry === true
-    readonly property var hints: [{ k: "lt", label: inSide ? "Details" : "List" }].concat(model.hints || [])
+    readonly property var hints: model.hints || []
     readonly property var search: model.search || null
     readonly property string searchValue: search ? (search.value || "") : ""
     // The engine's words win whenever they differ from the box (a page opened again, a letter it didn't keep).
@@ -27,14 +27,20 @@ Item {
     readonly property string bLabel: search && searchValue !== "" ? "Clear search" : ""
 
     function press(k) {
-        if (k === "lt") { toOtherSide(); return true }
-        if (k === "rt" && search) { app.setFocus(searchBox, false); searchBox.activated(); return true }
         if (k === "b" && search && searchValue !== "") { input.text = ""; app.doAct("search", search.arg, ""); return true }
         return app.pageKey(model, k)
     }
     function move(k) {
         if (inSide) return k === "up" || k === "down" ? (app.moveFocus(k, sideArea), true) : false
         if (!app.moveFocus(k, rows) && k === "left") toOtherSide()
+        return true
+    }
+    // Find: the search box takes the highlight and the keyboard (`text`: a letter typed already).
+    function find(text) {
+        if (!search) return false
+        app.setFocus(searchBox, false)
+        searchBox.activated()
+        if (text !== "") { input.text = input.text + text; app.doAct("search", search.arg, input.text) }
         return true
     }
     function toOtherSide() {
@@ -105,7 +111,7 @@ Item {
                 }
                 Flickable {
                     id: sideFlick
-                    anchors { top: searchBox.bottom; bottom: parent.bottom; left: parent.left; right: parent.right; topMargin: searchBox.visible ? page.app.px(8) : 0 }
+                    anchors { top: searchBox.bottom; bottom: sideButtons.top; left: parent.left; right: parent.right; topMargin: searchBox.visible ? page.app.px(8) : 0; bottomMargin: sideButtons.visible ? page.app.px(8) : 0 }
                     clip: true
                     contentHeight: sideList.implicitHeight + page.app.px(10)
                     boundsBehavior: Flickable.StopAtBounds
@@ -128,6 +134,10 @@ Item {
                                 fid: "side:" + modelData.id
                                 firstFocus: on
                                 aLabel: "Open"
+                                // What the open entry holds is what it offers (a game: Play, its switches, its pages).
+                                offers: on ? (page.model.entry || []) : []
+                                optionsTitle: modelData.title || ""
+                                optionLabel: "Go to its details"
                                 sayRole: Accessible.ListItem
                                 sayName: [modelData.title || "", on ? "open" : "", modelData.chip || "", modelData.lock === true ? "locked" : "", (index + 1) + " of " + page.side.length].filter(x => x !== "").join(", ")
                                 Accessible.selected: on
@@ -157,6 +167,15 @@ Item {
                     }
                 }
                 ScrollFade { app: page.app; view: sideFlick; color: page.app.colors.card }
+                // The page's own actions, pinned under the list.
+                PageButtons {
+                    id: sideButtons
+                    app: page.app
+                    side: true
+                    options: page.model.options || []
+                    anchors { bottom: parent.bottom; left: parent.left; right: parent.right; leftMargin: page.app.px(12); rightMargin: page.app.px(12); bottomMargin: page.app.px(4) }
+                    height: visible ? implicitHeight : 0
+                }
             }
         }
 

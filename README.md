@@ -152,24 +152,38 @@ and checks your changes are still in place after a SteamOS update.
 
 ## 🎮 Controls
 
-Everything works with just the controller, in Game Mode and in Desktop Mode. Nothing opens a separate window.
+Everything works with just the controller, with just a keyboard and with just a mouse, in Game Mode and in Desktop
+Mode. Nothing opens a separate window. The controls are the same as in
+[Turbine Mod Manager](https://github.com/Ravenor907/Turbine-Mod-Manager).
 
-| Button | Keyboard | Action |
-|---|---|---|
-| D-pad or left stick | Arrows or W A S D | Move |
-| **A** | Enter | Select, or the main action |
-| **B** | Esc | Back, or close a dialog |
-| **X** / **Y** | X / Y | The page's own actions (shown at the bottom) |
-| **LB / RB** | Q / E, or Page Up / Page Down | Switch tabs |
-| **LT** | Tab | Between a list and its details |
-| **RT** | / | Search (Games and Store) |
-| **View** | F1 | Help for this page |
-| **Menu** | F10 | Menu: Where's my...?, Bring it over, Review changes, Settings, Close |
+| Do | Controller | Keyboard | Mouse |
+|---|---|---|---|
+| Move | D-pad or left stick | Arrows or W A S D | Move the mouse |
+| Select | A | Enter or Space | Click |
+| Back | B | Esc or Backspace | Back side button |
+| Options | X | R | Right-click |
+| Find | Y | F, Ctrl+F or / | Click the search box |
+| Tabs | LB / RB | Q / E, or Page Up / Page Down | Click a tab |
+| Menu | View | Tab | Click Menu in the footer |
+| Main button | Start | Ctrl+Enter | Click the button |
+| Play | Hold Start | Hold Space | Click Play |
+| Jump | LT / RT | Home / End | Wheel |
+| Pointer | Right stick |  |  |
+| Click | R3 |  | Click |
+| Pointer options | Hold R3 |  | Right-click |
+| Scroll | Sweep the left stick round |  | Wheel |
+| Help | X, then Help | F1 | Right-click, then Help |
+| Size |  | Ctrl+= / Ctrl+- | Ctrl and the wheel |
 
-With a mouse, the Back button is **B** and a right-click is **X**. Home and End jump to the top and the bottom of a
-list, and Ctrl with = or - (or with the mouse wheel) changes the interface size.
+**Options** is a menu for whatever the highlight is on: what **A** does there first, then everything else that thing
+and the page can do, each with its own button where it has one. **Find** jumps to the search box of Games, the
+Store and Where's my...?; in Game Mode Steam's keyboard opens for it.
 
-The bar at the bottom always shows what each button does on the screen you're on.
+The right stick moves a pointer that Turbine Hub draws itself, so it works in Game Mode too. It hides after a few
+seconds and as soon as the D-pad is used.
+
+The bar at the bottom always shows what each button does on the screen you're on, and Help (in every Options menu,
+F1 on a keyboard) lists all of them.
 
 ## 🛡️ Safe by design
 

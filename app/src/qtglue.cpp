@@ -140,6 +140,43 @@ extern "C" int turbinehub_test_spoken(int what)
     return what == 1 ? heard.nameless : what == 2 ? heard.focused : what == 3 ? heard.texts : heard.controls;
 }
 
+// The controller pointer (pointer.rs, Main.qml): mouse and wheel events made from the right stick and R3, delivered
+// straight into the window the way a real mouse's are, so every tap handler, hover and list reacts to them and the
+// clicks pass the same gate as a finger's. The system cursor isn't moved: gamescope (Game Mode) doesn't let an app
+// move it, and there is none to see there. kind: 0 move, 1 press, 2 release, 3 wheel. button and buttons use Qt's
+// values (1 left, 2 right). wheel: steps, positive scrolls down. Returns 1 when sent, -1 when the window isn't there.
+extern "C" int turbinehub_pointer_event(int kind, double x, double y, int button, int buttons, int wheel)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    const QPointF local(x, y);
+    const QPointF global = win->mapToGlobal(local);
+    const Qt::MouseButtons held = Qt::MouseButtons::fromInt(buttons);
+    if (kind == 3) {
+        QWheelEvent ev(local, global, QPoint(), QPoint(0, -120 * wheel), held, Qt::NoModifier, Qt::NoScrollPhase, false);
+        ev.setTimestamp(stamp());
+        QCoreApplication::sendEvent(win, &ev);
+        return 1;
+    }
+    const QEvent::Type type = kind == 1 ? QEvent::MouseButtonPress : kind == 2 ? QEvent::MouseButtonRelease : QEvent::MouseMove;
+    QMouseEvent ev(type, local, global, kind == 0 ? Qt::NoButton : static_cast<Qt::MouseButton>(button), held, Qt::NoModifier);
+    ev.setTimestamp(stamp());
+    QCoreApplication::sendEvent(win, &ev);
+    return 1;
+}
+
+// The window's size, for the pointer's speed and edges. Returns 1 when the window is there.
+extern "C" int turbinehub_window_size(double *w, double *h)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    *w = win->width();
+    *h = win->height();
+    return 1;
+}
+
 // key: Qt's key code. mods: Qt's keyboard modifiers. repeat: the keyboard repeating a key that is held down.
 // Returns 1 when sent, -1 when the window isn't there.
 extern "C" int turbinehub_test_key(int key, int mods, int pressed, int repeat)
@@ -147,7 +184,10 @@ extern "C" int turbinehub_test_key(int key, int mods, int pressed, int repeat)
     QWindow *win = mainWindow();
     if (!win)
         return -1;
-    QKeyEvent ev(pressed ? QEvent::KeyPress : QEvent::KeyRelease, key, Qt::KeyboardModifiers::fromInt(mods), QString(), repeat != 0);
+    // A key that types something carries what it types, as a real keyboard's does (a letter, a digit, a sign).
+    const bool types = key >= 0x20 && key < 0x7f && (mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0;
+    const QString text = types ? QString(QChar(key)).toLower() : QString();
+    QKeyEvent ev(pressed ? QEvent::KeyPress : QEvent::KeyRelease, key, Qt::KeyboardModifiers::fromInt(mods), text, repeat != 0);
     QCoreApplication::sendEvent(win, &ev);
     return 1;
 }

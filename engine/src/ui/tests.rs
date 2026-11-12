@@ -498,7 +498,11 @@ fn store_shows_each_apps_state_and_tiles_bring_their_browser() {
     let heroic = rows(&page).into_iter().find(|r| r.str_at("title") == Some("Heroic Games Launcher")).unwrap();
     // A row shows the app's state and opens the app's own page.
     assert_eq!((heroic.str_at("badge"), heroic.str_at("act"), heroic.str_at("arg")), (Some("Update ready"), Some("open"), Some("store-item|com.heroicgameslauncher.hgl")));
-    assert!(page.get("hints").unwrap().as_array().iter().any(|h| h.str_at("label") == Some("Update all")));
+    // Update all is the page's own action: in its Options menu, and a button on the page.
+    assert!(page.get("options").unwrap().as_array().iter().any(|o| o.str_at("title") == Some("Update all") && o.get("button").and_then(Json::as_bool) == Some(true)));
+    // X on the row offers what its page does, without going in first.
+    let offered: Vec<&str> = heroic.get("offers").unwrap().as_array().iter().filter_map(|o| o.str_at("title")).collect();
+    assert!(offered.contains(&"Update") && offered.iter().any(|t| t.contains("Remove")), "{offered:?}");
     let j = parse(&u.act("store", "com.spotify.Client", "")).unwrap();
     assert_eq!(j.get("dialog").unwrap().str_at("confirm"), Some("Install"));
     assert_eq!(u.confirm().unwrap().steps, vec![Step::Host(["flatpak-spawn", "--host", "flatpak", "install", "-y", "--noninteractive", "flathub", "com.spotify.Client"].iter().map(|x| x.to_string()).collect())]);
@@ -732,12 +736,133 @@ fn help_is_about_the_page_it_was_asked_on() {
     assert_eq!(games.str_at("title"), Some("Games"));
     assert_eq!(saves.str_at("title"), Some("Saves of Baldur's Gate 3"));
     assert_ne!(games.str_at("intro"), saves.str_at("intro"));
-    // The page's own buttons are explained, and Where's my...? is one press away.
-    let text = games.to_text();
-    assert!(text.contains("Play.") && text.contains("Library check.") && text.contains("Search."));
+    // The page's own actions are named, and Where's my...? is one press away.
+    let own = rows(&games).into_iter().find(|r| r.str_at("title") == Some("Options on this page")).unwrap();
+    let line = own.str_at("line").unwrap();
+    assert!(line.contains("Play") && line.contains("Library check") && line.contains("Find"), "{line}");
     assert!(rows(&games).iter().any(|r| r.str_at("act") == Some("open") && r.str_at("arg") == Some("wheres")));
-    // At a desk the keys are named.
-    u.window = true;
-    assert!(rows(&parse(&u.page("help", "games@")).unwrap()).iter().any(|r| r.str_at("title") == Some("Enter")));
+    // Every control is shown for the controller, the keyboard and the mouse at once, whatever is in the hand.
+    let way = |j: &Json, name: &str| rows(j).into_iter().find(|r| r.str_at("title") == Some(name)).and_then(|r| r.str_at("value").map(String::from));
+    assert_eq!(way(&games, "Select").as_deref(), Some("A \u{b7} Enter or Space \u{b7} Click"));
+    assert_eq!(way(&games, "Options").as_deref(), Some("X \u{b7} R \u{b7} Right-click"));
+    assert_eq!(way(&games, "Find").as_deref(), Some("Y \u{b7} F, Ctrl+F or / \u{b7} Click the search box"));
+    assert_eq!(way(&games, "Play").as_deref(), Some("Hold Start \u{b7} Hold Space \u{b7} Click Play"));
+    assert_eq!(way(&games, "Click").as_deref(), Some("R3 \u{b7} Click"));
+    // A page without a list has no Find, and one without a game no Play.
+    assert_eq!(way(&saves, "Find"), None);
+    assert_eq!(way(&saves, "Play"), None);
+    // The first steps have no tabs and no menu yet.
+    let setup = parse(&u.page("help", "setup@machine")).unwrap();
+    assert_eq!(way(&setup, "Tabs"), None);
+    assert_eq!(way(&setup, "Menu"), None);
+    assert!(rows(&setup).iter().any(|r| r.str_at("title") == Some("Main button") && r.str_at("line") == Some("Here: Continue.")) || way(&setup, "Main button").is_some());
     done("pagehelp");
+}
+
+/// Every page of a made-up machine, each with the argument its picture uses.
+const WITH_ARGS: &[(&str, &str)] = &[
+    ("home", ""), ("games", ""), ("games", "steam:1086940"), ("library", ""), ("store", ""), ("store", "apps"), ("store-item", "com.heroicgameslauncher.hgl"), ("tool", ""), ("proton", "steam:1086940"), ("saves", "steam:1086940"),
+    ("machine", ""), ("module:lighting", ""), ("module:power", ""), ("module:tuneup", ""), ("module:battery", ""), ("settings", ""), ("settings", "look"), ("changes", ""), ("bring", ""), ("windrive", ""), ("winapps", ""),
+    ("wheres", ""), ("help", "games@"), ("pick", ""), ("setup", "machine"), ("setup", "password"), ("setup", "games"), ("setup", "picks"), ("quick", ""),
+];
+
+#[test]
+fn every_page_gets_its_options_and_its_hints_from_one_place() {
+    for mode in [Mode::Guided, Mode::Veteran] {
+        let mut u = ui("controls", HANDHELD, mode);
+        for (name, arg) in WITH_ARGS {
+            let j = parse(&u.page(name, arg)).unwrap();
+            let options = j.get("options").unwrap_or_else(|| panic!("{name} has no options")).as_array();
+            let hints: Vec<(&str, &str)> = j.get("hints").unwrap().as_array().iter().map(|h| (h.str_at("k").unwrap(), h.str_at("label").unwrap())).collect();
+            // No page names X, Y or a trigger for an action of its own any more.
+            assert!(j.get("x").is_none() && j.get("y").is_none(), "{name}");
+            // One button stands for one thing: X is Options, Y is Find, and no button shows twice.
+            for (i, (k, label)) in hints.iter().enumerate() {
+                assert!(!hints[..i].iter().any(|(o, _)| o == k), "{name}: {k} twice in the footer");
+                assert!(!label.is_empty(), "{name}: {k} has no words");
+                match *k {
+                    "x" => assert_eq!(*label, "Options", "{name}"),
+                    "y" => assert_eq!(*label, "Find", "{name}"),
+                    "view" => assert_eq!(*label, "Menu", "{name}"),
+                    "start" | "play" => {}
+                    other => panic!("{name}: the footer names {other}"),
+                }
+            }
+            // Help is in every Options menu (Where's my...? is the last page of help itself).
+            if *name != "wheres" {
+                assert!(hints.iter().any(|(k, _)| *k == "x"), "{name} has no Options");
+                let last = options.last().unwrap();
+                assert_eq!(last.str_at("act"), Some("open"), "{name}");
+                assert!(last.str_at("arg").is_some_and(|a| a.starts_with("help|") || a == "wheres"), "{name}");
+            }
+            // A page with a list has Find, in the footer and in Options; one without has neither.
+            let search = j.get("search").is_some_and(Json::truthy);
+            assert_eq!(hints.iter().any(|(k, _)| *k == "y"), search, "{name}");
+            assert_eq!(options.iter().any(|o| o.str_at("local") == Some("find")), search, "{name}");
+            // The main button is Start's, with the button's own words, and listed in Options with its key.
+            if let Some(p) = j.get("primary").filter(|p| p.str_at("act").is_some()) {
+                assert_eq!(p.str_at("k"), Some("start"), "{name}");
+                assert!(hints.contains(&("start", p.str_at("label").unwrap())), "{name}");
+                assert!(options.iter().any(|o| o.str_at("key") == Some("start") && o.str_at("title") == p.str_at("label")), "{name}");
+            }
+            // No two entries of a menu do the same thing, and every entry says something and does something.
+            for (i, o) in options.iter().enumerate() {
+                assert!(!o.str_at("title").unwrap_or("").is_empty(), "{name}");
+                assert!(o.str_at("local").is_some() || !o.str_at("act").unwrap_or("").is_empty(), "{name}: {o:?}");
+                assert!(!options[..i].iter().any(|x| x.str_at("act") == o.str_at("act") && x.str_at("arg") == o.str_at("arg") && x.str_at("local") == o.str_at("local")), "{name}: {o:?} twice");
+            }
+            // The first steps have no tabs to leave to, so no menu yet.
+            assert_eq!(hints.iter().any(|(k, _)| *k == "view"), !["pick", "setup", "quick"].contains(name), "{name}");
+        }
+        done("controls");
+    }
+}
+
+#[test]
+fn a_game_a_store_row_and_a_card_say_what_they_can_do() {
+    let mut u = ui("itemoptions", HANDHELD, Mode::Guided);
+    let titles = |v: &Json| -> Vec<String> { v.as_array().iter().filter_map(|o| o.str_at("title").map(String::from)).collect() };
+    // A game: Play first (the page's main action for it, held Start), then what its panel holds.
+    let games = parse(&u.page("games", "steam:1086940")).unwrap();
+    let entry = titles(games.get("entry").unwrap());
+    assert_eq!(entry.first().map(String::as_str), Some("Play"), "{entry:?}");
+    assert!(entry.len() >= 3, "{entry:?}");
+    let options = games.get("options").unwrap().as_array();
+    assert_eq!((options[0].str_at("title"), options[0].str_at("key")), (Some("Play"), Some("play")));
+    assert!(options.iter().any(|o| o.str_at("title") == Some("Library check") && o.get("button").and_then(Json::as_bool) == Some(true)));
+    let hints: Vec<&str> = games.get("hints").unwrap().as_array().iter().filter_map(|h| h.str_at("k")).collect();
+    assert_eq!(hints, vec!["play", "y", "x", "view"]);
+    // Every entry of a game's menu is a press the engine knows.
+    for o in games.get("entry").unwrap().as_array() {
+        let r = parse(&u.act(o.str_at("act").unwrap(), o.str_at("arg").unwrap(), "")).unwrap();
+        assert!(!r.entries().is_empty(), "{o:?} does nothing");
+    }
+    // A Store row: what its own page offers.
+    let store = parse(&u.page("store", "apps")).unwrap();
+    let row = rows(&store).into_iter().find(|r| r.str_at("arg").is_some_and(|a| a.starts_with("store-item|")) && r.str_at("badge") != Some("Installed")).unwrap();
+    let offered = titles(row.get("offers").unwrap());
+    assert!(offered.iter().any(|t| t.contains("Install")), "{offered:?}");
+    // A card of My machine: the switches and buttons of its page.
+    let machine = parse(&u.page("machine", "")).unwrap();
+    let cards = machine.get("cards").unwrap().as_array();
+    let power = cards.iter().find(|c| c.str_at("id") == Some("power")).unwrap();
+    assert!(titles(power.get("offers").unwrap()).iter().any(|t| t.starts_with("Game Boost: turn ")), "{:?}", power.get("offers"));
+    let lighting = cards.iter().find(|c| c.str_at("id") == Some("lighting")).unwrap();
+    assert!(!titles(lighting.get("offers").unwrap()).is_empty());
+    assert!(cards.iter().all(|c| c.get("offers").is_none_or(|o| o.as_array().len() <= 9)));
+    // A first-run step with a page inside offers that page's actions too.
+    let step = parse(&u.page("setup", "games")).unwrap();
+    let offered = titles(step.get("options").unwrap());
+    assert!(offered.contains(&"Next".to_string()), "{offered:?}");
+    done("itemoptions");
+}
+
+#[test]
+fn the_menu_leads_to_help_for_the_page_it_was_opened_on() {
+    let mut u = ui("menuhelp", HANDHELD, Mode::Guided);
+    let j = parse(&u.act("menu", "games@steam:1086940", "")).unwrap();
+    let rows = j.get("dialog").unwrap().get("rows").unwrap().as_array();
+    assert_eq!((rows[0].str_at("title"), rows[0].str_at("act"), rows[0].str_at("arg"), rows[0].str_at("key")), (Some("Help for this page"), Some("open"), Some("help|games@steam:1086940"), Some("f1")));
+    assert_eq!(rows.last().unwrap().str_at("title"), Some("Close Turbine Hub"));
+    done("menuhelp");
 }

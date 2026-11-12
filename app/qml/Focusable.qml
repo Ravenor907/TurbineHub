@@ -12,15 +12,20 @@ import QtQuick
 // highlight is on it now. The build's checks fail a picture in which one has no name (SelfCheck).
 //
 // app (required): Main.qml's window. fid: a name that survives a reload, so the highlight comes back to the same
-// thing. aLabel: what A does here, for the footer ("" when A does nothing). hints: more footer hints while the
-// highlight is here. firstFocus: where the highlight starts on a page.
+// thing. aLabel: what A does here, for the footer ("" when A does nothing). firstFocus: where the highlight starts
+// on a page. offers: what else it offers, for its Options menu (X, R, a right-click, R3 held: Main.qml's
+// openOptions lists its own press first, then these, then the page's). optionsTitle: its name at the top of that menu.
 Item {
     id: f
     required property var app
     property bool focusable: true
     property string fid: ""
     property string aLabel: "Select"
-    property var hints: []
+    property var offers: []
+    property string optionsTitle: ""
+    // Its own press as its Options menu says it, where the footer's short word would be unclear in a list ("Open"
+    // beside "Open Discord").
+    property string optionLabel: ""
     property bool firstFocus: false
     // Something above it that shows with it when a list scrolls to it (its section's heading).
     property Item revealFrom: null

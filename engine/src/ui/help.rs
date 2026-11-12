@@ -50,70 +50,43 @@ const ABOUT: &[(&str, &str)] = &[
     ("pick", "How Turbine Hub talks to you: Guided explains things, Veteran shows every control. Settings switches any time."),
 ];
 
-/// A button's name on a controller, or its key at a desk.
-fn key_name(k: &str, keyboard: bool) -> &'static str {
-    match (k, keyboard) {
-        ("a", false) => "A",
-        ("a", true) => "Enter",
-        ("b", false) => "B",
-        ("b", true) => "Esc",
-        ("x", _) => "X",
-        ("y", _) => "Y",
-        ("lt", false) => "LT",
-        ("lt", true) => "Tab",
-        ("rt", false) => "RT",
-        ("rt", true) => "/",
-        ("start", false) => "MENU",
-        ("start", true) => "F10",
-        ("view", false) => "VIEW",
-        ("view", true) => "F1",
-        (_, false) => "LB and RB",
-        (_, true) => "Q and E",
-    }
-}
-
 /// One page's help. `arg` is the page and its own argument, as "page@argument".
 pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
     let (name, page_arg) = arg.split_once('@').unwrap_or((arg, ""));
     let name = if name.is_empty() || name == "help" || name == "wheres" { "home" } else { name };
     let about = ABOUT.iter().find(|(p, _)| *p == name).map(|(_, w)| *w).unwrap_or(if name.starts_with("module:") { "One part of this machine: what it is set to now and what can change." } else { "One of Turbine Hub's pages." });
-    // The page's own buttons, as the page itself lists them.
+    // What the page itself offers, as its Options menu lists it.
     let shown = crate::json::parse(&ui.page(name, page_arg)).unwrap_or(Json::Null);
-    let keyboard = ui.keys.unwrap_or(ui.window);
-    let mut own: Vec<(String, String)> = Vec::new();
-    let mut add = |k: &str, label: &str| {
-        if !label.is_empty() && !own.iter().any(|(x, _)| x == k) {
-            own.push((k.to_string(), label.to_string()));
-        }
-    };
-    for list in ["buttons", "hints"] {
-        for h in shown.get(list).map(Json::as_array).unwrap_or(&[]) {
-            add(h.str_at("k").unwrap_or(""), h.str_at("label").unwrap_or(""));
-        }
+    let own: Vec<(String, String)> = shown.get("options").map(Json::as_array).unwrap_or(&[]).iter().filter(|o| o.str_at("key") != Some("f1")).map(|o| (o.str_at("title").unwrap_or("").to_string(), o.str_at("key").unwrap_or("").to_string())).filter(|(t, _)| !t.is_empty()).collect();
+    let has = |key: &str| own.iter().any(|(_, k)| k == key);
+    let first_run = super::controls::first_run(name);
+    let tabs = !first_run && ui.settings().mode.is_some();
+    let main = own.iter().find(|(_, k)| k == "start").map(|(t, _)| t.clone());
+    let mut here: Vec<Json> = Vec::new();
+    if !own.is_empty() {
+        let names: Vec<&str> = own.iter().map(|(t, _)| t.as_str()).collect();
+        here.push(row("none", "", "info", "Options on this page", &format!("{}. X, R or a right-click lists them, after what the highlighted thing itself can do.", names.join(", "))));
     }
-    if let Some(p) = shown.get("primary") {
-        add(p.str_at("k").unwrap_or(""), p.str_at("label").unwrap_or(""));
-    }
-    let two_sides = ["games", "store", "settings"].contains(&name);
-    let first_run = ["setup", "quick", "pick"].contains(&name);
-    let mut keys = vec![(key_name("a", keyboard).to_string(), "Picks what the highlight is on: opens it, turns it on or off, or presses its button.".to_string())];
-    keys.push((key_name("b", keyboard).to_string(), "Back to where you were.".into()));
-    if two_sides {
-        keys.push((key_name("lt", keyboard).to_string(), "Jumps between the list and what the picked entry holds.".into()));
-    }
-    for (k, label) in &own {
-        if ["a", "b"].contains(&k.as_str()) {
-            continue;
-        }
-        keys.push((key_name(k, keyboard).to_string(), format!("{label}.")));
-    }
-    if !first_run {
-        keys.push((key_name("lb", keyboard).to_string(), "The tabs: Home, Games, Store, My machine, Settings.".into()));
-    }
-    keys.push((key_name("view", keyboard).to_string(), "This help. Press it again for Where's my...?".into()));
-    if !own.iter().any(|(k, _)| k == "start") && !first_run {
-        keys.push((key_name("start", keyboard).to_string(), "The menu: Where's my...?, Bring it over, Review changes, Settings, Close.".into()));
-    }
+    // The scheme, the same on every page; a line the page has no use for is left out.
+    let keys: Vec<Json> = super::controls::SCHEME
+        .iter()
+        .filter(|c| match c.name {
+            "Find" => has("y"),
+            "Play" => has("play"),
+            "Tabs" | "Menu" => tabs,
+            _ => true,
+        })
+        .map(|c| {
+            let ways: Vec<&str> = [c.pad, c.keys, c.mouse].into_iter().filter(|w| !w.is_empty()).collect();
+            let does = match (c.name, &main) {
+                ("Main button", Some(label)) => format!("Here: {label}."),
+                ("Main button", None) if first_run => "Presses the page's main button, when it has one.".to_string(),
+                ("Main button", None) => "This page has no main button, so it opens Settings.".to_string(),
+                _ => c.does.to_string(),
+            };
+            with(row("none", "", "info", c.name, &does), "value", s(ways.join(" \u{b7} ")))
+        })
+        .collect();
     let tab = match name {
         "home" => Some("Home"),
         "games" => Some("Games"),
@@ -126,15 +99,15 @@ pub(crate) fn page_help(ui: &mut Ui, arg: &str) -> Json {
     };
     let page_title = tab.map(String::from).or_else(|| shown.str_at("title").filter(|t| !t.is_empty()).map(String::from)).unwrap_or_else(|| "This page".into());
     let wheres = with(with(row("open", "wheres", "button", "Where's my...?", "Windows things and where they are on SteamOS, and the words Turbine Hub uses"), "icon", s("help")), "button", s("Open"));
+    here.insert(0, wheres);
     obj! {
         "crumb": s("Help"),
         "title": s(page_title),
         "intro": s(about),
         "sections": arr([
-            section("", vec![wheres]),
-            with(section("Buttons", keys.iter().map(|(k, w)| row("none", "", "info", k, w)).collect()), "columns", super::n(2.0)),
+            section("", here),
+            section("Controls: controller \u{b7} keyboard \u{b7} mouse", keys),
         ]),
-        "hints": arr([]),
     }
 }
 
@@ -161,7 +134,6 @@ pub(crate) fn page(_ui: &mut Ui, arg: &str) -> Json {
         "title": s("Where's my...?"),
         "intro": s("Windows things and where they are on SteamOS, and the words Turbine Hub uses. Search finds both."),
         "sections": arr(sections),
-        "hints": arr([]),
         "search": b(true),
     }
 }

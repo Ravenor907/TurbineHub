@@ -171,13 +171,13 @@ pub const SHOTS: &[(&str, &str)] = &[
     // Animations at Full and Reduced (pictures are otherwise taken with them off): the page is worked with presses
     // while everything moves, then must come to rest on the very picture the same presses give with animations off.
     ("motion-home", "--page=home --keys=down,down --machine=handheld --mode=guided --motion=full"),
-    ("motion-settings", "--page=settings --keys=lt,down,down,down,a --machine=handheld --mode=guided --motion=full --installed=com.github.mtkennerly.ludusavi"),
-    ("motion-games", "--page=games --keys=down,down,down,lt,down,down --machine=handheld --mode=guided --motion=full"),
+    ("motion-settings", "--page=settings --keys=right,down,down,down,a --machine=handheld --mode=guided --motion=full --installed=com.github.mtkennerly.ludusavi"),
+    ("motion-games", "--page=games --keys=down,down,down,right,down,rt --machine=handheld --mode=guided --motion=full"),
     ("motion-machine", "--page=machine --keys=down,down,right --machine=handheld --mode=guided --motion=full"),
     ("motion-dialog", "--page=machine --act=tuneup:all --keys=up,down --machine=handheld --mode=guided --motion=full"),
     ("motion-menu", "--page=home --act=menu: --keys=down,down --machine=handheld --mode=guided --motion=full"),
     ("motion-library", "--page=library --keys=down,down,down,down,down,down --machine=handheld --mode=guided --motion=full"),
-    ("motion-reduced-settings", "--page=settings --keys=lt,down,down,down,a --machine=handheld --mode=guided --motion=reduced --installed=com.github.mtkennerly.ludusavi"),
+    ("motion-reduced-settings", "--page=settings --keys=right,down,down,down,a --machine=handheld --mode=guided --motion=reduced --installed=com.github.mtkennerly.ludusavi"),
     ("motion-reduced-dialog", "--page=machine --act=tuneup:all --keys=up,down --machine=handheld --mode=guided --motion=reduced"),
     // The page worked with real keys, a real mouse and a finger before its picture (app/qml/SelfCheck.qml).
     ("check-taps", "--page=settings --check=taps --machine=handheld --mode=guided"),
@@ -186,6 +186,24 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("check-hover", "--page=settings --check=hover --machine=handheld --mode=guided"),
     ("check-mouse", "--page=settings --check=mouse --machine=handheld --mode=guided"),
     ("check-typing", "--page=games --check=typing --gamemode --machine=handheld --mode=guided"),
+    ("check-pointer", "--page=settings --check=pointer --focus=snapshots --machine=handheld --mode=guided --installed=com.github.mtkennerly.ludusavi"),
+    ("check-drag", "--page=module:lighting --check=drag --machine=handheld --mode=guided"),
+    ("check-options", "--page=games --arg=steam:1086940 --check=options --machine=desktop --mode=guided"),
+    // Options (X, R, a right-click, R3 held): a menu for one thing, with its own press first.
+    ("options-game", "--page=games --arg=steam:1086940 --keys=x --machine=handheld --mode=guided"),
+    ("options-store-item", "--page=store --arg=apps --keys=right,x --machine=handheld --mode=guided"),
+    ("options-machine-card", "--page=machine --keys=x --machine=handheld --mode=guided"),
+    ("options-page", "--page=windrive --keys=x --machine=handheld --mode=guided"),
+    ("options-keys", "--page=games --arg=steam:1086940 --keys=x --machine=desktop --mode=veteran --window"),
+    ("options-size-150", "--page=machine --keys=x --machine=handheld --mode=guided --scale=150"),
+    // The controller's pointer (the right stick) over a page and over a dialog; Find open; Help's controls.
+    ("pointer", "--page=machine --pointer=0.36,0.47 --machine=handheld --mode=guided"),
+    ("pointer-dialog", "--page=machine --act=tuneup:all --pointer=0.62,0.66 --machine=handheld --mode=guided"),
+    ("find-games", "--page=games --keys=y --gamemode --machine=handheld --mode=guided"),
+    ("find-store", "--page=store --keys=y --machine=desktop --mode=guided"),
+    ("help-controls", "--page=help --arg=games@steam:1086940 --machine=handheld --mode=guided"),
+    ("help-controls-quick", "--page=help --arg=quick@ --machine=desktop --mode=veteran"),
+    ("motion-options", "--page=machine --keys=down,x,down --machine=handheld --mode=guided --motion=full"),
 ];
 
 fn w(base: &Path, rel: &str, text: &str) {

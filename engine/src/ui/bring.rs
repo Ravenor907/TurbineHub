@@ -2,7 +2,7 @@
 //! games here, and the Windows apps with what each becomes on SteamOS. The Windows drive is only ever read.
 use super::plan::{Plan, Step, dialog, refresh, toast};
 use super::store::{self, CHROME, HEROIC};
-use super::{Ui, arr, b, hint, n, obj, row, s, section, size_words, with};
+use super::{Ui, arr, b, n, obj, row, s, section, size_words, with};
 use crate::bring::{self, Becomes, WinGame};
 use crate::hardware::DriveRole;
 use crate::json::Json;
@@ -61,7 +61,6 @@ pub(crate) fn hub(ui: &mut Ui) -> Json {
             card("tv", "tv", "TV and streaming", "Netflix, YouTube, Disney+, Twitch and Plex as controller-ready tiles.", "Not done yet", ui.brought("tv"), ("Pick services", "open", "store|tv")),
             card("wheres", "help", "Where's my...?", "Task Manager, the C: drive, installing programs: where they are on SteamOS.", "Always in Help", false, ("Open", "open", "wheres")),
         ]),
-        "hints": arr([]),
     }
 }
 
@@ -133,7 +132,7 @@ fn saves_rows(ui: &Ui) -> Vec<Json> {
 /// Your Windows drive: the Steam games on it, ticked to copy.
 pub(crate) fn drive(ui: &mut Ui) -> Json {
     let Some(mount) = ui.windows_drive() else {
-        return obj! {"crumb": s("Bring it over"), "title": s("Your Windows drive"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("No Windows drive is open. Go back and pick Read the drive."))]), "hints": arr([])};
+        return obj! {"crumb": s("Bring it over"), "title": s("Your Windows drive"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("No Windows drive is open. Go back and pick Read the drive."))])};
     };
     let dg = drive_games(ui, &mount);
     let free = ui.free_bytes;
@@ -169,9 +168,8 @@ pub(crate) fn drive(ui: &mut Ui) -> Json {
             section("Saves", saves_rows(ui)),
         ]),
         "note": s(room),
-        "primary": if count > 0 { obj! {"label": s(if count == 1 { "Copy 1 game".to_string() } else { format!("Copy {count} games") }), "k": s("start"), "act": s("copy"), "arg": s("")} } else { Json::Null },
-        "hints": arr([hint("x", "Tick all")]),
-        "x": obj! {"act": s("tick-all"), "arg": s("windrive")},
+        "primary": if count > 0 { obj! {"label": s(if count == 1 { "Copy 1 game".to_string() } else { format!("Copy {count} games") }), "act": s("copy"), "arg": s("")} } else { Json::Null },
+        "options": arr([super::controls::page_button("Tick all", "tick-all", "windrive")]),
     }
 }
 
@@ -226,8 +224,7 @@ pub(crate) fn apps(ui: &mut Ui) -> Json {
         "title": s("Your Windows apps"),
         "intro": s("Pick the apps you use on Windows. Turbine Hub installs the SteamOS version."),
         "sections": arr([with(section("", rows), "columns", n(2.0))]),
-        "primary": if count > 0 { obj! {"label": s(if count == 1 { "Install 1 app".to_string() } else { format!("Install {count} apps") }), "k": s("start"), "act": s("install-apps"), "arg": s("")} } else { Json::Null },
-        "hints": arr([]),
+        "primary": if count > 0 { obj! {"label": s(if count == 1 { "Install 1 app".to_string() } else { format!("Install {count} apps") }), "act": s("install-apps"), "arg": s("")} } else { Json::Null },
     }
 }
 

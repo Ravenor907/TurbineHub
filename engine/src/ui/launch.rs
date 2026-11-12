@@ -97,7 +97,7 @@ pub(crate) fn proton_line(ui: &Ui, tv: &ToolView, g: &Game) -> String {
 }
 
 fn not_found() -> Json {
-    obj! {"crumb": s("Games"), "title": s("Not found"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("That game isn't installed any more."))]), "hints": arr([])}
+    obj! {"crumb": s("Games"), "title": s("Not found"), "intro": s(""), "sections": arr([with(section("", vec![]), "empty", s("That game isn't installed any more."))])}
 }
 
 /// Turbine Hub in Steam: the launch tool's state, how to turn it on for a game, the games that use it, and Remove.
@@ -107,7 +107,7 @@ pub(crate) fn tool_page(ui: &mut Ui) -> Json {
     keep_files(ui, &tv, &all);
     let intro = "The launch tool carries each game's switches and Proton pick into the game. It lives in a folder Steam only reads. Steam's own files stay as they are.";
     if tv.steam_root.is_none() {
-        return obj! {"crumb": s("Games"), "title": s("Turbine Hub in Steam"), "intro": s(intro), "sections": arr([with(section("", vec![]), "empty", s("Steam wasn't found on this machine. Start Steam once and sign in."))]), "hints": arr([])};
+        return obj! {"crumb": s("Games"), "title": s("Turbine Hub in Steam"), "intro": s(intro), "sections": arr([with(section("", vec![]), "empty", s("Steam wasn't found on this machine. Start Steam once and sign in."))])};
     }
     let state_row = match tv.state {
         State::Missing => with(with(row("tool", "install", "button", "Not set up yet", "One press. Nothing in Steam changes until you pick it for a game."), "icon", s("bolt")), "button", s("Set up")),
@@ -135,14 +135,14 @@ pub(crate) fn tool_page(ui: &mut Ui) -> Json {
     if tv.state != State::Missing {
         sections.push(section("Remove", vec![with(with(row("tool", "remove", "button", "Remove the launch tool", "Games that use it need another tool picked in Steam first"), "icon", s("remove")), "button", s("Remove"))]));
     }
-    obj! {"crumb": s("Games"), "title": s("Turbine Hub in Steam"), "intro": s(intro), "sections": arr(sections), "hints": arr([])}
+    obj! {"crumb": s("Games"), "title": s("Turbine Hub in Steam"), "intro": s(intro), "sections": arr(sections)}
 }
 
 /// One game's Proton: what it starts with now, every Proton installed, and Undo. `arg` is the game.
 pub(crate) fn proton_page(ui: &mut Ui, arg: &str) -> Json {
     let Some(l) = games::find(ui, arg) else { return not_found() };
     let title = format!("Proton for {}", l.game.name);
-    let plain = |intro: &str, rows: Vec<Json>| obj! {"crumb": s("Games"), "title": s(&title), "intro": s(intro), "sections": arr([section("", rows)]), "hints": arr([])};
+    let plain = |intro: &str, rows: Vec<Json>| obj! {"crumb": s("Games"), "title": s(&title), "intro": s(intro), "sections": arr([section("", rows)])};
     if l.locked() {
         return plain("", vec![with(row("none", "", "info", "Plays as it is", "Its anti-cheat runs online, so Turbine Hub never changes how this game starts, Proton included."), "icon", s("shield"))]);
     }
@@ -194,7 +194,6 @@ pub(crate) fn proton_page(ui: &mut Ui, arg: &str) -> Json {
         "title": s(title),
         "intro": s("Another Proton often fixes a game that won't start. The pick is Turbine Hub's own: Steam's settings stay as they are."),
         "sections": arr([section("", first), section("Installed", rows), section("", vec![more])]),
-        "hints": arr([]),
     }
 }
 

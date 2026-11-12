@@ -2,6 +2,7 @@ mod agent;
 mod backend;
 mod log;
 mod pad;
+mod pointer;
 mod run;
 mod single;
 

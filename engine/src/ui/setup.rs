@@ -2,7 +2,7 @@
 use super::home::step_title;
 use super::plan::{Ask, Plan, Step, dialog, helper_plan, toast};
 use super::store::{self, HEROIC, LUDUSAVI};
-use super::{Ui, arr, b, hint, kind_word, n, obj, row, s, section, with};
+use super::{Ui, arr, b, kind_word, n, obj, row, s, section, with};
 use crate::helper::{self, Setting};
 use crate::json::{self, Json};
 use crate::modules;
@@ -161,9 +161,9 @@ pub(crate) fn quick(ui: &mut Ui) -> Json {
     let (all, picked) = chosen(ui, false);
     let (sections, count) = pick_sections(&all, &picked);
     let has_file = super::settings::setup_file(ui).is_file();
-    let mut hints = vec![hint("x", "Tick all")];
+    let mut options = vec![super::controls::page_button("Tick all", "tick-all", "quick")];
     if has_file {
-        hints.push(hint("y", "Load setup"));
+        options.push(super::controls::page_button("Load setup", "setup-load", ""));
     }
     obj! {
         "crumb": s("Veteran mode"),
@@ -172,10 +172,8 @@ pub(crate) fn quick(ui: &mut Ui) -> Json {
         "flow": s("columns"),
         "sections": arr(sections),
         "note": s(format!("Turbine Hub backs up every setting first. {}.", changes_words(count))),
-        "primary": obj! {"label": s(if count == 0 { "Finish".to_string() } else { format!("Apply {}", changes_words(count)) }), "k": s("start"), "act": s("quick-apply"), "arg": s("")},
-        "hints": arr(hints),
-        "x": obj! {"act": s("tick-all"), "arg": s("quick")},
-        "y": if has_file { obj! {"act": s("setup-load"), "arg": s("")} } else { Json::Null },
+        "primary": obj! {"label": s(if count == 0 { "Finish".to_string() } else { format!("Apply {}", changes_words(count)) }), "act": s("quick-apply"), "arg": s("")},
+        "options": arr(options),
     }
 }
 
@@ -200,7 +198,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             "SteamOS asks for a password before changing system settings, like the admin password on Windows. Turbine Hub asks for it once, uses it only for changes you approve, and never stores it.".into(),
             "",
             Vec::new(),
-            vec![button("Set password", "a", "password", "", true), button("I already have one", "x", "setup-next", step, false), button("Skip for now", "y", "setup-next", step, false)],
+            vec![button("Set password", "a", "password", "", true), button("I already have one", "", "setup-next", step, false), button("Skip for now", "", "setup-next", step, false)],
             "Write it down somewhere safe. SteamOS can't recover it.".into(),
         ),
         "games" => ("", String::new(), "library", Vec::new(), vec![button("Next", "start", "setup-next", step, true)], String::new()),
@@ -223,7 +221,6 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "flow": s("columns"),
         "sections": arr(sections),
         "buttons": arr(buttons),
-        "hints": arr([]),
         "index": n(index as f64),
     }
 }

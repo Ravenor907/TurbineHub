@@ -278,7 +278,7 @@ impl<R: Run> Sys<R> {
         if changed.iter().any(|f| f.starts_with("/etc/udev/")) {
             self.run.run(UDEVADM, &["control", "--reload"])?;
             for sub in ["usb", "leds", "hidraw", "misc"] {
-                let _ = self.run.run(UDEVADM, &["trigger", "--action=add", &format!("--subsystem-match={sub}")]);
+                let _ = self.run.run(UDEVADM, &["trigger", "--settle", "--action=add", &format!("--subsystem-match={sub}")]);
             }
         }
         Ok(changed)
@@ -308,6 +308,9 @@ impl<R: Run> Sys<R> {
             return Err(e);
         }
         self.save(&l)?;
+        if matches!(s, Setting::Access { what: policy::Access::Lighting }) {
+            self.open_lights();
+        }
         Ok(id)
     }
 
@@ -370,8 +373,9 @@ impl<R: Run> Sys<R> {
                 }
             }
         }
-        // udev may have met the lighting interfaces before the helper's folder was there at start.
-        self.hid_access_all();
+        // udev may have met the lights before the helper's folder was there at start, or the controller service may
+        // have closed them again: open them now.
+        self.open_lights();
         if errors.is_empty() { Ok(fixed) } else { Err(errors.join("; ")) }
     }
 
@@ -404,6 +408,35 @@ impl<R: Run> Sys<R> {
     }
 
     /// `hid_access` for every hidraw interface there is now.
+    /// Opens every RGB light's color and brightness files for writing by everyone, right now, when the player asked
+    /// for the lighting access rule. The udev rule does the same as lights appear, but udev can be slow, and on some
+    /// handhelds the controller service puts the files back as they were after a boot or a sleep; this runs when the
+    /// rule is set, at every boot and after every wake. Only lights (folders under /sys/class/leds with a
+    /// multi_intensity file) and only those two files; links pointing out of /sys are refused.
+    pub fn open_lights(&self) {
+        if !matches!(self.ledger().map(|l| l.find_key(&Setting::Access { what: policy::Access::Lighting }.key()).is_some()), Ok(true)) {
+            return;
+        }
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(sys) = fs::canonicalize(self.p("/sys")) else { return };
+        for e in fs::read_dir(self.p("/sys/class/leds")).into_iter().flatten().flatten() {
+            let dir = e.path();
+            if !dir.join("multi_intensity").exists() {
+                continue;
+            }
+            for f in ["multi_intensity", "brightness"] {
+                let Ok(real) = fs::canonicalize(dir.join(f)) else { continue };
+                if !real.starts_with(&sys) || !real.is_file() {
+                    continue;
+                }
+                if let Ok(m) = fs::metadata(&real) {
+                    let _ = fs::set_permissions(&real, fs::Permissions::from_mode((m.permissions().mode() & 0o777) | 0o666));
+                }
+            }
+        }
+        self.hid_access_all();
+    }
+
     fn hid_access_all(&self) {
         for e in fs::read_dir(self.p("/sys/class/hidraw")).into_iter().flatten().flatten() {
             let _ = self.hid_access(&e.file_name().to_string_lossy());
@@ -624,9 +657,9 @@ pub fn polkit_rule(user: &str) -> String {
 
 pub const REAPPLY_UNIT_TEXT: &str = "[Unit]\n\
 Description=Turbine Hub: put recorded settings back after boot\n\
-After=local-fs.target systemd-udev-settle.service\n\n\
+After=local-fs.target systemd-udev-settle.service suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target\n\n\
 [Service]\nType=oneshot\nExecStart=/var/lib/turbinehub/bin/turbinehub-helper reapply\n\n\
-[Install]\nWantedBy=multi-user.target\n";
+[Install]\nWantedBy=multi-user.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target\n";
 
 /// The same unit Decky's own installer writes.
 pub fn decky_unit(home: &str) -> String {

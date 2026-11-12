@@ -221,6 +221,7 @@ Window {
         model = JSON.parse(Hub.page(current.page, pageArg))
         settle(false)
         Qt.callLater(restoreFocus)
+        clampLater.restart()
     }
     function setArg(arg) { pageArg = arg; reloadPage() }
     // The page on screen keeps what it shows (the game, the section) for when Back comes to it again.
@@ -374,7 +375,22 @@ Window {
             for (const k of q) press(k)
         }
     }
-    Timer { id: revealAgain; interval: 1; onTriggered: if (app.focusItem) app.reveal(app.focusItem) }
+    Timer { id: revealAgain; interval: 1; onTriggered: { app.clampScrolls(app.scopeRoot); if (app.focusItem) app.reveal(app.focusItem); clampLater.restart() } }
+    // A page that got shorter (a card gone after a fix, a dialog closed) can't stay scrolled past its end: that hid
+    // its top under the tabs and left the bottom of the screen empty. Every list is brought back inside its length.
+    function clampScrolls(it) {
+        if (!it) return
+        if (it.contentY !== undefined && it.contentItem !== undefined && it.contentHeight !== undefined) {
+            const top = it.originY || 0
+            const max = top + Math.max(0, it.contentHeight - it.height)
+            if (it.contentY > max) it.contentY = max
+            else if (it.contentY < top) it.contentY = top
+        }
+        const kids = it.children
+        for (let i = 0; i < kids.length; i++) clampScrolls(kids[i])
+    }
+    // Layouts finish placing rows a little after a reload; check once more then.
+    Timer { id: clampLater; interval: 120; onTriggered: app.clampScrolls(app.scopeRoot) }
     // Scrolls every list around the item so all of it shows, clear of the fades at the edges. An item can ask for
     // more above it to show with it (`revealFrom`: the heading of its section).
     function reveal(item) {

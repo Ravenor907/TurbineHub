@@ -205,6 +205,7 @@ fn make_ui() -> Ui {
     let mut st = ui.settings();
     if let Some(v) = option("scale").and_then(|v| v.parse::<u32>().ok()) {
         st.ui_scale = v.clamp(50, 150);
+        st.scale_chosen = true;
     }
     if let Some(t) = option("theme").filter(|t| turbinehub_engine::settings::THEMES.contains(&t.as_str())) {
         st.theme = t;

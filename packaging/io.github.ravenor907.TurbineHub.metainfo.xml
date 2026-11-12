@@ -20,6 +20,7 @@
   <url type="homepage">https://github.com/Ravenor907/TurbineHub</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.1" date="2026-11-12" type="development"/>
     <release version="0.2" date="2026-11-12" type="development"/>
     <release version="0.1" date="2026-11-11" type="development"/>
   </releases>

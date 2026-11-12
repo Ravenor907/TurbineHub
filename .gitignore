@@ -20,3 +20,4 @@
 /TurbineHub-Decky.zip*
 /build.log
 /app/.qmlls.ini
+__pycache__/

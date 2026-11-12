@@ -285,12 +285,31 @@ fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
         fs::set_permissions(sys.p(&format!("/dev/{n}")), fs::Permissions::from_mode(0o600)).unwrap();
     }
     let mode = |sys: &Sys<Fake>, n: &str| fs::metadata(sys.p(&format!("/dev/{n}"))).unwrap().permissions().mode() & 0o777;
+    // The rings' own files, closed as the kernel leaves them, and a light whose file leads out of /sys.
+    for (led, f) in [("ally:rgb:joystick_rings", "multi_intensity"), ("ally:rgb:joystick_rings", "brightness")] {
+        let path = sys.p(&format!("/sys/class/leds/{led}/{f}"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "0\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    fs::create_dir_all(sys.p("/sys/class/leds/evil")).unwrap();
+    std::os::unix::fs::symlink("../../../../secret", sys.p("/sys/class/leds/evil/multi_intensity")).unwrap();
+    let led_mode = |sys: &Sys<Fake>, f: &str| fs::metadata(sys.p(&format!("/sys/class/leds/ally:rgb:joystick_rings/{f}"))).unwrap().permissions().mode() & 0o777;
     // Not before the player asked for the lighting rule.
     assert_eq!(sys.hid_access("hidraw0"), Ok(false));
     assert_eq!(mode(&sys, "hidraw0"), 0o600);
+    sys.open_lights();
+    assert_eq!(led_mode(&sys, "multi_intensity"), 0o644);
     sys.apply(set(r#"{"kind":"access","what":"lighting"}"#)).unwrap();
     assert!(read(&sys, policy::ACCESS_FILE).contains("hid-access %k"));
-    assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --action=add --subsystem-match=hidraw"));
+    assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --settle --action=add --subsystem-match=hidraw"));
+    // Open at once, without waiting for udev; nothing outside /sys changes.
+    assert_eq!([led_mode(&sys, "multi_intensity"), led_mode(&sys, "brightness")], [0o666, 0o666]);
+    assert_eq!(fs::metadata(sys.p("/secret")).unwrap().permissions().mode() & 0o777 & 0o002, 0);
+    // Closed again (a sleep, the controller service): the boot and wake run opens them again.
+    fs::set_permissions(sys.p("/sys/class/leds/ally:rgb:joystick_rings/multi_intensity"), fs::Permissions::from_mode(0o644)).unwrap();
+    let _ = sys.reapply();
+    assert_eq!(led_mode(&sys, "multi_intensity"), 0o666);
     assert_eq!(sys.hid_access("hidraw0"), Ok(true));
     assert_eq!(sys.hid_access("hidraw1"), Ok(true));
     assert_eq!(sys.hid_access("hidraw2"), Ok(false));

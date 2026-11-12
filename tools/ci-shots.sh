@@ -25,7 +25,7 @@ shard=0
 shards=1
 case "$out" in
   ''|*[!0-9]*) ;;
-  *) shard=$out; shards=${3:-1}; out=shots ;;
+  *) shard=$out; shards=${3:-1}; out=${SHOTS_OUT:-shots} ;;
 esac
 case "$part" in
   1280x800|1920x1080|1600x900) sizes=$part ;;
@@ -47,7 +47,9 @@ app() {   # app <seconds> <arguments>
   timeout "$t" $bus flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
     --filesystem="$out" "$APP" "$@" < /dev/null
 }
+# Shards of one run share the folder (tools/shots-fast.sh starts them side by side), so each keeps its own list.
 list="$out/shots.list"
+[ "$shards" -gt 1 ] && list="$out/shots.$part.$shard.list"
 if ! app 60 --shots > "$list" 2> "$out/shots.list.log" || ! [ -s "$list" ]; then
   echo "::error title=No picture list::turbinehub --shots gave nothing"
   cat "$out/shots.list.log"

@@ -34,9 +34,6 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            layer.enabled: page.app.softwareDraw
-            // A layer has no see-through parts under software drawing, so the list paints what it sits on first.
-            Rectangle { parent: flick; anchors.fill: parent; z: -1; visible: page.app.softwareDraw; color: page.app.colors.ground }
             contentHeight: grid.implicitHeight + page.app.px(12)
             boundsBehavior: Flickable.StopAtBounds
             Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }

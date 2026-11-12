@@ -10,8 +10,10 @@ Item {
     required property var app
     required property Flickable view
     property color color: app.colors.ground
+    // False when something pinned marks the top already.
+    property bool topEdge: true
     readonly property bool longer: view.visible && view.contentHeight > view.height + 1
-    readonly property bool above: longer && !view.atYBeginning
+    readonly property bool above: topEdge && longer && !view.atYBeginning
     readonly property bool below: longer && !view.atYEnd
     Component.onCompleted: parent = view
     anchors.fill: parent
@@ -38,5 +40,12 @@ Item {
             GradientStop { position: 1; color: sf.color }
         }
     }
-    Icon { app: sf.app; visible: sf.below; d: "M6 9l6 6 6-6"; size: 18; tint: sf.app.colors.soft; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom }
+    // The "more below" mark sits on a disc of the ground color, so it never draws over words.
+    Rectangle {
+        visible: sf.below
+        width: sf.app.px(26); height: width; radius: width / 2
+        color: sf.color
+        anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom
+        Icon { app: sf.app; d: "M6 9l6 6 6-6"; size: 18; tint: sf.app.colors.soft; anchors.centerIn: parent }
+    }
 }

@@ -20,9 +20,11 @@ Item {
     readonly property bool inSide: app.focusItem !== null && app.focusItem.sideEntry === true
     readonly property var hints: [{ k: "lt", label: inSide ? "Details" : "List" }].concat(model.hints || [])
     readonly property var search: model.search || null
-    readonly property string searchValue: search ? search.value : ""
+    readonly property string searchValue: search ? (search.value || "") : ""
     // The engine's words win whenever they differ from the box (a page opened again, a letter it didn't keep).
     onSearchValueChanged: if (input.text !== searchValue) input.text = searchValue
+    // B empties the search box before it leaves the page.
+    readonly property string bLabel: search && searchValue !== "" ? "Clear search" : ""
 
     function press(k) {
         if (k === "lt") { toOtherSide(); return true }
@@ -94,16 +96,13 @@ Item {
                         Keys.onReturnPressed: page.app.keysBack()
                         Keys.onEnterPressed: page.app.keysBack()
                         Keys.onDownPressed: { page.app.keysBack(); page.app.moveFocus("down", sideArea) }
-                        Text { visible: input.text === ""; text: page.search ? page.search.hint : ""; color: page.app.colors.muted; font: input.font; anchors.verticalCenter: parent.verticalCenter }
+                        Text { visible: input.text === ""; text: page.search ? (page.search.hint || "") : ""; color: page.app.colors.muted; font: input.font; anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
                 Flickable {
                     id: sideFlick
                     anchors { top: searchBox.bottom; bottom: parent.bottom; left: parent.left; right: parent.right; topMargin: searchBox.visible ? page.app.px(8) : 0 }
                     clip: true
-                    layer.enabled: page.app.softwareDraw
-                    // A layer has no see-through parts under software drawing, so the list paints what it sits on first.
-                    Rectangle { parent: sideFlick; anchors.fill: parent; z: -1; visible: page.app.softwareDraw; color: page.app.colors.card }
                     contentHeight: sideList.implicitHeight + page.app.px(10)
                     boundsBehavior: Flickable.StopAtBounds
                     Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }

@@ -319,7 +319,11 @@ pub(crate) fn library(ui: &mut Ui) -> Json {
         .map(|l| {
             // Before the lists were ever fetched, "not rated" only means "not looked up yet".
             let note = if l.verdict.label == Label::NotRated && never_checked { "Waiting for the ratings. They arrive once the internet is there." } else { l.verdict.note.as_str() };
-            let mut r = row("fix", &game_id(&l.game), if l.verdict.fix.is_some() { "button" } else { "info" }, &l.game.name, &format!("{} \u{b7} {note}", l.game.store.label()));
+            // A game with a fix fixes it; any other opens the game in Games (its switches, saves and help).
+            let mut r = match l.verdict.fix {
+                Some(_) => row("fix", &game_id(&l.game), "button", &l.game.name, &format!("{} \u{b7} {note}", l.game.store.label())),
+                None => row("open", &format!("games|{}", game_id(&l.game)), "button", &l.game.name, &format!("{} \u{b7} {note}", l.game.store.label())),
+            };
             r = with(r, "badge", s(l.verdict.label.words()));
             r = with(r, "tone", s(tone(&l.verdict)));
             if l.verdict.fix.is_some() {

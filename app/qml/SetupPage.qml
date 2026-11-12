@@ -4,7 +4,8 @@ import TurbineHub
 
 // Guided's first run: the five steps down the left, the step itself on the right. A step is either a few words
 // with its buttons (your machine, the password), another page shown inside (the library check, Bring it over), or
-// a list of things to tick (the picks). B leaves; the Home page's setup card comes back to the same step.
+// a list of things to tick (the picks). B goes to the step before; on the first step it leaves, and the Home page's
+// setup card comes back to the first step not done.
 //
 // app (required): Main.qml's window (its model is the page).
 Item {
@@ -17,7 +18,10 @@ Item {
     readonly property var buttons: model.buttons || []
     readonly property var hints: buttons.filter(b => b.k !== "a").map(b => ({ k: b.k, label: b.label })).concat(inner.hints || [])
 
+    // B goes to the step before; on the first step it leaves (to the mode picker when that is where setup began).
+    readonly property int step: model.index || 0
     function press(k) {
+        if (k === "b" && step > 0 && (model.rail || []).length > step) { app.setArg(model.rail[step - 1].id); return true }
         const b = buttons.find(x => x.k === k && k !== "a")
         if (b) { app.doAct(b.act, b.arg, ""); return true }
         return embed !== "" && app.pageKey(inner, k)

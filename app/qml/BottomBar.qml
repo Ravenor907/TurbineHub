@@ -8,24 +8,28 @@ Rectangle {
     id: bar
     required property var app
     property var hints: []
-    // How many hints fit, counted from the front (at least A and B).
-    property int shown: hints.length
-    readonly property var shownKeys: hints.slice(0, shown).map(h => h.k)
+    // The hints left out for room: the page's own extras first (from the last), then Help and Menu; never A or B.
+    property var hidden: []
+    readonly property var shownKeys: hints.filter((h, i) => hidden.indexOf(i) < 0).map(h => h.k)
     height: app.px(58)
     color: app.colors.bar
     Rectangle { anchors.top: parent.top; width: parent.width; height: Math.max(1, bar.app.px(1)); color: bar.app.colors.line }
 
     function fit() {
         const room = width - moveHint.width - app.px(28) * 2 - app.px(32)
-        let n = hints.length
         const gap = app.px(22)
-        function total(count) {
+        const out = []
+        function total() {
             let w = 0
-            for (let i = 0; i < count && i < measure.count; i++) w += measure.itemAt(i).implicitWidth + gap
+            for (let i = 0; i < hints.length && i < measure.count; i++) if (out.indexOf(i) < 0 && measure.itemAt(i)) w += measure.itemAt(i).implicitWidth + gap
             return w
         }
-        while (n > 2 && total(n) > room) n--
-        shown = n
+        // Who gives way first: the page's extras from the last one back, then Help, then Menu.
+        const order = []
+        for (let i = hints.length - 1; i >= 0; i--) if (["a", "b", "view", "start"].indexOf(hints[i].k) < 0) order.push(i)
+        for (const k of ["view", "start"]) { const i = hints.findIndex(h => h.k === k); if (i >= 0) order.push(i) }
+        for (const i of order) { if (total() <= room) break; out.push(i) }
+        hidden = out
     }
     onWidthChanged: fit()
     onHintsChanged: Qt.callLater(fit)
@@ -47,7 +51,7 @@ Rectangle {
                 id: hint
                 required property var modelData
                 required property int index
-                visible: index < bar.shown
+                visible: bar.hidden.indexOf(index) < 0
                 spacing: bar.app.px(9)
                 height: bar.height
                 KeyCap { app: bar.app; k: hint.modelData.k; anchors.verticalCenter: parent.verticalCenter }

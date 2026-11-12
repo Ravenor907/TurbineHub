@@ -23,7 +23,8 @@ Rectangle {
                 id: tabItem
                 required property var modelData
                 required property int index
-                readonly property bool on: bar.app.tab === index
+                // The tab of the page on screen, wherever it was opened from.
+                readonly property bool on: bar.app.shownTab === index
                 // Narrow windows keep the icons and drop the other tabs' names.
                 readonly property bool named: on || bar.width >= bar.app.px(1080)
                 width: tabContent.implicitWidth + bar.app.px(24)
@@ -44,7 +45,7 @@ Rectangle {
                     }
                 }
                 Rectangle { visible: tabItem.on; anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter; width: parent.width - bar.app.px(12); height: Math.max(3, bar.app.px(3)); radius: height / 2; color: bar.app.colors.accent }
-                TapHandler { onTapped: bar.app.open(tabItem.modelData.id) }
+                TapHandler { onTapped: bar.app.goTab(tabItem.index) }
             }
         }
         KeyCap { app: bar.app; k: "rb"; anchors.verticalCenter: parent.verticalCenter }
@@ -71,10 +72,9 @@ Rectangle {
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            // The name gives way before the tabs do.
-            width: Math.min(implicitWidth, Math.max(0, bar.width - tabsRow.width - bar.app.px(200)))
-            visible: width > bar.app.px(60)
-            elide: Text.ElideRight
+            // The name gives way before the tabs do: whole or not at all.
+            width: implicitWidth
+            visible: implicitWidth <= bar.width - tabsRow.width - bar.app.px(200)
             text: bar.app.st.machine
             color: bar.app.colors.muted
             font.family: bar.app.bodyFont

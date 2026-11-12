@@ -11,6 +11,8 @@ const THEME_WORDS: &[&str] = &["Dark", "Black", "Light", "High contrast"];
 const ACCENT_WORDS: &[&str] = &["Brass", "Iron", "Copper", "Jade"];
 const ACCENT_HEX: &[&str] = &["#C99E52", "#A9B4BE", "#B07A5A", "#6FAE8C"];
 const FLATPAK_ID: &str = "io.github.ravenor907.TurbineHub";
+/// How long a new interface size waits to be kept before it goes back by itself.
+pub const KEEP_SECONDS: u32 = 10;
 
 fn choice(act: &str, title: &str, line: &str, options: &[&str], index: usize) -> Json {
     with(with(row(act, "", "choice", title, line), "options", arr(options.iter().map(|o| s(*o)))), "index", n(index as f64))
@@ -35,7 +37,7 @@ pub fn setup_json(ui: &Ui) -> String {
         "mode": s(if st.mode == Some(Mode::Veteran) { "veteran" } else { "guided" }),
         "theme": s(&st.theme),
         "accent": s(&st.accent),
-        "uiScale": n(st.ui_scale as f64),
+        "uiScale": n(st.scale_for(ui.machine().on_tv()) as f64),
         "gameBoost": b(st.game_boost),
         "changes": arr(changes),
         "apps": arr(apps),
@@ -65,11 +67,12 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let changes = ui.ledger().entries.len();
     let rows: Vec<Json> = match id {
         "general" => {
-            let mut scale = with(row("scale", "", "slider", "Interface size", "50 to 150%. Layouts re-flow, nothing gets cut off."), "value", n(st.ui_scale as f64));
+            let mut scale = with(row("scale", "", "slider", "Interface size", "50 to 150%. Layouts re-flow, nothing gets cut off. The desktop's own scaling doesn't change it."), "value", n(st.scale_for(ui.machine().on_tv()) as f64));
             for (k, v) in [("min", 50.0), ("max", 150.0), ("step", 10.0)] {
                 scale = with(scale, k, n(v));
             }
-            scale = with(with(scale, "unit", s("%")), "live", b(true));
+            // Left and Right move the value, A applies it, and the player is asked to keep it (see `act`).
+            scale = with(scale, "unit", s("%"));
             let mut rows = vec![
                 choice("mode", "Mode", "Guided explains things. Veteran shows every control.", &["Guided", "Veteran"], if st.mode == Some(Mode::Veteran) { 1 } else { 0 }),
                 scale,
@@ -235,8 +238,30 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             state()
         }
         "scale" => {
+            let before = st.scale_for(ui.machine().on_tv());
             st.ui_scale = (idx? as u32).clamp(50, 150);
-            state()
+            st.scale_chosen = true;
+            // A size too small to read can't be put back by reading, so a new size asks to be kept and goes back
+            // by itself: the window counts down `seconds`, then sends `act` with `arg` and `value`. "back" is that
+            // way back, and asks nothing.
+            if arg == "back" || st.ui_scale == before {
+                state()
+            } else {
+                with(
+                    state(),
+                    "keep",
+                    obj! {
+                        "title": s("Keep this size?"),
+                        "text": s(format!("It goes back to {before}% by itself in {{n}} seconds.")),
+                        "seconds": n(KEEP_SECONDS as f64),
+                        "confirm": s("Keep"),
+                        "cancel": s(format!("Back to {before}%")),
+                        "act": s("scale"),
+                        "arg": s("back"),
+                        "value": s(before.to_string()),
+                    },
+                )
+            }
         }
         "animations" => {
             st.animations = !st.animations;

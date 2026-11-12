@@ -1,7 +1,8 @@
 import QtQuick
 
-// A short note that something happened, inside the content area just above the footer. It goes by itself; a new
-// note takes the place of the last one.
+// A short note that something happened, inside the content area just above the footer, or at its top when the
+// highlight is down there (Main.qml's placeToast: it never covers the highlight). It goes by itself; a new note
+// takes the place of the last one.
 //
 // app (required): Main.qml's window. show(text): shows a note.
 Rectangle {
@@ -9,8 +10,10 @@ Rectangle {
     required property var app
     property string text: ""
     property bool up: false
-    function show(words) { text = words; up = true; stay.restart() }
+    function show(words) { text = words; up = true; stay.restart(); app.placeToast() }
     z: 60
+    // Drawn over the page on purpose (SelfCheck leaves it out of the overlap check).
+    readonly property bool cover: true
     width: Math.min(words.implicitWidth + app.px(44), parent.width - app.px(64))
     height: words.height + app.px(22)
     radius: app.px(10)

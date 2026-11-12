@@ -7,9 +7,13 @@ import TurbineHub
 // controller's button inside each. It sizes to what it holds and scrolls the list when that is long. The same
 // card shows the menu (a list of places to go) and plain explanations (one Close button).
 //
-// A dark backdrop covers the page behind it, and nothing behind it takes a press while it is open.
+// A dark backdrop covers the page behind it (the footer stays clear, it says what A and B do here), and nothing
+// behind it takes a press while it is open.
 //
-// app (required): Main.qml's window. show(d): opens it with the engine's dialog. close(): closes it.
+// app (required): Main.qml's window. show(d): opens it with the engine's dialog. close(): closes it. Two dialogs
+// are answered here instead of by the engine: `local: "quit"` closes Turbine Hub on confirm, and `keep` (a change
+// that could leave the screen unreadable) counts down `keep.seconds` in its words ("{n}") and then goes back by
+// sending `keep.act`, as Cancel does.
 Item {
     id: dlg
     required property var app
@@ -27,12 +31,16 @@ Item {
     visible: open
 
     function show(model) {
+        // A dialog over a dialog (the menu's choice asking something) keeps the page's highlight to come back to.
+        if (d === null) behind = app.lastFid
         d = model
         error = ""
         pw.text = ""; pw2.text = ""
-        behind = app.lastFid
+        list.contentY = 0
+        remaining = d.keep ? (d.keep.seconds || 10) : 0
         app.lastFid = ""
         app.focusItem = null
+        app.settle(true)
         Qt.callLater(function () {
             app.restoreFocus()
             if (dlg.ask !== "" && app.keyboard) pw.forceActiveFocus()
@@ -43,17 +51,47 @@ Item {
         app.keysBack()
         app.lastFid = behind
         app.focusItem = null
+        app.settle(true)
         Qt.callLater(app.restoreFocus)
     }
-    function cancel() { Hub.cancel(); close() }
+    function cancel() {
+        // A size that asked to be kept goes back.
+        if (d && d.keep) { const k = d.keep; close(); app.doAct(k.act, k.arg, k.value); return }
+        Hub.cancel(); close()
+    }
     function confirm() {
+        if (d && d.local === "quit") { Qt.quit(); return }
+        if (d && d.keep) { close(); return }
         if (!typed) { error = ask === "new" ? "Type the new password in both boxes first." : "Type the password first."; return }
         app.confirmDialog(pw.text, pw2.text)
     }
+    // A place in the menu: the menu closes, then the place opens (the row is gone by then, so the dialog does it).
+    function choose(act, arg) {
+        close()
+        app.doAct(act, arg, "")
+    }
+    // Scrolls the words and the list by most of what shows; false at the end.
+    function scroll(dir) {
+        const max = Math.max(0, list.contentHeight - list.height)
+        const to = Math.max(0, Math.min(max, list.contentY + dir * Math.max(app.px(60), list.height * 0.6)))
+        if (Math.abs(to - list.contentY) < 1) return false
+        list.contentY = to
+        return true
+    }
+    readonly property bool scrolls: list.contentHeight > list.height + 1
     function press(k) {
         if (k === "b") { cancel(); return true }
+        // Down from the buttons, where nothing is below, reads on in the list.
+        if (k === "down" && scrolls && app.focusItem && (app.focusItem.fid === "cancel" || app.focusItem.fid === "confirm")) return scroll(1)
         // The tabs, Help and the menu wait until the dialog is answered.
         return ["lb", "rb", "lt", "rt", "view", "start", "x", "y"].indexOf(k) >= 0
+    }
+    // A change that goes back by itself counts down out loud.
+    property int remaining: 0
+    Timer {
+        interval: 1000; repeat: true
+        running: dlg.open && dlg.d.keep !== undefined && dlg.remaining > 0
+        onTriggered: { dlg.remaining--; if (dlg.remaining <= 0) dlg.cancel() }
     }
 
     Rectangle {
@@ -83,63 +121,77 @@ Item {
             anchors.margins: dlg.app.px(26)
             spacing: dlg.app.px(14)
 
-            Label { app: dlg.app; Layout.fillWidth: true; text: dlg.d ? dlg.d.title : ""; font.family: dlg.app.titleFont; font.pixelSize: dlg.app.fpx(24); font.weight: Font.Bold }
-            Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; text: dlg.d ? (dlg.d.text || "") : ""; color: dlg.app.colors.soft; font.pixelSize: dlg.app.fpx(17); lineHeight: 1.2 }
+            Label { app: dlg.app; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.d ? dlg.d.title : ""; font.family: dlg.app.titleFont; font.pixelSize: dlg.app.fpx(24); font.weight: Font.Bold }
 
-            // The exact changes, or the places the menu leads to.
-            Flickable {
-                id: list
-                visible: dlg.d !== null && ((dlg.d.items || []).length > 0 || (dlg.d.rows || []).length > 0)
+            // What will happen in words, then the exact changes or the places the menu leads to. When it is longer
+            // than the room, it scrolls: Up from the buttons lands on it and Up and Down read through it; Down on
+            // the buttons reads on too. The buttons stay where they are.
+            Focusable {
+                id: reader
+                app: dlg.app
+                visible: dlg.d !== null && ((dlg.d.text || "") !== "" || (dlg.d.items || []).length > 0 || (dlg.d.rows || []).length > 0)
+                focusable: dlg.open && dlg.scrolls && !(dlg.d && dlg.d.rows)
+                fid: "list"
+                aLabel: ""
+                tapActivates: false
+                ringGap: dlg.app.px(2)
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: listCol.implicitHeight
                 Layout.minimumHeight: Math.min(listCol.implicitHeight, dlg.app.px(90))
-                clip: true
-                layer.enabled: dlg.app.softwareDraw
-                // A layer has no see-through parts under software drawing, so the list paints what it sits on first.
-                Rectangle { parent: list; anchors.fill: parent; z: -1; visible: dlg.app.softwareDraw; color: dlg.app.colors.panel }
-                contentHeight: listCol.implicitHeight
-                boundsBehavior: Flickable.StopAtBounds
-                Column {
-                    id: listCol
-                    width: list.width
-                    spacing: dlg.app.px(8)
-                    Repeater {
-                        model: dlg.d ? (dlg.d.items || []) : []
-                        RowLayout {
-                            id: item
-                            required property var modelData
-                            width: listCol.width
-                            spacing: dlg.app.px(10)
-                            // A tick for a change the dialog makes; a plain marker for a step of a how-to (nothing is done yet).
-                            Icon { app: dlg.app; d: dlg.d && dlg.d.guide === true ? dlg.app.icons.chevron : dlg.app.icons.check; size: 18; tint: dlg.d && dlg.d.guide === true ? dlg.app.colors.muted : dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 0
-                                Label { app: dlg.app; Layout.fillWidth: true; text: item.modelData.title; font.weight: Font.DemiBold; wrapMode: Text.Wrap }
-                                Label { app: dlg.app; Layout.fillWidth: true; visible: text !== ""; text: item.modelData.line; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15); wrapMode: Text.Wrap }
+                function press(k) {
+                    if (k === "up" || k === "down") return dlg.scroll(k === "down" ? 1 : -1)
+                    return false
+                }
+                Flickable {
+                    id: list
+                    anchors.fill: parent
+                    clip: true
+                    contentHeight: listCol.implicitHeight
+                    boundsBehavior: Flickable.StopAtBounds
+                    Behavior on contentY { enabled: dlg.app.motion.on; NumberAnimation { duration: dlg.app.motion.standard; easing.type: dlg.app.motion.ease } }
+                    Column {
+                        id: listCol
+                        width: list.width
+                        spacing: dlg.app.px(8)
+                        Label { app: dlg.app; visible: text !== ""; width: listCol.width; bottomPadding: dlg.app.px(6); text: dlg.d ? (dlg.d.keep ? (dlg.d.text || "").replace("{n}", dlg.remaining) : (dlg.d.text || "")) : ""; color: dlg.app.colors.soft; font.pixelSize: dlg.app.fpx(17); lineHeight: 1.2 }
+                        Repeater {
+                            model: dlg.d ? (dlg.d.items || []) : []
+                            RowLayout {
+                                id: item
+                                required property var modelData
+                                width: listCol.width
+                                spacing: dlg.app.px(10)
+                                // A tick for a change the dialog makes; a plain marker for a step of a how-to (nothing is done yet).
+                                Icon { app: dlg.app; d: dlg.d && dlg.d.guide === true ? dlg.app.icons.chevron : dlg.app.icons.check; size: 18; tint: dlg.d && dlg.d.guide === true ? dlg.app.colors.muted : dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    Label { app: dlg.app; Layout.fillWidth: true; text: item.modelData.title; font.weight: Font.DemiBold; wrapMode: Text.Wrap }
+                                    Label { app: dlg.app; Layout.fillWidth: true; visible: text !== ""; text: item.modelData.line; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15); wrapMode: Text.Wrap }
+                                }
                             }
                         }
-                    }
-                    Repeater {
-                        model: dlg.d ? (dlg.d.rows || []) : []
-                        Focusable {
-                            id: menuRow
-                            required property var modelData
-                            required property int index
-                            app: dlg.app
-                            fid: "menu:" + index
-                            firstFocus: index === 0
-                            aLabel: "Open"
-                            width: listCol.width - dlg.app.px(8)
-                            x: dlg.app.px(4)
-                            height: dlg.app.tpx(48)
-                            ringRadius: dlg.app.px(8)
-                            ringGap: -dlg.app.px(1)
-                            onActivated: { const m = modelData; dlg.close(); dlg.app.doAct(m.act, m.arg, "") }
-                            Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.raised }
-                            Label { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; x: dlg.app.px(16); text: menuRow.modelData.title; font.weight: Font.DemiBold }
-                            Icon { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: dlg.app.px(12); d: dlg.app.icons.chevron; size: 18 }
+                        Repeater {
+                            model: dlg.d ? (dlg.d.rows || []) : []
+                            Focusable {
+                                id: menuRow
+                                required property var modelData
+                                required property int index
+                                app: dlg.app
+                                fid: "menu:" + index
+                                firstFocus: index === 0
+                                aLabel: "Open"
+                                width: listCol.width - dlg.app.px(8)
+                                x: dlg.app.px(4)
+                                height: dlg.app.tpx(48)
+                                ringRadius: dlg.app.px(8)
+                                ringGap: -dlg.app.px(1)
+                                onActivated: dlg.choose(modelData.act, modelData.arg)
+                                Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.raised }
+                                Label { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; x: dlg.app.px(16); text: menuRow.modelData.title; font.weight: Font.DemiBold }
+                                Icon { app: dlg.app; anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: dlg.app.px(12); d: dlg.app.icons.chevron; size: 18 }
+                            }
                         }
                     }
                 }
@@ -149,6 +201,7 @@ Item {
             ColumnLayout {
                 visible: dlg.ask !== ""
                 Layout.fillWidth: true
+                Layout.minimumHeight: implicitHeight
                 spacing: dlg.app.px(8)
                 Label { app: dlg.app; text: dlg.ask === "new" ? "New password" : "Your SteamOS password (asked once)"; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
                 RowLayout {
@@ -186,7 +239,7 @@ Item {
                         focusable: dlg.ask !== ""
                         fid: "show"
                         label: shown ? "Hide" : "Show"
-                        icon: "search"
+                        icon: "eye"
                         onActivated: shown = !shown
                     }
                 }
@@ -217,11 +270,12 @@ Item {
                 }
                 Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "Steam button and X opens the keyboard."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
             }
-            Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; text: dlg.error; color: dlg.app.colors.stop; font.weight: Font.DemiBold }
+            Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.error; color: dlg.app.colors.stop; font.weight: Font.DemiBold }
 
             // The buttons, always in view.
             RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumHeight: implicitHeight
                 spacing: dlg.app.px(14)
                 Item { Layout.fillWidth: true }
                 ActionButton {

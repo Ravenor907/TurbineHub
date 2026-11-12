@@ -16,6 +16,9 @@ pub struct Settings {
     pub mode: Option<Mode>,
     /// Interface size, 50 to 150 percent.
     pub ui_scale: u32,
+    /// The player picked the interface size (else it follows the machine: larger on a TV). Only a picked size is
+    /// written to the file.
+    pub scale_chosen: bool,
     pub animations: bool,
     /// "dark", "black", "light" or "contrast".
     pub theme: String,
@@ -44,6 +47,7 @@ impl Default for Settings {
         Settings {
             mode: None,
             ui_scale: 100,
+            scale_chosen: false,
             animations: true,
             theme: "dark".into(),
             accent: "brass".into(),
@@ -79,6 +83,7 @@ impl Settings {
                 _ => None,
             },
             ui_scale: j.get("uiScale").and_then(Json::as_f64).map(|v| (v.round() as i64).clamp(50, 150) as u32).unwrap_or(d.ui_scale),
+            scale_chosen: j.get("uiScale").and_then(Json::as_f64).is_some(),
             animations: b("animations", d.animations),
             theme: word(&j, "theme", THEMES, &d.theme),
             accent: word(&j, "accent", ACCENTS, &d.accent),
@@ -98,9 +103,9 @@ impl Settings {
             Some(Mode::Veteran) => "\"veteran\"",
             None => "null",
         };
+        let scale = if self.scale_chosen { format!("\n  \"uiScale\": {},", self.ui_scale) } else { String::new() };
         format!(
-            "{{\n  \"mode\": {mode},\n  \"uiScale\": {},\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"saveSnapshots\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
-            self.ui_scale,
+            "{{\n  \"mode\": {mode},{scale}\n  \"animations\": {},\n  \"theme\": {},\n  \"accent\": {},\n  \"gameBoost\": {},\n  \"saveSnapshots\": {},\n  \"testBuilds\": {},\n  \"reports\": {},\n  \"setupDone\": {},\n  \"brought\": {}\n}}\n",
             self.animations,
             quote(&self.theme),
             quote(&self.accent),
@@ -111,6 +116,17 @@ impl Settings {
             l(&self.setup_done),
             l(&self.brought)
         )
+    }
+
+    /// The interface size in use: the player's pick, or 125% on a machine used on a TV (couch distance), else 100%.
+    pub fn scale_for(&self, tv: bool) -> u32 {
+        if self.scale_chosen {
+            self.ui_scale
+        } else if tv {
+            125
+        } else {
+            100
+        }
     }
 
     /// Setup is finished when every step is done or skipped.
@@ -137,12 +153,17 @@ mod tests {
 
     #[test]
     fn round_trips_and_repairs() {
-        let mut s = Settings { mode: Some(Mode::Veteran), ui_scale: 125, game_boost: true, save_snapshots: true, ..Settings::default() };
+        let mut s = Settings { mode: Some(Mode::Veteran), ui_scale: 125, scale_chosen: true, game_boost: true, save_snapshots: true, ..Settings::default() };
         s.setup_done = vec!["machine".into(), "password".into()];
         assert_eq!(Settings::parse(&s.to_json()), s);
         let bad = Settings::parse(r#"{"mode":"hacker","uiScale":900,"theme":"pink","accent":7,"setupDone":["machine","x","machine"],"extra":1}"#);
         assert_eq!((bad.mode, bad.ui_scale, bad.theme.as_str(), bad.accent.as_str()), (None, 150, "dark", "brass"));
         assert_eq!(bad.setup_done, vec!["machine"]);
+        // A size the player never picked follows the machine, and stays out of the file.
+        let fresh = Settings::default();
+        assert_eq!((fresh.scale_for(true), fresh.scale_for(false), s.scale_for(true)), (125, 100, 125));
+        assert!(!fresh.to_json().contains("uiScale"));
+        assert_eq!(Settings::parse(&fresh.to_json()), fresh);
         assert_eq!(Settings::parse("garbage"), Settings::default());
         assert!(!s.setup_finished());
         s.setup_done = SETUP_STEPS.iter().map(|x| x.to_string()).collect();

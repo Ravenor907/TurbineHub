@@ -27,11 +27,13 @@ Item {
         id: tile
         required property var modelData
         property bool compact: false
-        implicitHeight: page.app.px(compact ? 64 : 92)
+        // Grows with its words when they take more room than the design (a small window, a large text floor).
+        implicitHeight: Math.max(page.app.px(compact ? 64 : 92), tileRow.implicitHeight + page.app.px(16))
         radius: page.app.px(10)
         color: page.app.colors.panel
         border.width: Math.max(1, page.app.px(1)); border.color: page.app.colors.line
         RowLayout {
+            id: tileRow
             anchors { fill: parent; leftMargin: page.app.px(16); rightMargin: page.app.px(12) }
             spacing: page.app.px(12)
             Icon { app: page.app; d: page.app.icons[tile.modelData.icon] || page.app.icons.info; size: tile.compact ? 22 : 26; tint: page.app.colors.accent }
@@ -85,9 +87,6 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: page.app.px(40); anchors.rightMargin: page.app.px(40)
         clip: true
-        layer.enabled: page.app.softwareDraw
-        // A layer has no see-through parts under software drawing, so the list paints what it sits on first.
-        Rectangle { parent: flick; anchors.fill: parent; z: -1; visible: page.app.softwareDraw; color: page.app.colors.ground }
         contentHeight: (page.guided ? guidedBody.implicitHeight : veteranBody.implicitHeight) + page.app.px(40)
         boundsBehavior: Flickable.StopAtBounds
         Behavior on contentY { enabled: page.app.motion.on; NumberAnimation { duration: page.app.motion.standard; easing.type: page.app.motion.ease } }

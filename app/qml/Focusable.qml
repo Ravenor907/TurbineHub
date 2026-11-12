@@ -18,6 +18,8 @@ Item {
     property string aLabel: "Select"
     property var hints: []
     property bool firstFocus: false
+    // Something above it that shows with it when a list scrolls to it (its section's heading).
+    property Item revealFrom: null
     // A click or tap anywhere on it presses it (off for rows whose inner parts take the tap themselves).
     property bool tapActivates: true
     property real ringRadius: app.px(10)
@@ -25,6 +27,8 @@ Item {
     property real ringGap: app.px(3)
     readonly property bool focused: app.focusItem === f
     signal activated()
+    // Rebuilt away while it held the highlight (its list re-flowed): the highlight finds its new self.
+    Component.onDestruction: if (app && app.focusItem === f) app.focusLost()
 
     function press(k) {
         if (k === "a" && aLabel !== "") { activated(); return true }
@@ -37,8 +41,8 @@ Item {
         anchors.margins: -f.ringGap
         radius: f.ringRadius + f.ringGap
         color: "transparent"
-        border.width: Math.max(2, f.app.px(3))
-        border.color: f.app.colors.accentHi
+        border.width: f.app.colors.light ? Math.max(3, f.app.px(4)) : Math.max(2, f.app.px(3))
+        border.color: f.app.colors.ring
         opacity: f.focused ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { enabled: f.app.motion.on; NumberAnimation { duration: f.app.motion.quick; easing.type: f.app.motion.ease } }

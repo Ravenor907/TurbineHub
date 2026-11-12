@@ -42,8 +42,14 @@ Window {
 
     // ---------------------------------------------------------------- sizes
     // Everything is drawn from a 1280 x 800 design, scaled to the window and by the player's interface size.
-    readonly property real unit: Math.max(0.4, Math.min(width / 1280, height / 800) * st.scale / 100)
+    // A window far from 16:10 (half a screen, a tall or a wide one) keeps a readable size on its roomy side and
+    // re-flows on the other, instead of shrinking the whole 1280 x 800 layout into it. Nothing gets smaller than
+    // the text floor allows, so boxes and their words always shrink together.
+    readonly property real fit: Math.max(Math.min(width / 1280, height / 800), Math.min(0.85, Math.max(width / 1280, height / 800)))
+    readonly property real unit: Math.max(0.5, fit * st.scale / 100)
     function px(v) { return Math.round(v * unit) }
+    // The screen's pixels per point (display scaling).
+    readonly property real ratio: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
     // Text never goes below what can be read.
     function fpx(v) { return Math.max(9, Math.round(v * unit)) }
     // Touch targets keep a finger's size even at the smallest interface size.
@@ -80,6 +86,8 @@ Window {
         readonly property color onAccent: light ? "#FFFFFF" : "#0B0A08"
         readonly property color accentText: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 2.2) : Qt.lighter(accentBase, 1.12)
         readonly property color focusFill: hc ? "#333300" : light ? Qt.lighter(accentBase, 1.55) : Qt.darker(accentBase, 4.2)
+        // The highlight ring: as plain on the light ground as on the dark ones.
+        readonly property color ring: hc ? "#FFE680" : light ? Qt.darker(accentBase, 2.6) : Qt.lighter(accentBase, 1.22)
         // Status colors; the words beside them always carry the meaning too.
         readonly property color ok: hc ? "#9FE8B5" : light ? "#2F5A3C" : "#9FD3B5"
         readonly property color okFill: hc ? "#002A10" : light ? "#D5E6D2" : "#13201A"
@@ -129,6 +137,7 @@ Window {
         help: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M9.5 9.2a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.7v.5 M12 16.8v.4",
         info: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 11v6 M12 7.5v.5",
         search: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z M20 20l-4-4",
+        eye: "M2 12C4.500 7 8 5 12 5S19.500 7 22 12C19.500 17 16 19 12 19S4.500 17 2 12z M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z",
         check: "M5 12.5L10 17L19 7",
         close: "M6 6l12 12 M18 6L6 18",
         restore: "M4 4v6h6 M5 15a8 8 0 1 0 2-8.500L4 10",
@@ -155,11 +164,29 @@ Window {
         { id: "home", title: "Home", icon: "home" }, { id: "games", title: "Games", icon: "games" }, { id: "store", title: "Store", icon: "store" },
         { id: "machine", title: "My machine", icon: "machine" }, { id: "settings", title: "Settings", icon: "settings" }]
     property int tab: 0
-    // Pages opened on top of the tab, newest last: { page, arg }.
+    // What each tab showed last (the picked game, the section), so coming back to it finds the same thing.
+    property var tabArgs: ["", "", "", "", ""]
+    property var tabFids: ["", "", "", "", ""]
+    // Pages opened on top of the tab, newest last: { page, arg }. The first screen of a fresh start is marked
+    // `first`: Back there asks to close Turbine Hub.
     property var stack: []
-    readonly property var current: stack.length > 0 ? stack[stack.length - 1] : { page: tabs[tab].id, arg: "" }
-    // The first-run pages fill the window: no tabs until setup is through.
-    readonly property bool bare: ["pick", "setup", "quick"].indexOf(current.page) >= 0
+    readonly property var current: stack.length > 0 ? stack[stack.length - 1] : { page: tabs[tab].id, arg: tabArgs[tab] || "", fid: tabFids[tab] || "" }
+    // The first-run pages fill the window: no tabs until a mode is picked and setup is through.
+    readonly property bool bare: st.mode === "" || ["pick", "setup", "quick"].indexOf(current.page) >= 0
+    // The tab a page belongs to (-1: it belongs to the one it was opened from).
+    function tabOf(page) {
+        if (page === "home") return 0
+        if (["games", "library", "tool", "proton", "saves"].indexOf(page) >= 0) return 1
+        if (page === "store" || page === "store-item") return 2
+        if (page === "machine" || page.startsWith("module:")) return 3
+        if (page === "settings" || page === "changes") return 4
+        return -1
+    }
+    // The tab the top bar lights: always the one the page on screen belongs to, and none for a page that belongs to
+    // no tab (Help, Bring it over).
+    readonly property int shownTab: stack.length === 0 ? tab : tabOf(current.page)
+    // Back from here asks to close Turbine Hub (the first screen, and Home with nothing opened on top).
+    readonly property bool atRoot: (stack.length === 1 && stack[0].first === true) || (stack.length === 0 && tab === 0)
     property var model: ({})
 
     function fileFor(page) {
@@ -178,40 +205,89 @@ Window {
         const file = fileFor(current.page)
         if (view.file !== file) { view.file = file; view.setSource(file, { app: app }) }
         focusItem = null
-        lastFid = ""
+        // Back on a page that was left for another: the highlight where it was.
+        lastFid = current.fid || ""
         // A text box of the page before doesn't keep the keyboard.
         keysBack()
         if (mo.on) pageIn.restart()
+        // A note belongs to the page it was about.
+        toast.up = false
+        settle(true)
         Qt.callLater(restoreFocus)
     }
     // The same page again with fresh content; the highlight stays on the same thing (found again by its name,
     // however many times the page is rebuilt before the highlight is put back).
     function reloadPage() {
         model = JSON.parse(Hub.page(current.page, pageArg))
+        settle(false)
         Qt.callLater(restoreFocus)
     }
     function setArg(arg) { pageArg = arg; reloadPage() }
+    // The page on screen keeps what it shows (the game, the section) for when Back comes to it again.
+    function remember() {
+        if (stack.length > 0) {
+            const s = stack.slice()
+            s[s.length - 1] = Object.assign({}, s[s.length - 1], { arg: pageArg, fid: lastFid })
+            stack = s
+        } else {
+            const a = tabArgs.slice()
+            a[tab] = pageArg
+            const f = tabFids.slice()
+            f[tab] = lastFid
+            tabFids = f
+            tabArgs = a
+        }
+    }
     function open(target) {
         const parts = target.split("|")
-        const t = tabs.findIndex(x => x.id === parts[0])
-        if (t >= 0) { stack = []; tab = t; loadPage(); if (parts.length > 1) setArg(parts[1]); return }
-        stack = stack.concat([{ page: parts[0], arg: parts.length > 1 ? parts[1] : "" }])
+        const page = parts[0], arg = parts.length > 1 ? parts[1] : ""
+        if (page === "home") { root("home"); return }
+        const t = tabs.findIndex(x => x.id === page)
+        // No tabs before a mode is picked.
+        if (t >= 0 && st.mode === "") return
+        remember()
+        // From a tab itself another tab is a switch; from a page opened on top (or a setup step) it goes on top,
+        // so Back comes back to it.
+        if (t >= 0 && stack.length === 0) { tab = t; if (arg !== "") { const a = tabArgs.slice(); a[t] = arg; tabArgs = a } loadPage(); return }
+        stack = stack.concat([{ page: page, arg: arg }])
         loadPage()
     }
     function back() {
-        if (stack.length > 0 && !(stack.length === 1 && st.mode === "")) { stack = stack.slice(0, stack.length - 1); loadPage(); return true }
+        if (stack.length > 0 && !(stack.length === 1 && stack[0].first === true)) { stack = stack.slice(0, stack.length - 1); loadPage(); return true }
         if (tab !== 0 && stack.length === 0) { tab = 0; loadPage(); return true }
         return false
     }
-    function switchTab(d) {
+    function switchTab(d) { goTab(((shownTab >= 0 ? shownTab : tab) + d + tabs.length) % tabs.length) }
+    function goTab(t) {
         if (bare) return
-        const t = (tab + d + tabs.length) % tabs.length
+        remember()
         stack = []; tab = t; loadPage()
     }
     function root(page) {
-        if (page === "home") { stack = []; tab = 0 } else stack = [{ page: page, arg: "" }]
+        if (page === "home") { stack = []; tab = 0 }
+        // The mode just picked on the first screen: the picker stays one Back away.
+        else if (current.page === "pick" && (page === "setup" || page === "quick")) { remember(); stack = stack.concat([{ page: page, arg: "" }]) }
+        else stack = [{ page: page, arg: "" }]
         loadPage()
     }
+    // Back with nothing behind: a question, never a sudden exit.
+    function askClose() {
+        dialog.show({ title: "Close Turbine Hub?", text: "Everything you set up stays as it is.", items: [], confirm: "Close", cancel: "Cancel", ask: "", danger: true, local: "quit" })
+    }
+
+    // ---------------------------------------------------------------- presses wait for the page
+    // While the highlight is being put back (a page just loaded or rebuilt, a dialog just opened or closed) presses
+    // are held and sent on once it is back, so none lands on a row that is going away. For a moment after a new page
+    // or dialog appears, A, X, Y and Menu are left out, so a double press never reaches what the first one opened.
+    property bool restoring: false
+    property bool fresh: false
+    property var held: []
+    function settle(arrived) {
+        restoring = true
+        if (arrived) { fresh = true; freshGuard.restart() }
+    }
+    Timer { id: freshGuard; interval: mo.pressGuard; onTriggered: app.fresh = false }
+    readonly property bool ready: !restoring && !fresh
 
     // ---------------------------------------------------------------- presses to the engine
     function doAct(act, arg, value) {
@@ -223,10 +299,13 @@ Window {
     function handle(r) {
         if (r.root) root(r.root)
         if (r.open) open(r.open)
-        if (r.setupStep !== undefined) pageArg = ""
+        // Continue goes on to the step after this one (after a step taken again with Back too).
+        if (r.setupStep !== undefined) pageArg = r.setupStep
         if (r.refresh && !r.root && !r.open) reloadPage()
         if (r.toast) toast.show(r.toast)
         if (r.dialog) dialog.show(r.dialog)
+        // A change that could leave the screen unreadable asks to be kept, and goes back by itself.
+        if (r.keep) dialog.show({ title: r.keep.title, text: r.keep.text, items: [], confirm: r.keep.confirm, cancel: r.keep.cancel, ask: "", danger: true, keep: r.keep })
     }
     function confirmDialog(password, again) {
         const r = JSON.parse(Hub.confirm(password, again))
@@ -257,28 +336,66 @@ Window {
         focusItem = item
         if (item && item.fid !== "") lastFid = item.fid
         if (item && !quiet) reveal(item)
+        placeToast()
         if (item && item.focusedNow) item.focusedNow()
     }
-    function restoreFocus() {
-        const list = focusables(scopeRoot)
-        if (list.length === 0) { focusItem = null; return }
-        let pick = null
-        if (lastFid !== "") pick = list.find(x => x.fid === lastFid) || null
-        if (!pick) pick = list.find(x => x.firstFocus === true) || list[0]
-        focusItem = null
-        setFocus(pick, false)
+    // Layouts size their items lazily, just before drawing; a page just built gets its sizes now, so the highlight
+    // lands on what will be drawn (a width can decide how many columns, and so which rows, there are).
+    function settleLayouts(it) {
+        if (!it || !it.visible) return
+        if (typeof it.forceLayout === "function") it.forceLayout()
+        const kids = it.children
+        for (let i = 0; i < kids.length; i++) settleLayouts(kids[i])
     }
-    // Scrolls every list around the item so all of it shows, clear of the fades at the edges.
+    function focusLost() {
+        focusItem = null
+        restoring = true
+        Qt.callLater(restoreFocus)
+    }
+    function restoreFocus() {
+        restoring = false
+        settleLayouts(scopeRoot)
+        const list = focusables(scopeRoot)
+        if (list.length === 0) focusItem = null
+        else {
+            let pick = null
+            if (lastFid !== "") pick = list.find(x => x.fid === lastFid) || null
+            if (!pick) pick = list.find(x => x.firstFocus === true) || list[0]
+            focusItem = null
+            setFocus(pick, false)
+        }
+        // The presses that waited go on now (unless putting the highlight back rebuilt the page again).
+        if (!restoring && held.length > 0) {
+            const q = held
+            held = []
+            for (const k of q) press(k)
+        }
+    }
+    // Scrolls every list around the item so all of it shows, clear of the fades at the edges. An item can ask for
+    // more above it to show with it (`revealFrom`: the heading of its section).
     function reveal(item) {
+        // Layouts settle their sizes lazily; measure what will be drawn, not what was drawn last.
+        const chain = []
+        for (let p = item.parent; p; p = p.parent) chain.unshift(p)
+        for (const p of chain) if (typeof p.forceLayout === "function") p.forceLayout()
+        const from = item.revealFrom ? item.revealFrom : item
         let p = item.parent
         while (p) {
             if (p.contentY !== undefined && p.contentItem !== undefined && p.contentHeight > p.height) {
-                const y = item.mapToItem(p.contentItem, 0, 0).y
+                const y = from.mapToItem(p.contentItem, 0, 0).y
+                const bottom = item.mapToItem(p.contentItem, 0, item.height).y
                 const pad = px(28)
+                // What stays pinned over the top of the list (its headings) covers that much more.
+                const top = pad + (p.topInset || 0)
                 // Anything on the first screenful shows with the top of the page, its heading included.
-                if (y + item.height + pad <= p.height) p.contentY = 0
-                else if (y - pad < p.contentY) p.contentY = Math.max(0, y - pad)
-                else if (y + item.height + pad > p.contentY + p.height) p.contentY = Math.min(p.contentHeight - p.height, y + item.height + pad - p.height)
+                if (bottom + pad <= p.height) p.contentY = 0
+                else if (y - top < p.contentY) p.contentY = Math.max(0, y - top)
+                // Scrolling down never takes the top of the item (or its heading) out of view.
+                else if (bottom + pad > p.contentY + p.height) p.contentY = Math.max(0, Math.min(p.contentHeight - p.height, bottom + pad - p.height, y - top))
+                // The last thing to highlight in the list brings its end into view: words after it (readings,
+                // a tip, the activity list) can't be reached any other way.
+                const after = focusables(p.contentItem).some(x => x !== item && x.mapToItem(p.contentItem, 0, 0).y >= bottom - 1)
+                if (!after) p.contentY = Math.max(p.contentY, Math.min(p.contentHeight - p.height, y - top))
             }
             p = p.parent
         }
@@ -319,6 +436,8 @@ Window {
     // ---------------------------------------------------------------- one press, whatever it came from
     function press(k) {
         if (Hub.busy) return
+        if (restoring) { if (held.length < 4) held = held.concat([k]); return }
+        if (fresh && ["a", "x", "y", "start"].indexOf(k) >= 0) return
         if (dialog.open && dialog.press(k)) return
         if (focusItem && focusItem.press && focusItem.press(k)) return
         if (k === "up" || k === "down" || k === "left" || k === "right") {
@@ -331,10 +450,11 @@ Window {
         if (view.item && view.item.press && view.item.press(k)) return
         if (k === "lb") switchTab(-1)
         else if (k === "rb") switchTab(1)
-        else if (k === "b") { if (!back() && current.page === "pick") Qt.quit() }
+        else if (k === "b") { if (!back()) askClose() }
         // Help: what this page is and what its buttons do, with Where's my...? one press further.
         else if (k === "view") { if (current.page === "help") open("wheres"); else if (current.page !== "wheres") open("help|" + current.page + "@" + pageArg) }
-        else if (k === "start") doAct("menu", "", "")
+        // The menu leads to the tabs' places, so it waits until first run is through.
+        else if (k === "start" && !bare) doAct("menu", "", "")
     }
     // A page's own keys: X and Y from its model, and the primary button's key.
     function pageKey(m, k) {
@@ -363,8 +483,7 @@ Window {
             if (k === "f5") app.reloadPage(); else app.press(k)
         }
     }
-    // Qt Quick's software drawing (pictures, machines without a GPU) doesn't clip line drawings to a scrolling
-    // list, so lists draw through a layer there.
+    // Qt Quick's software drawing (pictures, machines without a GPU): icons paint into pictures there (Icon.qml).
     readonly property bool softwareDraw: keys.GraphicsInfo.api === GraphicsInfo.Software
     // A text box took the keyboard; this gives it back to the window.
     function keysBack() { keys.forceActiveFocus() }
@@ -387,8 +506,8 @@ Window {
                 } else if (kd[0] === app.heldDir) { app.heldDir = ""; repeatDelay.stop(); repeatTick.stop() }
             }
             if (r.done) {
-                if (r.done.toast) toast.show(r.done.toast)
                 if (r.done.ok && r.done.open) app.open(r.done.open); else app.reloadPage()
+                if (r.done.toast) toast.show(r.done.toast)
             } else if (r.tick && !dialog.open) app.reloadPage()
         }
     }
@@ -410,7 +529,9 @@ Window {
     Loader {
         id: view
         property string file: ""
-        anchors { top: app.bare ? parent.top : topBar.bottom; left: parent.left; right: parent.right; bottom: bottomBar.top }
+        // On an ultrawide screen the page keeps a sensible width, centered, so a switch stays near its words.
+        width: Math.min(parent.width, Math.max(app.px(1280), app.height * 1.9))
+        anchors { top: app.bare ? parent.top : topBar.bottom; horizontalCenter: parent.horizontalCenter; bottom: bottomBar.top }
     }
     BottomBar {
         id: bottomBar
@@ -428,19 +549,37 @@ Window {
             out.push({ k: "b", label: dialog.cancelLabel })
             return out
         }
-        out.push({ k: "a", label: item && item.aLabel ? item.aLabel : "Select" })
-        out.push({ k: "b", label: current.page === "pick" && stack.length <= 1 ? "Quit" : "Back" })
+        // A shows only where it does something: words to read take the highlight too, so a long page scrolls.
+        if (item && item.aLabel) out.push({ k: "a", label: item.aLabel })
+        // What B does here: the page's own say first (empty a search, the step before), then Back, or the
+        // question to close at the very start.
+        const pageB = view.item && view.item.bLabel ? view.item.bLabel : ""
+        out.push({ k: "b", label: pageB !== "" ? pageB : atRoot ? "Close" : "Back" })
         const own = (view.item && view.item.hints ? view.item.hints : []).concat(item && item.hints ? item.hints : [])
-        for (const h of own) out.push(h)
-        if (!bare) {
-            out.push({ k: "view", label: "Help" })
-            // A page whose main button is on Start keeps Start for it.
-            if (!own.some(h => h.k === "start")) out.push({ k: "start", label: "Menu" })
-        }
+        // A hint that says what A says already (the main button under the highlight) is said once.
+        for (const h of own) if (!(item && item.aLabel && h.label === item.aLabel)) out.push(h)
+        if (current.page !== "wheres") out.push({ k: "view", label: "Help" })
+        // A page whose main button is on Start keeps Start for it.
+        if (!bare && !own.some(h => h.k === "start")) out.push({ k: "start", label: "Menu" })
         return out
     }
-    Toast { id: toast; app: app; anchors.bottom: bottomBar.top; anchors.bottomMargin: app.px(16); anchors.horizontalCenter: parent.horizontalCenter }
-    DialogCard { id: dialog; app: app; anchors.fill: parent }
+    // A note above the footer, or at the top when the highlight is down there: it never covers the highlight.
+    Toast {
+        id: toast
+        app: app
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: app.toastHigh ? (app.bare ? 0 : topBar.height) + app.px(16) : bottomBar.y - height - app.px(16)
+    }
+    property bool toastHigh: false
+    function placeToast() {
+        const it = focusItem
+        if (!it || !toast.up) return
+        const at = it.mapToItem(null, 0, 0)
+        const low = bottomBar.y - toast.height - px(16)
+        // Highlight and note overlapping at the bottom: the note goes up.
+        toastHigh = at.y + it.height > low - px(8) && at.y < bottomBar.y
+    }
+    DialogCard { id: dialog; app: app; anchors { top: parent.top; left: parent.left; right: parent.right; bottom: bottomBar.top } }
 
     // While a confirmed dialog's steps run: one line saying what is happening, nothing else to press.
     Rectangle {
@@ -472,12 +611,12 @@ Window {
             else if (shot.page === "changes") tab = 4
             else if (["library", "tool", "proton", "saves"].indexOf(shot.page) >= 0) tab = 1
             else if (shot.page === "store-item") tab = 2
-            if (t >= 0) { tab = t; stack = [] } else stack = [{ page: shot.page, arg: shot.arg }]
+            if (t >= 0) { tab = t; stack = [] } else stack = [{ page: shot.page, arg: shot.arg, first: shot.page === "pick" && st.mode === "" }]
             loadPage()
             if (t >= 0 && shot.arg !== "") setArg(shot.arg)
             if (shot.act !== "") { const i = shot.act.indexOf(":"); doAct(shot.act.substring(0, i), shot.act.substring(i + 1), Hub.option("value")) }
         } else if (st.mode === "") {
-            stack = [{ page: "pick", arg: "" }]
+            stack = [{ page: "pick", arg: "", first: true }]
             loadPage()
         } else loadPage()
         keys.forceActiveFocus()
@@ -492,6 +631,8 @@ Window {
         id: scripted
         interval: mo.scriptStep; repeat: true
         onTriggered: {
+            // Each press waits until the page before it is ready, as a hand would.
+            if (!app.ready) return
             if (app.scriptedAt < shot.keys.length) { app.press(shot.keys[app.scriptedAt]); app.scriptedAt++ }
             else { stop(); selfCheck.item.start() }
         }

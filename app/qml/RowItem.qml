@@ -23,6 +23,8 @@ Focusable {
     property real val: m.value !== undefined && kind === "slider" ? m.value : 0
     property int cur: kind === "choice" ? Math.max(0, m.index) : 0
     readonly property var options: m.options || []
+    // The state chip sits beside the words unless it would take more than a third of the row.
+    readonly property bool chipBelow: (m.badge || "") !== "" && sideChip.implicitWidth > width * 0.3
 
     function send(value) { app.doAct(m.act, m.arg, value) }
     function step(d) {
@@ -78,6 +80,7 @@ Focusable {
                 spacing: r.app.px(2)
                 Label { app: r.app; Layout.fillWidth: true; text: r.m.title; font.pixelSize: r.app.fpx(17); font.weight: Font.DemiBold }
                 Label { app: r.app; Layout.fillWidth: true; visible: text !== ""; text: r.m.line || ""; font.pixelSize: r.app.fpx(15); color: r.app.colors.muted }
+                Chip { app: r.app; visible: text !== "" && r.chipBelow; text: r.m.badge || ""; tone: r.m.tone || ""; Layout.topMargin: r.app.px(4) }
             }
             Label {
                 app: r.app
@@ -88,7 +91,8 @@ Focusable {
                 font.weight: Font.DemiBold
                 wrapMode: Text.NoWrap
             }
-            Chip { app: r.app; text: r.m.badge || ""; tone: r.m.tone || "" }
+            // A wide chip in a narrow row goes under the words instead, so the words never squeeze to a word a line.
+            Chip { id: sideChip; app: r.app; visible: text !== "" && !r.chipBelow; text: r.m.badge || ""; tone: r.m.tone || "" }
             Toggle { app: r.app; visible: r.kind === "toggle"; on: r.m.on === true }
             ActionButton { app: r.app; visible: r.kind === "button" && (r.m.button || "") !== ""; plain: true; primary: r.m.primary === true; label: r.m.button || ""; cap: r.focused ? "a" : "" }
             Icon { app: r.app; visible: r.kind === "button" && (r.m.button || "") === ""; d: r.app.icons.chevron; size: 20 }
@@ -142,7 +146,7 @@ Focusable {
                         id: optRow
                         anchors.centerIn: parent
                         spacing: r.app.px(8)
-                        Rectangle { visible: opt.swatch !== ""; width: r.app.px(18); height: width; radius: width / 2; color: opt.swatch !== "" ? opt.swatch : "transparent"; border.width: 1; border.color: r.app.colors.ground; anchors.verticalCenter: parent.verticalCenter }
+                        Rectangle { visible: opt.swatch !== ""; width: r.app.px(18); height: width; radius: width / 2; color: opt.swatch !== "" ? opt.swatch : "transparent"; border.width: opt.picked ? Math.max(2, r.app.px(2)) : 1; border.color: opt.picked ? r.app.colors.onAccent : r.app.colors.ground; anchors.verticalCenter: parent.verticalCenter }
                         Icon { app: r.app; visible: opt.picked; d: r.app.icons.check; size: 16; tint: r.app.colors.onAccent; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: opt.modelData; color: opt.picked ? r.app.colors.onAccent : r.app.colors.text; font.family: r.app.bodyFont; font.pixelSize: r.app.fpx(16); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                     }

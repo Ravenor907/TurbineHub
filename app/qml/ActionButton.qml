@@ -29,7 +29,7 @@ Focusable {
         id: content
         anchors.centerIn: parent
         spacing: ab.app.px(9)
-        KeyCap { app: ab.app; visible: ab.cap !== ""; k: ab.cap; small: true; anchors.verticalCenter: parent.verticalCenter }
+        KeyCap { app: ab.app; visible: ab.cap !== ""; k: ab.cap; small: true; onFill: ab.primary; anchors.verticalCenter: parent.verticalCenter }
         Icon { app: ab.app; visible: ab.icon !== ""; d: ab.icon !== "" ? ab.app.icons[ab.icon] : ""; size: 18; tint: words.color; anchors.verticalCenter: parent.verticalCenter }
         Text {
             id: words

@@ -426,7 +426,26 @@ fn first_run_walks_the_steps_and_quick_setup_counts_its_changes() {
 #[test]
 fn settings_change_the_file_and_stay_in_range() {
     let mut u = ui("settings", HANDHELD, Mode::Guided);
-    assert_eq!(parse(&u.act("scale", "", "400")).unwrap().get("state").and_then(Json::as_bool), Some(true));
+    // A new interface size is applied, then asked to be kept, with the way back to the size before.
+    let general = parse(&u.page("settings", "general")).unwrap();
+    let scale = rows(&general).into_iter().find(|r| r.str_at("act") == Some("scale")).unwrap();
+    assert!(scale.get("live").is_none(), "the size applies on A, not while it moves");
+    let r = parse(&u.act("scale", "", "60")).unwrap();
+    assert_eq!(r.get("state").and_then(Json::as_bool), Some(true));
+    let keep = r.get("keep").unwrap();
+    assert_eq!((keep.str_at("act"), keep.str_at("arg"), keep.str_at("value")), (Some("scale"), Some("back"), Some("100")));
+    assert!(keep.str_at("text").unwrap().contains("{n}"));
+    assert_eq!(u.settings().ui_scale, 60);
+    // Going back asks nothing, and neither does the size already in use.
+    assert!(parse(&u.act("scale", "back", "100")).unwrap().get("keep").is_none());
+    assert_eq!(u.settings().ui_scale, 100);
+    assert!(parse(&u.act("scale", "", "100")).unwrap().get("keep").is_none());
+    assert!(parse(&u.act("scale", "", "400")).unwrap().get("keep").is_some());
+    // On a TV the size starts larger until the player picks one.
+    let tv = ui("tvscale", Preset::TvPc, Mode::Veteran);
+    assert_eq!(parse(&tv.state()).unwrap().get("scale").and_then(Json::as_f64), Some(125.0));
+    assert_eq!(parse(&u.state()).unwrap().get("scale").and_then(Json::as_f64), Some(150.0));
+    done("tvscale");
     u.act("theme", "", "2");
     u.act("accent", "", "3");
     u.act("mode", "", "1");

@@ -30,6 +30,8 @@ QtObject {
     readonly property int spin: 1400
     readonly property int holdDelay: 380
     readonly property int holdRepeat: 110
+    // How long a page or dialog that just appeared leaves out A, X, Y and Menu (a double press stays on the first).
+    readonly property int pressGuard: 250
     // How long a picture waits for the page to settle before the checks run.
     readonly property int settle: 350
     // The time between two scripted presses in a picture run.

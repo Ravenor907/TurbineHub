@@ -199,7 +199,7 @@ impl Ui {
         obj! {
             "version": s(&self.ctx.version),
             "mode": s(match st.mode { Some(Mode::Guided) => "guided", Some(Mode::Veteran) => "veteran", None => "" }),
-            "scale": n(st.ui_scale as f64),
+            "scale": n(st.scale_for(m.on_tv()) as f64),
             "animations": b(st.animations),
             "theme": s(&st.theme),
             "accent": s(&st.accent),

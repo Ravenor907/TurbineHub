@@ -4,7 +4,7 @@ import QtQuick.Shapes
 import TurbineHub
 
 // The first screen: Guided or Veteran, two large cards. Left and Right switch, A chooses. The Guided card carries a
-// drawing of a turbine on a marked path; the Veteran card carries its portrait from the app's art folder.
+// emblem on a marked path; the Veteran card carries its portrait from the app's art folder.
 //
 // app (required): Main.qml's window (its model is the page).
 Item {
@@ -69,7 +69,7 @@ Item {
                                 asynchronous: false
                                 mipmap: true
                             }
-                            // A turbine on a marked path, from the start dot to the flag.
+                            // The emblem on a marked path, from the start dot to the flag.
                             Shape {
                                 id: drawing
                                 visible: !card.veteran
@@ -85,21 +85,6 @@ Item {
                                 }
                                 ShapePath {
                                     scale: Qt.size(drawing.k, drawing.k)
-                                    strokeColor: page.app.colors.ground; strokeWidth: 3; fillColor: page.app.colors.accent
-                                    PathSvg { path: "M130 60a52 52 0 1 1 0 104a52 52 0 1 1 0-104z" }
-                                }
-                                ShapePath {
-                                    scale: Qt.size(drawing.k, drawing.k)
-                                    strokeColor: page.app.colors.ground; strokeWidth: 2.5; fillColor: "transparent"; capStyle: ShapePath.RoundCap
-                                    PathSvg { path: "M130 112C130 84 150 70 168 76 M130 112C156 112 170 132 164 150 M130 112C130 140 110 154 92 148 M130 112C104 112 90 92 96 74" }
-                                }
-                                ShapePath {
-                                    scale: Qt.size(drawing.k, drawing.k)
-                                    strokeColor: "transparent"; fillColor: page.app.colors.ground
-                                    PathSvg { path: "M130 103a9 9 0 1 1 0 18a9 9 0 1 1 0-18z" }
-                                }
-                                ShapePath {
-                                    scale: Qt.size(drawing.k, drawing.k)
                                     strokeColor: page.app.colors.text; strokeWidth: 2.5; fillColor: "transparent"; capStyle: ShapePath.RoundCap
                                     PathSvg { path: "M240 40L240 8" }
                                 }
@@ -112,6 +97,14 @@ Item {
                                     scale: Qt.size(drawing.k, drawing.k)
                                     strokeColor: "transparent"; fillColor: page.app.colors.text
                                     PathSvg { path: "M30 189a7 7 0 1 1 0 14a7 7 0 1 1 0-14z" }
+                                }
+                                Image {
+                                    source: "file://" + Hub.share + "/art/emblem.png"
+                                    x: 70 * drawing.k; y: 52 * drawing.k
+                                    width: 120 * drawing.k; height: 120 * drawing.k
+                                    sourceSize: Qt.size(512, 512)
+                                    asynchronous: false
+                                    mipmap: true
                                 }
                             }
                         }

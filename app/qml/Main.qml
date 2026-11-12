@@ -449,8 +449,11 @@ Window {
         Column {
             anchors.centerIn: parent
             spacing: app.px(16)
-            Icon {
-                app: app; d: app.icons.turbine; size: 56; tint: c.accent
+            Image {
+                source: "file://" + Hub.share + "/art/emblem.png"
+                width: app.px(64); height: width
+                sourceSize: Qt.size(256, 256)
+                mipmap: true
                 anchors.horizontalCenter: parent.horizontalCenter
                 RotationAnimator on rotation { from: 0; to: 360; duration: mo.spin; loops: Animation.Infinite; running: Hub.busy }
             }

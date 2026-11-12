@@ -39,11 +39,10 @@
                 "if [ -d /run/ccache ]; then export CARGO_TARGET_DIR=/run/ccache/cargo-target; fi; cargo --offline build --release --locked -p turbinehub -p turbinehub-helper && for b in turbinehub turbinehub-helper; do install -Dm755 \"${CARGO_TARGET_DIR:-target}/release/$b\" /app/bin/$b; done",
                 "install -Dm644 -t /app/share/turbinehub/fonts fonts/*.ttf",
                 "install -Dm644 -t /app/share/turbinehub/licenses fonts/OFL-*.txt LICENSE",
-                "install -Dm644 -t /app/share/turbinehub/art packaging/art/veteran.jpg",
+                "install -Dm644 -t /app/share/turbinehub/art packaging/art/veteran.jpg packaging/emblem.png",
                 "install -Dm644 -t /app/share/turbinehub/steam-art packaging/steam-art/*.png",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineHub.desktop /app/share/applications/io.github.ravenor907.TurbineHub.desktop",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineHub.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineHub.metainfo.xml",
-                "install -Dm644 packaging/io.github.ravenor907.TurbineHub.svg /app/share/icons/hicolor/scalable/apps/io.github.ravenor907.TurbineHub.svg",
                 "for n in 32 48 64 128 256 512; do install -Dm644 packaging/io.github.ravenor907.TurbineHub-$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineHub.png; done"
             ],
             "sources": [

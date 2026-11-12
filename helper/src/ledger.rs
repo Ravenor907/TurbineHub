@@ -11,6 +11,8 @@ pub enum Change {
     Set(Setting),
     /// Decky Loader installed or repaired from this official release tag.
     Decky { tag: String },
+    /// AllyHub's system files removed (each backed up first, so Undo puts them back).
+    AllyHubRemoved,
 }
 
 impl Change {
@@ -18,6 +20,7 @@ impl Change {
         match self {
             Change::Set(s) => s.key(),
             Change::Decky { .. } => "decky".into(),
+            Change::AllyHubRemoved => "allyhub".into(),
         }
     }
 
@@ -25,6 +28,7 @@ impl Change {
         match self {
             Change::Set(s) => s.words(),
             Change::Decky { tag } => format!("Decky Loader {tag} installed"),
+            Change::AllyHubRemoved => "AllyHub's system files removed".into(),
         }
     }
 
@@ -32,10 +36,14 @@ impl Change {
         match self {
             Change::Set(s) => s.to_json(),
             Change::Decky { tag } => format!("{{\"kind\":\"decky\",\"tag\":{}}}", quote(tag)),
+            Change::AllyHubRemoved => "{\"kind\":\"allyhub-removed\"}".into(),
         }
     }
 
     fn from_json(j: &Json) -> Result<Change, String> {
+        if j.str_at("kind") == Some("allyhub-removed") {
+            return Ok(Change::AllyHubRemoved);
+        }
         if j.str_at("kind") == Some("decky") {
             let tag = j.str_at("tag").ok_or("tag is missing")?;
             if !crate::ops::decky_tag_ok(tag) {
@@ -141,7 +149,7 @@ impl Ledger {
             .iter()
             .filter_map(|e| match &e.change {
                 Change::Set(s) => Some(s),
-                Change::Decky { .. } => None,
+                Change::Decky { .. } | Change::AllyHubRemoved => None,
             })
             .collect()
     }

@@ -638,6 +638,15 @@ pub fn groups_json(groups: &[Group]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_helper_removes_exactly_the_files_this_plan_names() {
+        let mut a: Vec<&str> = SYSTEM_FILES.to_vec();
+        let mut b: Vec<&str> = turbinehub_helper::policy::ALLYHUB_FILES.to_vec();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
+    }
     use crate::fake::{self, Preset};
     use std::path::PathBuf;
 

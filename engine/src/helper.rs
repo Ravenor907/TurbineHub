@@ -25,6 +25,11 @@ pub fn undo(id: u64) -> Vec<String> {
     job("undo", Some(&format!("{{\"id\":{id}}}")))
 }
 
+/// Removes AllyHub's system files (a fixed list inside the helper), recorded so Undo puts them back.
+pub fn allyhub_cleanup() -> Vec<String> {
+    job("allyhub-cleanup", None)
+}
+
 pub fn set_now(path: &str, value: &str) -> Vec<String> {
     job("set-now", Some(&format!("{{\"path\":{},\"value\":{}}}", json::quote(path), json::quote(value))))
 }

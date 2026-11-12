@@ -45,7 +45,7 @@ Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pas
 - "Where's my...?": Windows things and where they are on SteamOS, and the glossary. VIEW (Help) on any page first explains that page and its buttons, with "Where's my...?" one press further.
 
 ### Games
-Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, send a report), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
+Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, write a report that stays on the machine), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
 
 ### Store
 Essentials, Apps (Flathub), Decky plugins (with turn-off and "Turn all off" for troubleshooting), Launchers, TV and streaming, Emulation (EmuDeck), Installed. Update all. Everything installed keeps itself current.
@@ -243,7 +243,7 @@ One JSON file, one entry per setting (a second change to the same setting update
 ## 5. Updates, reports, CI
 
 - Updates: GitHub releases checked at startup and once a day by the background agent, installed only when the player agrees, bundle checked by SHA-256 (Turbine's selfupdate). Test builds: opt-in pre-releases.
-- Reports and Labs mode: Turbine's report and Labs.
+- Reports: written to Turbine Hub's own folder only, never sent anywhere. Labs mode: as in Turbine.
 - A release only ships a bundle from a green CI run of the same commit (Turbine's reuse and release jobs).
 - CI follows Turbine's build.yml: house rules check, engine tests and `clippy -D warnings` on 1.97.0, QML syntax check, release rules, Flatpak build, screenshot shards at 1280x800, 1920x1080 and 1600x900 with SelfCheck, stand-in servers and fake home folders (a live check may warn, never fail), layout checks and before/after screenshot comparison.
 - The repo variable `TURBINE_RUNNER` picks GitHub's runners or the owner's PC. The PC gets its own runner set with the label `turbinehub`, and a matching switch next to `~/dev-setup/turbine-ci`.

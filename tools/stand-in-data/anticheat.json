@@ -1,0 +1,6 @@
+[
+  {"name": "Apex Legends", "status": "Supported", "storeIds": {"steam": "1172470"}, "anticheats": ["Easy Anti-Cheat"]},
+  {"name": "ELDEN RING", "status": "Running", "storeIds": {"steam": "1245620"}, "anticheats": ["Easy Anti-Cheat"]},
+  {"name": "Shooter Without Linux", "status": "Denied", "storeIds": {"steam": "3999903"}, "anticheats": ["Vanguard"]},
+  {"name": "Not On Steam", "status": "Broken", "storeIds": {"epic": {"namespace": "x"}}, "anticheats": ["BattlEye"]}
+]

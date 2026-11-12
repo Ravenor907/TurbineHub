@@ -1,0 +1,624 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    # Words alone don't need a build.
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish this build as a release (only when the owner says so)"
+        type: boolean
+        default: false
+
+# How many green full builds of a commit a release needs. Only full attempts count, and the release ships exactly
+# that run's files, by artifact id and checksum.
+env:
+  REQUIRED_GREEN_BUILDS: 1
+
+permissions:
+  contents: read
+
+# A newer push to main cancels the push build it replaces. Every dispatched run (a release, or one of the green runs
+# for one) has a group of its own, so runs started side by side never cancel each other.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || format('build-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  # A release publishes the checked bundle of a green run of the same commit (its artifact's digest checked), never a
+  # new build; with no such run it stops here. Other runs find nothing to reuse and build in full.
+  reuse:
+    name: A checked build of this commit?
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+      ids: ${{ steps.find.outputs.ids }}
+    steps:
+      - id: find
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=""
+          ids=""
+          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
+            sha="${{ github.sha }}"
+            # A release needs every check green on this commit REQUIRED_GREEN_BUILDS times (fresh runs or full
+            # reruns), and ships the bundle and plugin such a run built, never a new build. Pushes and dispatched
+            # runs both count. A run counts only when it built the bundle (a release that reused a build has none).
+            # The run shipped is one whose latest attempt is green, and its files must come from that attempt (made
+            # between its start and its end), never from an earlier or later failed one.
+            repo="${{ github.repository }}"
+            # A commit that changes only paths this workflow ignores on push (*.md: the paths-ignore list at the
+            # top, mirrored in the case line below and checked by tools/release-check.py) has no build of its own.
+            # Its release reuses the green build of the newest commit before it that changed anything else; the
+            # release is still tagged on this commit.
+            built="$sha"
+            for step in $(seq 1 30); do
+              files=$(gh api "repos/$repo/commits/$built" --jq '.files[].filename')
+              parents=$(gh api "repos/$repo/commits/$built" --jq '.parents | length')
+              [ -n "$files" ] && [ "$parents" = 1 ] || break
+              only_ignored=1
+              while IFS= read -r f; do
+                case "$f" in *.md) ;; *) only_ignored=0 ;; esac
+              done <<< "$files"
+              [ "$only_ignored" = 1 ] || break
+              built=$(gh api "repos/$repo/commits/$built" --jq '.parents[0].sha')
+            done
+            if [ "$built" != "$sha" ]; then
+              echo "::notice title=Only ignored paths changed::$sha changes only *.md since $built: the release reuses $built's green build"
+              sha="$built"
+            fi
+            greens=0
+            for r in $(gh api "repos/$repo/actions/workflows/build.yml/runs?head_sha=$sha&per_page=50" \
+                         --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and (.event == \"push\" or .event == \"workflow_dispatch\") and .id != ${{ github.run_id }}) | .id"); do
+              arts=$(gh api "repos/$repo/actions/runs/$r/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired == false)]')
+              [ "$(echo "$arts" | jq '[.[] | select(.name == "TurbineHub.flatpak")] | length')" -gt 0 ] || continue
+              n=$(gh api "repos/$repo/actions/runs/$r" --jq .run_attempt)
+              for a in $(seq 1 "$n"); do
+                read -r c from to < <(gh api "repos/$repo/actions/runs/$r/attempts/$a" --jq '"\(.conclusion) \(.run_started_at) \(.updated_at)"')
+                [ "$c" = success ] || continue
+                # Only a full attempt counts. "Re-run failed jobs" makes an attempt in which the jobs that passed
+                # before are carried over (they keep their earlier attempt's number): that attempt checked only
+                # part of the build again.
+                carried=$(gh api "repos/$repo/actions/runs/$r/attempts/$a/jobs?per_page=100" --jq "[.jobs[] | select(.run_attempt != $a)] | length")
+                [ "$carried" = 0 ] || continue
+                greens=$((greens + 1))
+                if [ -z "$run" ] && [ "$a" = "$n" ]; then
+                  ok=1
+                  for name in TurbineHub.flatpak TurbineHub-Decky.zip; do
+                    made=$(echo "$arts" | jq -r --arg n "$name" '[.[] | select(.name == $n)] | sort_by(.created_at) | last | .created_at // ""')
+                    if [ -z "$made" ] || [[ "$made" < "$from" ]] || [[ "$made" > "$to" ]]; then ok=0; fi
+                  done
+                  [ "$ok" = 1 ] && run=$r
+                fi
+              done
+            done
+            echo "::notice title=Green runs of this commit::$greens"
+            if [ "$greens" -lt "$REQUIRED_GREEN_BUILDS" ]; then
+              echo "::error title=Not enough green builds::commit $sha has $greens green full builds and a release needs $REQUIRED_GREEN_BUILDS; run or rerun the build until every check is green"
+              exit 1
+            fi
+            if [ -z "$run" ]; then
+              echo "::error title=No run to ship::no run of $sha has a green latest attempt with its own files; run the build once more"
+              exit 1
+            fi
+            for name in TurbineHub.flatpak TurbineHub-Decky.zip; do
+              art=$(gh api "repos/$repo/actions/runs/$run/artifacts?per_page=100" --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)] | sort_by(.created_at) | last | \"\(.id) \(.digest)\"")
+              if [ -z "$art" ] || [ "$art" = "null null" ] || [ "${art#* }" = null ]; then echo "::error title=$name is gone::run $run's artifact expired or has no digest; push a new commit and get it green"; exit 1; fi
+              echo "::notice title=Release reuses run $run::$name, artifact $art"
+              ids="${ids:+$ids,}${art%% *}"
+            done
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "ids=${ids:-}" >> "$GITHUB_OUTPUT"
+
+  rules:
+    name: House rules
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      app: ${{ steps.parts.outputs.app }}
+      shots: ${{ steps.parts.outputs.shots }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: No em or en dashes, no attribution
+        shell: bash
+        run: |
+          fail=0
+          hits=$(git grep -n -I -F "$(printf '\342\200\224')" -- . | head -n 20 || true)
+          if [ -n "$hits" ]; then echo "::error title=House rule broken::Em dash"; echo "$hits"; fail=1; fi
+          hits=$(git grep -n -I -F "$(printf '\342\200\223')" -- . | head -n 20 || true)
+          if [ -n "$hits" ]; then echo "::error title=House rule broken::En dash"; echo "$hits"; fail=1; fi
+          # Kept encoded so this file doesn't contain the words either. The same list as tools/house-rules.sh.
+          pattern=$(printf '%s' 'Y28tYXV0aG9yZWQtYnl8YW50aHJvcGljfGNsYXVkZXxjaGF0Z3B0fGNvcGlsb3Q=' | base64 -d)
+          hits=$(git grep -n -I -i -E "$pattern" -- . | head -n 20 || true)
+          if [ -n "$hits" ]; then echo "::error title=House rule broken::Attribution"; echo "$hits"; fail=1; fi
+          exit $fail
+      - name: Commits are the owner's, with no trailers
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Every commit in the push: author and committer Ravenor907@users.noreply.github.com, no "Key: value"
+          # trailer lines and none of the words above in its message (tools/house-rules.sh checks each one).
+          if [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -Eq '^0+$' && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..HEAD"
+          else
+            range="HEAD -1"
+          fi
+          if ! out=$(sh tools/house-rules.sh "$range" 2>&1); then
+            echo "$out"
+            echo "::error title=House rule broken::$(echo "$out" | head -n 6 | cut -c1-200 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')"
+            exit 1
+          fi
+          echo "$out"
+      - name: Which parts are here
+        id: parts
+        shell: bash
+        run: |
+          # The app, its Flatpak and its screenshot checks build once their folders are in the repo. Until then
+          # those jobs are skipped and say so here.
+          app=false; shots=false
+          if [ -f app/Cargo.toml ] && ls packaging/io.github.ravenor907.TurbineHub.json > /dev/null 2>&1; then app=true; fi
+          if [ "$app" = true ] && [ -f tools/ci-shots.sh ]; then shots=true; fi
+          [ "$app" = true ] || echo "::notice title=No app yet::app/ or packaging/ isn't in the repo, so the Flatpak build and screenshot checks are skipped"
+          [ "$app" != true ] || [ "$shots" = true ] || echo "::notice title=No screenshot checks yet::tools/ci-shots.sh isn't in the repo, so the screenshot checks are skipped"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "shots=$shots" >> "$GITHUB_OUTPUT"
+      - name: QML syntax (seconds here instead of minutes into the Flatpak build)
+        shell: bash
+        run: |
+          if [ ! -f tools/qml-check.js ] || ! ls app/qml/*.qml > /dev/null 2>&1; then
+            echo "::notice title=QML check skipped::tools/qml-check.js or app/qml isn't in the repo yet"
+            exit 0
+          fi
+          node tools/qml-check.js app/qml/*.qml
+      - name: Release rules (the green builds a release needs, the same Flatpak and Decky zip, checksums, a pinned plugin)
+        shell: bash
+        run: python3 tools/release-check.py
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          v=$(head -n1 VERSION | tr -d '\r')
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$' || { echo "::error::VERSION must look like 0.3 or 1.0, not \"$v\""; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  engine:
+    name: Engine and helper tests
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      # The pinned toolchain and the build folder, kept between runs (the engine and helper have no outside crates).
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: runner.environment == 'github-hosted'
+        with:
+          path: |
+            ~/.rustup/toolchains/1.97.0-*
+            ~/.rustup/update-hashes/1.97.0-*
+            target
+          key: engine-1.97.0-${{ hashFiles('engine/**', 'helper/**', 'Cargo.lock') }}
+          restore-keys: engine-1.97.0-
+      - name: Test and lint the engine and the helper
+        shell: bash
+        run: |
+          # A pinned toolchain, so a newer runner (with new lints) can't break the build by itself.
+          rustup toolchain install 1.97.0 --profile minimal --component clippy
+          # Named one by one: the app needs Qt, which only the Flatpak build has.
+          env -u XDG_CONFIG_HOME cargo +1.97.0 test --release --locked -p turbinehub-engine -p turbinehub-helper
+          cargo +1.97.0 clippy --locked --all-targets -p turbinehub-engine -p turbinehub-helper -- -D warnings
+      - name: The stand-in server answers (tools/stand-in.py)
+        shell: bash
+        run: python3 tools/stand-in.py --self-test
+      - name: The --json jobs on a fake machine and a fake home folder
+        shell: bash
+        run: |
+          # The quick panel's jobs, run the way the panel runs them, against tools/fake-home.py and the engine's
+          # fake machines: every answer is one JSON object with ok true.
+          python3 tools/fake-home.py /tmp/th-home --allyhub
+          cargo +1.97.0 run --release --locked -q -p turbinehub-engine --example json -- --self-test /tmp/th-home
+
+  live:
+    name: Outside services (live, warns only)
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Ask the real services what the app asks them
+        shell: bash
+        run: sh tools/live-check.sh || true
+
+  # The optional quick panel (decky/), on its own beside the other jobs (nothing waits for it but a release). Decky's
+  # template build (rollup), its typecheck and tests, then the zip Decky installs from.
+  decky:
+    name: Quick panel (Decky)
+    needs: [reuse]
+    # A release ships the plugin the green runs built (reuse), never a new build.
+    if: needs.reuse.outputs.run == ''
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Typecheck, test and build the plugin
+        shell: bash
+        working-directory: decky
+        run: |
+          node --version
+          npm install -g pnpm@9.15.9 > /dev/null
+          pnpm --version
+          # The plugin's packages are pinned in the committed pnpm-lock.yaml; a build without it would pick new ones.
+          if [ ! -f pnpm-lock.yaml ]; then
+            pnpm install --lockfile-only > /dev/null
+            echo "LOCKFILE $(base64 -w0 pnpm-lock.yaml)"
+            echo "::error title=decky/pnpm-lock.yaml missing::Commit the lockfile (printed above as LOCKFILE) so every build uses the same packages"
+            exit 1
+          fi
+          pnpm install --frozen-lockfile
+          pnpm run typecheck
+          python3 -m py_compile main.py
+          pnpm run test
+          pnpm run build
+          test -s dist/index.js || { echo "::error title=Plugin build::dist/index.js wasn't made"; exit 1; }
+      - name: Zip it the way Decky installs it
+        shell: bash
+        run: |
+          v=$(head -n1 VERSION | tr -d '\r')
+          out=decky/out/TurbineHub
+          rm -rf decky/out && mkdir -p "$out/dist"
+          cp decky/dist/index.js "$out/dist/"
+          cp decky/main.py decky/plugin.json "$out/"
+          if [ -f LICENSE ]; then cp LICENSE "$out/LICENSE"; fi
+          # Decky shows the plugin's version from package.json: Turbine Hub's own (one dot, as everywhere).
+          node -e 'const fs=require("fs"), p=JSON.parse(fs.readFileSync(process.argv[1])); p.version=process.argv[3]; delete p.devDependencies; fs.writeFileSync(process.argv[2], JSON.stringify(p, null, 2) + "\n")' decky/package.json "$out/package.json" "$v"
+          (cd decky/out && zip -qr ../../TurbineHub-Decky.zip TurbineHub)
+          sha256sum TurbineHub-Decky.zip | tee TurbineHub-Decky.zip.sha256
+          unzip -l TurbineHub-Decky.zip
+          echo "::notice title=TurbineHub-Decky.zip::$(stat -c %s TurbineHub-Decky.zip) bytes, version $v"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: TurbineHub-Decky.zip
+          path: |
+            TurbineHub-Decky.zip
+            TurbineHub-Decky.zip.sha256
+          retention-days: 30
+
+  vendor:
+    name: Rust crates for the offline Flatpak build
+    needs: [rules]
+    if: needs.rules.outputs.app == 'true'
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Vendor the locked crates
+        shell: bash
+        run: |
+          # The crate versions are pinned in the committed Cargo.lock; a build without it would pick new ones.
+          [ -f Cargo.lock ] || { echo "::error title=Cargo.lock missing::Commit Cargo.lock so every build uses the same crate versions"; exit 1; }
+          mkdir -p .cargo
+          cargo vendor --locked vendor > .cargo/config.toml
+          du -sh vendor
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: vendor
+          path: |
+            vendor
+            .cargo/config.toml
+            Cargo.lock
+          include-hidden-files: true
+          retention-days: 3
+
+  flatpak:
+    name: Flatpak
+    # Starts without waiting for the engine tests (they run beside it; a failure still fails the run and blocks
+    # a release).
+    needs: [rules, vendor, reuse]
+    if: needs.reuse.outputs.run == '' && needs.rules.outputs.app == 'true'
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
+      options: --privileged
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: vendor
+          path: .
+      - name: Fonts
+        shell: bash
+        run: |
+          if [ -f tools/get-fonts.sh ]; then sh tools/get-fonts.sh; else echo "No tools/get-fonts.sh, so the app brings no fonts of its own"; fi
+      - name: Version
+        shell: bash
+        env:
+          VERSION: ${{ needs.rules.outputs.version }}
+        run: |
+          m=packaging/io.github.ravenor907.TurbineHub.json
+          # The manifest hands the app its version as TURBINEHUB_VERSION (TURBINE_VERSION is read too).
+          sed -i -E "s|\"(TURBINE(HUB)?_VERSION)\": \"[0-9.]+\"|\"\\1\": \"$VERSION\"|" "$m"
+          grep -Eq "\"TURBINE(HUB)?_VERSION\": \"$VERSION\"" "$m" || { echo "::error::The version didn't go into the Flatpak manifest (it sets TURBINEHUB_VERSION in the app module's build environment)"; exit 1; }
+          # The commit goes in beside the app (read by app/build.rs), so the manifest and its build cache stay the same.
+          git config --global --add safe.directory "$PWD" 2>/dev/null || true
+          git rev-parse --short=9 HEAD > app/build-commit.txt || echo "${GITHUB_SHA:0:9}" > app/build-commit.txt
+          cat app/build-commit.txt
+      # The KDE runtime and SDK and the Rust SDK extension, installed once and kept (flatpak-builder still updates
+      # them from Flathub when a newer build is out). The caches are restored every run but saved only when their
+      # key is new. The runtimes, keyed on the manifest (their versions are there).
+      - id: sdkcache
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            /var/lib/flatpak
+            ~/.local/share/flatpak
+          key: flatpak-sdk-${{ hashFiles('packaging/*.json') }}
+          restore-keys: flatpak-sdk-
+      # flatpak-builder's state (sources, ccache, modules that didn't change), keyed on the manifest and the locked
+      # crates; a change to Turbine Hub's own code reuses it.
+      - id: fbcache
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .flatpak-builder
+          key: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}
+          restore-keys: fb-
+      - name: Build Flatpak
+        shell: bash
+        env:
+          KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
+        run: |
+          # On the owner's PC (TURBINE_RUNNER=local) the runtimes and flatpak-builder's state stay in the runner's
+          # own folder between runs instead of going through the GitHub cache.
+          state=.flatpak-builder
+          if [ -n "$KEEP" ]; then export FLATPAK_SYSTEM_DIR="$KEEP/flatpak-system"; state="$KEEP/flatpak-builder"; fi
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          set +e
+          flatpak-builder --repo=repo --disable-rofiles-fuse --force-clean --ccache --install-deps-from=flathub \
+            --state-dir="$state" flatpak_app packaging/io.github.ravenor907.TurbineHub.json > build.log 2>&1
+          code=$?
+          set -e
+          tail -n 60 build.log
+          if [ $code -ne 0 ]; then
+            errs=$(grep -E "^error|error\[|error:|Error:|undefined reference|cannot find" build.log | head -n 30 | cut -c1-240 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            [ -n "$errs" ] && echo "::error title=Build errors::$errs"
+            exit 1
+          fi
+          flatpak build-bundle repo TurbineHub.flatpak io.github.ravenor907.TurbineHub \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+          # The bundle's real size, and a gate at 300 MB.
+          bytes=$(stat -c %s TurbineHub.flatpak)
+          mb=$(( (bytes + 524288) / 1048576 ))
+          echo "::notice title=TurbineHub.flatpak::$bytes bytes ($mb MB)"
+          if [ "$bytes" -gt $((300 * 1048576)) ]; then echo "::error title=Bundle too big::$mb MB, over the 300 MB limit"; exit 1; fi
+          sha256sum TurbineHub.flatpak | tee TurbineHub.flatpak.sha256
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: runner.environment == 'github-hosted' && steps.sdkcache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            /var/lib/flatpak
+            ~/.local/share/flatpak
+          key: flatpak-sdk-${{ hashFiles('packaging/*.json') }}
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: runner.environment == 'github-hosted' && steps.fbcache.outputs.cache-hit != 'true'
+        with:
+          path: .flatpak-builder
+          key: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: TurbineHub.flatpak
+          path: |
+            TurbineHub.flatpak
+            TurbineHub.flatpak.sha256
+          retention-days: 30
+
+  # The pictures and checks, each size split over shards side by side, each on the bundle the Flatpak job made. Every
+  # page is drawn by the app's own --screenshot mode with fake machines and a fake home folder, SelfCheck.qml reports
+  # clipped text, overflow and missing footer hints, and anything the app would fetch comes from tools/stand-in.py.
+  checks:
+    name: Checks (${{ matrix.part }} ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: [rules, flatpak]
+    if: needs.rules.outputs.shots == 'true'
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
+      options: --privileged
+    strategy:
+      fail-fast: false
+      # Game Mode on a handheld, Game Mode on a TV, and a Desktop Mode window. tools/ci-shots.sh plans each size's
+      # pictures over its shards by run time.
+      matrix:
+        include:
+          - { part: 1280x800, shard: 0, shards: 4 }
+          - { part: 1280x800, shard: 1, shards: 4 }
+          - { part: 1280x800, shard: 2, shards: 4 }
+          - { part: 1280x800, shard: 3, shards: 4 }
+          - { part: 1920x1080, shard: 0, shards: 4 }
+          - { part: 1920x1080, shard: 1, shards: 4 }
+          - { part: 1920x1080, shard: 2, shards: 4 }
+          - { part: 1920x1080, shard: 3, shards: 4 }
+          - { part: 1600x900, shard: 0, shards: 4 }
+          - { part: 1600x900, shard: 1, shards: 4 }
+          - { part: 1600x900, shard: 2, shards: 4 }
+          - { part: 1600x900, shard: 3, shards: 4 }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: TurbineHub.flatpak
+          path: .
+      # The KDE runtime the bundle runs on (not Turbine Hub itself, installed fresh each time): one cache for every
+      # shard, saved only when the manifest changes.
+      - id: rtcache
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            ~/.local/share/flatpak
+            !~/.local/share/flatpak/app/io.github.ravenor907.TurbineHub
+          key: flatpak-runtime-${{ hashFiles('packaging/*.json') }}
+          restore-keys: flatpak-runtime-
+      - name: Pictures and checks (${{ matrix.part }})
+        shell: bash
+        env:
+          KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
+          # Any layout problem SelfCheck finds fails the build. The repo variable LAYOUT_STRICT set to 0 makes the
+          # layout checks only report (a warning per shard), as a way out while a fix is on its way.
+          LAYOUT_STRICT: ${{ vars.LAYOUT_STRICT == '0' && '0' || '1' }}
+          # Where the app's fetches go during the checks: never a live service.
+          TURBINEHUB_STAND_IN: http://127.0.0.1:47900
+        run: |
+          # On the owner's PC each runner keeps its own Flatpak user folder between runs.
+          if [ -n "$KEEP" ]; then export FLATPAK_USER_DIR="$KEEP/flatpak-user"; fi
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          mkdir -p shots
+          python3 tools/stand-in.py --port 47900 --log shots/stand-in-${{ matrix.part }}-${{ matrix.shard }}.log > /dev/null 2>&1 &
+          bash tools/ci-shots.sh "${{ matrix.part }}" "${{ matrix.shard }}" "${{ matrix.shards }}"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: runner.environment == 'github-hosted' && steps.rtcache.outputs.cache-hit != 'true' && matrix.shard == 0 && matrix.part == '1280x800'
+        with:
+          path: |
+            ~/.local/share/flatpak
+            !~/.local/share/flatpak/app/io.github.ravenor907.TurbineHub
+          key: flatpak-runtime-${{ hashFiles('packaging/*.json') }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: screenshots-${{ matrix.part }}-${{ matrix.shard }}
+          path: shots
+          retention-days: 14
+
+  # This run's pictures against the last green build's on main (the commit before this one, or the newest commit
+  # before it with a green build that still has its pictures): the counts and the changed pages in the job's
+  # summary, before | after | diff for each in the screenshot-diff artifact. A report only: it never fails the build.
+  shotdiff:
+    name: Pictures against the last green build
+    needs: [checks]
+    if: ${{ !cancelled() && needs.checks.result != 'skipped' }}
+    continue-on-error: true
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        continue-on-error: true
+        with:
+          pattern: screenshots-*
+          path: shots-after
+      - name: The last green build's pictures
+        id: base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_id }}
+        run: |
+          # The commits before this one (newest first) and main's green runs of this workflow (newest first).
+          parents=$(gh api "repos/$REPO/commits?sha=$SHA&per_page=30" --jq '.[1:][].sha' 2>/dev/null || true)
+          green_runs=$(gh api "repos/$REPO/actions/workflows/build.yml/runs?branch=main&status=success&per_page=100" \
+                         --jq '.workflow_runs[] | "\(.head_sha) \(.id)"' 2>/dev/null || true)
+          base="" base_sha=""
+          for p in $parents; do
+            for r in $(echo "$green_runs" | awk -v s="$p" '$1 == s {print $2}'); do
+              [ "$r" = "$RUN" ] && continue
+              n=$(gh api "repos/$REPO/actions/runs/$r/artifacts?per_page=100" \
+                    --jq '[.artifacts[] | select(.expired == false and (.name | startswith("screenshots-")))] | length' 2>/dev/null || true)
+              case "$n" in ''|*[!0-9]*) n=0 ;; esac
+              if [ "$n" -gt 0 ]; then base=$r; base_sha=$p; break 2; fi
+            done
+          done
+          if [ -z "$base" ]; then
+            echo "::notice title=Screenshot diff::no green build on main before this commit still has its pictures, so nothing is compared"
+            exit 0
+          fi
+          if ! gh run download "$base" -R "$REPO" -p 'screenshots-*' -D shots-before; then
+            echo "::warning title=Screenshot diff::the pictures of run $base didn't download, so nothing is compared"
+            exit 0
+          fi
+          echo "run=$base" >> "$GITHUB_OUTPUT"
+          echo "name=run $base (commit ${base_sha:0:9})" >> "$GITHUB_OUTPUT"
+      - name: Compare (pixels that moved past 2%)
+        if: steps.base.outputs.run != ''
+        shell: bash
+        env:
+          BEFORE_NAME: ${{ steps.base.outputs.name }}
+        run: |
+          python3 tools/shot-diff.py shots-before shots-after screenshot-diff --summary "$GITHUB_STEP_SUMMARY" --before-name "$BEFORE_NAME" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: steps.base.outputs.run != ''
+        continue-on-error: true
+        with:
+          name: screenshot-diff
+          path: screenshot-diff
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Release (owner approved)
+    needs: [reuse, rules, engine, flatpak, checks, decky]
+    # Only the bundle and plugin a green run of the same commit built and checked (found by reuse), never a new build.
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && inputs.release &&
+      needs.reuse.result == 'success' && needs.reuse.outputs.run != '' && needs.rules.result == 'success' && needs.engine.result == 'success'
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbinehub"]') || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Both files from the green run of this commit (same commit, artifact digests checked when downloaded), by
+      # the exact artifacts the reuse job chose (made by the run's green latest attempt).
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          artifact-ids: ${{ needs.reuse.outputs.ids }}
+          merge-multiple: true
+          path: .
+          run-id: ${{ needs.reuse.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Both files are the ones that were checked
+        shell: bash
+        run: |
+          for f in TurbineHub.flatpak TurbineHub-Decky.zip; do
+            [ -f "$f.sha256" ] || { echo "::error title=No checksum beside $f::nothing is released without it"; exit 1; }
+            sha256sum -c "$f.sha256"
+            echo "::notice title=Releasing::$(sha256sum "$f") from run ${{ needs.reuse.outputs.run }}"
+          done
+      - name: Release notes with the checksums
+        shell: bash
+        run: |
+          # A download can be checked from two places: the .sha256 file beside it, and these notes.
+          {
+            echo "Turbine Hub for SteamOS: handhelds, desktop PCs and TV PCs. Download TurbineHub.flatpak in Desktop Mode and open it to install."
+            echo
+            echo "SHA-256 of each file (the same as in the .sha256 file beside it):"
+            echo
+            echo '```'
+            sha256sum TurbineHub.flatpak TurbineHub-Decky.zip
+            echo '```'
+          } > release-notes.md
+          grep -c -E '^[0-9a-f]{64}  ' release-notes.md | grep -qx 2 || { echo "::error title=Release notes::the checksums didn't go into the notes"; exit 1; }
+          cat release-notes.md
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          tag_name: v${{ needs.rules.outputs.version }}
+          name: Turbine Hub ${{ needs.rules.outputs.version }}
+          prerelease: false
+          files: |
+            TurbineHub.flatpak
+            TurbineHub.flatpak.sha256
+            TurbineHub-Decky.zip
+            TurbineHub-Decky.zip.sha256
+          body_path: release-notes.md

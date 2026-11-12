@@ -1,0 +1,10 @@
+{
+  "name": "Turbine Hub",
+  "author": "Ravenor907",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["steamos", "utility"],
+    "description": "Turbine Hub in the Quick Access menu: battery, temperatures, this game's switches, Game Boost and lighting at a glance, and Open Turbine Hub. Needs Turbine Hub (Flatpak)."
+  }
+}

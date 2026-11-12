@@ -44,7 +44,7 @@ README_SHOTS = [
 ]
 
 
-TAGLINE = "Harness the Power of SteamOS"
+TAGLINE = "HARNESS THE POWER OF STEAMOS"
 
 
 def line(im, text, middle, height, fill=SOFT, face=BODY):
@@ -60,7 +60,7 @@ def banner():
     art.words(im, "TURBINE", (1000, 150), 104)
     art.rule(im, (1000, 222), 520)
     art.words(im, "HUB", (1000, 292), 104, spacing=0.5)
-    line(im, TAGLINE, (1000, 385), 36, fill=art.BRASS_HI, face=art.FONT)
+    art.words(im, TAGLINE, (1000, 385), 30, spacing=0.08)
     return im
 
 
@@ -70,7 +70,7 @@ def social():
     art.put_turbine(im, (w // 2, 250), 560, faint=40)
     art.put_turbine(im, (w // 2, 250), 290)
     art.words(im, "TURBINE HUB", (w // 2, 485), 70, spacing=0.1)
-    line(im, TAGLINE, (w // 2, 565), 36, fill=art.BRASS_HI, face=art.FONT)
+    art.words(im, TAGLINE, (w // 2, 565), 30, spacing=0.08)
     return im
 
 

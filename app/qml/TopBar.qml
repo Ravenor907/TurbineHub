@@ -3,7 +3,8 @@ import QtQuick
 // The top bar: the tabs between LB and RB (Q and E on a keyboard), then the status: the work that runs while the
 // player browses ("Working: Discord (2 more waiting)", with a mark that turns), a mark when updates are ready, the
 // battery with its percent and a charging mark (only on a machine with one), the clock (Game Mode hides Steam's
-// own), the mode and the machine's name. The tab that is open carries the accent underline ("selected"); the
+// own), the mode and the machine's name. While a lower graphics card voltage is being checked its countdown comes
+// first ("Checking -30 mV: 4:12 left") with Stop beside it, a tap that goes back at once; it never gives way. The tab that is open carries the accent underline ("selected"); the
 // highlight never comes up here, the bumpers and a click do the switching.
 //
 // The status never crowds the tabs. What fits is worked out from the room that is left (`fitted`), and things give
@@ -70,6 +71,7 @@ Rectangle {
     readonly property bool working: (status.work || "") !== ""
     readonly property bool hasBattery: status.battery >= 0
     readonly property int updates: status.updates || 0
+    readonly property string check: status.check || ""
     // The clock: the engine's own words in a picture, else the time here, looked at every few seconds.
     property date now: new Date()
     Timer { interval: 5000; repeat: true; running: bar.status.clock === true && (bar.status.clockText || "") === "" && bar.visible; onTriggered: bar.now = new Date() }
@@ -82,6 +84,8 @@ Rectangle {
     readonly property real room: width - tabsRow.x - tabsRow.width - app.px(24) - app.px(20)
     TextMetrics { id: fullWords; font: workText.font; text: bar.status.work || "" }
     TextMetrics { id: shortWords; font: workText.font; text: bar.status.workShort || "" }
+    TextMetrics { id: checkFull; font: checkText.font; text: bar.check }
+    TextMetrics { id: checkBrief; font: checkText.font; text: bar.status.checkShort || "" }
     readonly property var fitted: {
         const w = {
             mode: modeBox.width,
@@ -92,21 +96,27 @@ Rectangle {
             upd: updates > 0 ? updIcon.width + app.px(4) + updText.implicitWidth : 0,
             mark: working ? workIcon.width : 0,
             full: working ? fullWords.width + app.px(8) + (status.part >= 0 ? app.px(54) : 0) : 0,
-            brief: working ? shortWords.width + app.px(8) : 0
+            brief: working ? shortWords.width + app.px(8) : 0,
+            // The check's mark and Stop always show; its words as long as there is room ("4:12" at least).
+            check: bar.check !== "" ? app.px(18) + app.px(16) + stopItem.width : 0,
+            cfull: bar.check !== "" ? checkFull.width : 0,
+            cbrief: bar.check !== "" ? checkBrief.width : 0
         }
         const need = (t) => {
-            const parts = [w.mode, w.mark + (t.words === 2 ? w.full : t.words === 1 ? w.brief : 0), t.upd ? w.upd : 0, (t.bat ? w.bat : 0) + (t.pct ? w.pct : 0), t.clock ? w.clock : 0, t.name ? w.name : 0].filter(x => x > 0)
+            const parts = [w.mode, w.check + (t.cw === 2 ? w.cfull : t.cw === 1 ? w.cbrief : 0), w.mark + (t.words === 2 ? w.full : t.words === 1 ? w.brief : 0), t.upd ? w.upd : 0, (t.bat ? w.bat : 0) + (t.pct ? w.pct : 0), t.clock ? w.clock : 0, t.name ? w.name : 0].filter(x => x > 0)
             return parts.reduce((a, b) => a + b, 0) + gap * Math.max(0, parts.length - 1)
         }
         // Most first: each step lets one more thing go.
         const tries = [
-            { name: true, words: 2, clock: true, pct: true, bat: true, upd: true },
-            { name: false, words: 2, clock: true, pct: true, bat: true, upd: true },
-            { name: false, words: 2, clock: false, pct: true, bat: true, upd: true },
-            { name: false, words: 1, clock: false, pct: true, bat: true, upd: true },
-            { name: false, words: 1, clock: false, pct: false, bat: true, upd: true },
-            { name: false, words: 0, clock: false, pct: false, bat: true, upd: true },
-            { name: false, words: 0, clock: false, pct: false, bat: false, upd: false }]
+            { name: true, words: 2, clock: true, pct: true, bat: true, upd: true, cw: 2 },
+            { name: false, words: 2, clock: true, pct: true, bat: true, upd: true, cw: 2 },
+            { name: false, words: 2, clock: false, pct: true, bat: true, upd: true, cw: 2 },
+            { name: false, words: 1, clock: false, pct: true, bat: true, upd: true, cw: 2 },
+            { name: false, words: 1, clock: false, pct: false, bat: true, upd: true, cw: 2 },
+            { name: false, words: 0, clock: false, pct: false, bat: true, upd: true, cw: 2 },
+            { name: false, words: 0, clock: false, pct: false, bat: false, upd: false, cw: 2 },
+            { name: false, words: 0, clock: false, pct: false, bat: false, upd: false, cw: 1 },
+            { name: false, words: 0, clock: false, pct: false, bat: false, upd: false, cw: 0 }]
         for (const t of tries) if (need(t) <= room) return t
         return tries[tries.length - 1]
     }
@@ -115,6 +125,55 @@ Rectangle {
         id: statusRow
         anchors { right: parent.right; rightMargin: bar.app.px(24); verticalCenter: parent.verticalCenter }
         spacing: bar.gap
+        // A lower graphics card voltage being checked: its countdown, and Stop.
+        Row {
+            id: checkRow
+            visible: bar.check !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: bar.app.px(8)
+            Icon { app: bar.app; d: bar.app.icons.gauge; size: 18; tint: bar.app.colors.warn; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+                id: checkText
+                visible: bar.fitted.cw > 0
+                text: bar.fitted.cw === 2 ? bar.check : (bar.status.checkShort || "")
+                Accessible.role: Accessible.StaticText
+                Accessible.name: bar.check
+                Accessible.ignored: !checkRow.visible
+                color: bar.app.colors.text
+                font.family: bar.app.bodyFont
+                font.pixelSize: bar.app.fpx(15)
+                font.weight: Font.Medium
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Item {
+                id: stopItem
+                // Something to tap: never narrower than a finger.
+                readonly property bool tapTarget: true
+                width: Math.max(stopText.implicitWidth + bar.app.px(24), bar.app.touchFloor)
+                height: bar.height
+                Accessible.role: Accessible.Button
+                Accessible.name: "Stop checking the lower voltage"
+                Accessible.ignored: !checkRow.visible
+                Accessible.onPressAction: bar.app.doAct("uv-stop", "", "")
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: parent.width; height: bar.app.bpx(30, 15); radius: height / 2
+                    color: "transparent"
+                    border.width: Math.max(1, bar.app.px(2)); border.color: bar.app.colors.warn
+                }
+                Text {
+                    id: stopText
+                    anchors.centerIn: parent
+                    text: "Stop"
+                    Accessible.ignored: true
+                    color: bar.app.colors.text
+                    font.family: bar.app.bodyFont
+                    font.pixelSize: bar.app.fpx(15)
+                    font.weight: Font.DemiBold
+                }
+                TapHandler { onTapped: if (bar.app.gate(stopItem, "a")) bar.app.doAct("uv-stop", "", "") }
+            }
+        }
         // The line of work: a mark that turns while something runs, and its words where there is room.
         Row {
             id: workRow

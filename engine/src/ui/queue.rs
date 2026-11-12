@@ -493,6 +493,9 @@ impl Ui {
             "jobs": n(self.queue.count() as f64),
             "closing": s(self.queue.closing_words()),
             "updates": n(updates as f64),
+            // A graphics card voltage being checked: "Checking -30 mV: 4:12 left", with Stop beside it.
+            "check": s(self.uv_words()),
+            "checkShort": s(self.uv_short()),
         }
         .to_text()
     }

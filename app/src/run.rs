@@ -32,6 +32,8 @@ pub enum Event {
     Storage(Box<(turbinehub_engine::storage::Report, turbinehub_engine::storage::Host)>),
     /// One game's real size was counted (None: the game isn't there any more).
     GameSize(String, Option<Box<turbinehub_engine::storage::GameSize>>),
+    /// A graphics card voltage job of the checks ended (going back, or noting a driver reset).
+    Voltage(Result<(), String>),
 }
 
 /// Facts gathered from the host and the internet.
@@ -457,6 +459,19 @@ pub fn game_size(home: PathBuf, folder: PathBuf, data: PathBuf, id: String, tx: 
         let size = turbinehub_engine::storage::game_size_here(&home, &folder, &data, &id).map(Box::new);
         let _ = tx.send(Event::GameSize(id, size));
     });
+}
+
+/// A graphics card voltage job the checks ask for (going back, or noting a driver reset), on a new thread: no
+/// dialog and no line of work, so it never waits behind anything.
+pub fn voltage(line: Vec<String>, tx: Sender<Event>) {
+    std::thread::spawn(move || {
+        let _ = tx.send(Event::Voltage(voltage_now(&line)));
+    });
+}
+
+/// The same, waited for: Turbine Hub is closing and a value being checked goes back first.
+pub fn voltage_now(line: &[String]) -> Result<(), String> {
+    run(line, None).and_then(|o| helper_result(&o))
 }
 
 /// One harmless host command the engine asks for without a dialog (the sound output).

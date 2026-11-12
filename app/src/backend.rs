@@ -326,7 +326,7 @@ fn make_ui() -> Ui {
     if let Some(mode) = option("power-mode") {
         ui.sample_power_mode(&mode);
     }
-    // The desktop's graphics card in one of undervolting's states ("--undervolt=probation"), its fold open.
+    // The desktop's graphics card in one of undervolting's states ("--undervolt=checking"), its fold open.
     if let Some(state) = option("undervolt") {
         ui.sample_undervolt(&state);
     }
@@ -491,6 +491,19 @@ impl HubRust {
         }
     }
 
+    /// The graphics card voltage job the checks ask for, run at once (on a made-up machine only pretended).
+    /// Answers the window's news when it is pretended.
+    fn voltage_work(&mut self) -> Option<String> {
+        self.ui.uv_take_run().and_then(|line| {
+            if self.ui.sample {
+                return self.ui.uv_done(Ok(()));
+            }
+            crate::log::line("voltage", &line.join(" "));
+            run::voltage(line, self.tx.clone());
+            None
+        })
+    }
+
     /// The next job of the line of work starts, when nothing of it runs. On a made-up machine it only counts as
     /// running: nothing is ever run there.
     fn pump(&mut self) {
@@ -520,6 +533,16 @@ const STOP_WITHIN: Duration = Duration::from_secs(45);
 const QUIET_AFTER_BACK: Duration = Duration::from_millis(250);
 /// How long a Desktop Mode window waits for a controller before the checkup says none was found.
 const NO_PAD_AFTER: Duration = Duration::from_secs(10);
+
+/// One JSON object with another's keys added (the later one wins).
+fn with_news(text: &str, news: &str) -> String {
+    let (Ok(Json::Obj(mut a)), Ok(Json::Obj(b))) = (turbinehub_engine::json::parse(text), turbinehub_engine::json::parse(news)) else { return text.to_string() };
+    for (k, v) in b {
+        a.retain(|(x, _)| *x != k);
+        a.push((k, v));
+    }
+    Json::Obj(a).to_text()
+}
 
 /// The help page with one more section, for a Desktop Mode window where no controller was found.
 fn with_pad_hint(page: &str) -> String {
@@ -591,6 +614,13 @@ impl qobject::Hub {
     }
 
     pub fn stop_work(mut self: Pin<&mut Self>) {
+        // A graphics card voltage still being checked goes back before anything else, and is waited for.
+        if let Some(line) = self.as_mut().rust_mut().ui.uv_close()
+            && !self.rust().ui.sample
+        {
+            let r = run::voltage_now(&line);
+            crate::log::line("voltage", &format!("Closing during a check: back ({r:?})"));
+        }
         let running = self.as_mut().rust_mut().ui.queue_stop();
         self.rust().stop.store(true, Ordering::SeqCst);
         if self.rust().ui.sample {
@@ -768,6 +798,11 @@ impl qobject::Hub {
                 run::quick(line);
             }
         }
+        // A press of undervolting's checks may ask the helper to go back at once.
+        let mut text = text;
+        if let Some(news) = self.as_mut().rust_mut().voltage_work() {
+            text = with_news(&text, &news);
+        }
         // A press may have put a copy of Files into the line, or ended a made-up machine's job; Look again asks
         // for the storage saver's look.
         self.as_mut().rust_mut().pump();
@@ -917,7 +952,10 @@ impl qobject::Hub {
             self.as_mut().rust_mut().looked = std::time::Instant::now();
             tick |= self.as_mut().rust_mut().ui.absorb();
         }
-        let mut status = false;
+        // Undervolting's checks: the clock, the card, the questions and the countdowns (the engine decides all).
+        let mut uv: Vec<String> = Vec::new();
+        uv.extend(self.as_mut().rust_mut().ui.uv_tick());
+        let mut status = !uv.is_empty();
         let mut events = Vec::new();
         while let Ok(e) = self.rust().rx.try_recv() {
             events.push(e);
@@ -960,6 +998,11 @@ impl qobject::Hub {
                     self.as_mut().rust_mut().ui.storage_game_size(&id, size.map(|s| *s));
                     tick = true;
                 }
+                Event::Voltage(result) => {
+                    crate::log::line("voltage", &format!("Done: {result:?}"));
+                    uv.extend(self.as_mut().rust_mut().ui.uv_done(result));
+                    status = true;
+                }
                 Event::Done(_, result) => {
                     let plan = self.as_mut().rust_mut().running.take();
                     let result = match (&plan, result) {
@@ -984,6 +1027,12 @@ impl qobject::Hub {
                     }));
                 }
             }
+        }
+        uv.extend(self.as_mut().rust_mut().voltage_work());
+        if !uv.is_empty() {
+            status = true;
+            let merged = uv.iter().fold(String::from("{}"), |acc, n| with_news(&acc, n));
+            out.push(("uv", merged));
         }
         // A made-up machine tried by hand: its job ends after a moment, as a real one's would (also one that was
         // in the line from the start: --queue).

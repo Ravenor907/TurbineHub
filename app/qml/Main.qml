@@ -1042,6 +1042,8 @@ Window {
             }
             // Files: a copy's progress or its end, a search below a folder finding more.
             if (r.files) app.filesNews(r.files)
+            // Undervolting's checks: a countdown, a question that opens or closes, what happened.
+            if (r.uv) app.voltageNews(r.uv)
             // A job of the line of work ended: its note, and the page again with the thing's new state.
             if (r.job) app.jobNews(r.job)
             // This version's notes arrived after an update: What's new, once.
@@ -1052,6 +1054,15 @@ Window {
                 if (r.done.ok && r.done.next) app.doAct(r.done.next.act, r.done.next.arg || "", r.done.next.value || "")
             } else if (r.tick && !dialog.open && !(view.item && view.item.busyTyping === true)) app.reloadPage()
         }
+    }
+    // Undervolting's checks run on the engine's clock: the window only shows its questions and counts down with it.
+    function voltageNews(n) {
+        const ours = dialog.open && dialog.d !== null && dialog.d.keep !== undefined && dialog.d.keep.engine === true
+        if (n.close && ours) dialog.close()
+        if (n.keep) dialog.show({ title: n.keep.title, text: n.keep.text, items: [], confirm: n.keep.confirm, cancel: n.keep.cancel, ask: "", danger: true, keep: n.keep })
+        else if (typeof n.left === "number" && ours) dialog.remaining = n.left
+        if (n.toast) toast.show(n.toast)
+        if (n.refresh) { if (dialog.open || typing || (view.item && view.item.busyTyping === true)) pageStale = true; else reloadPage() }
     }
     // The page shows a state that has changed since (a job ended under a dialog): read again once it can be.
     property bool pageStale: false

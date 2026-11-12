@@ -171,7 +171,7 @@ sees of the lights into one text file to send with a problem.
 <details>
 <summary><b>Advanced</b></summary>
 
-**GPU undervolt** (Veteran mode, Radeon RX 7000 and RX 9000 only): a lower graphics card voltage, tried for 15 seconds before it is kept, put back a minute into each start and turned off by itself if the machine stops; it needs graphics card tuning on (a restart, and the system log marked as tuned).
+**GPU undervolt** (Veteran mode, Radeon RX 7000 and RX 9000 only): a lower graphics card voltage, tried with a 10 second question, then 5 minutes of play and a second question before it counts; it stays on until the machine restarts and is never turned on by itself at start or after a wake. It needs graphics card tuning on (a restart, and the system log marked as tuned).
 
 </details>
 

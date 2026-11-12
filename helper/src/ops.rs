@@ -506,6 +506,11 @@ impl<R: Run> Sys<R> {
     /// Applies one setting and records it. On failure nothing stays changed.
     pub fn apply(&mut self, s: Setting) -> Result<u64, String> {
         s.check()?;
+        // A graphics card voltage is never recorded: it is set for the session only, through the app's checks
+        // (the `gpu` job), so nothing could ever put it back. Older records can still be undone.
+        if matches!(s, Setting::GpuVoltage { .. }) {
+            return Err("A graphics card voltage isn't recorded: it is tried and checked for this session only".into());
+        }
         self.check_live(&s)?;
         let mut l = self.ledger()?;
         let old = l.clone();
@@ -528,12 +533,8 @@ impl<R: Run> Sys<R> {
         if matches!(s, Setting::Access { what: policy::Access::Lighting }) {
             self.open_lights();
         }
-        if matches!(s, Setting::GpuVoltage { .. }) {
-            // A value kept anew: the background helper may put it back again.
-            let _ = fs::remove_file(self.p(gpu::TRIPPED));
-        }
         if is_power_cap(&s) {
-            self.recommit();
+            self.recommit(&s);
         }
         Ok(id)
     }
@@ -545,8 +546,10 @@ impl<R: Run> Sys<R> {
         self.render_files(&l)?;
         self.restore_live(&e)?;
         self.save(&l)?;
-        if matches!(&e.change, Change::Set(s) if is_power_cap(s)) {
-            self.recommit();
+        if let Change::Set(s) = &e.change
+            && is_power_cap(s)
+        {
+            self.recommit(s);
         }
         Ok(e.change.words())
     }
@@ -600,19 +603,28 @@ impl<R: Run> Sys<R> {
         let mut errors = Vec::new();
         for e in &l.entries {
             if let Change::Set(s @ (Setting::Sysctl { .. } | Setting::Sysfs { .. } | Setting::Module { .. })) = &e.change {
+                // A graphics card's power limit that still reads as recorded isn't written again: on kernel 7.2
+                // that would drop a voltage offset the card holds.
+                if let Setting::Sysfs { path, value } = s
+                    && is_power_cap(s)
+                    && self.read(&self.sysfs_now(path)).is_some_and(|t| live_word(&t) == *value)
+                {
+                    continue;
+                }
                 match self.apply_live(s) {
                     Ok(()) => fixed.push(s.words()),
                     Err(er) => errors.push(er),
+                }
+                if is_power_cap(s) {
+                    self.limit_dropped_offset(s);
                 }
             }
         }
         // udev may have met the lights before the helper's folder was there at start, or the controller service may
         // have closed them again: open them now.
         self.open_lights();
-        // After a wake the power limit was just written again, which drops the card's voltage offset on kernel 7.2
-        // while its file still reads it: the offset goes in again. At boot the file reads 0 and nothing is written,
-        // so the boot never puts an offset back.
-        self.recommit();
+        // A voltage offset is never written here, at boot or after a wake: the owner turned putting one back off
+        // until real testing is done. After a wake the card keeps its offset, and the app looks at it again.
         if errors.is_empty() { Ok(fixed) } else { Err(errors.join("; ")) }
     }
 
@@ -692,7 +704,7 @@ impl<R: Run> Sys<R> {
         self.check_live(&s)?;
         self.apply_live(&s)?;
         if is_power_cap(&s) {
-            self.recommit();
+            self.recommit(&s);
         }
         Ok(())
     }
@@ -822,19 +834,36 @@ impl<R: Run> Sys<R> {
         }
     }
 
-    /// The offset each recorded card holds now goes in again (after a power limit was written). A card at 0 (a
-    /// fresh start, a reset, an offset never put back) gets nothing.
-    fn recommit(&mut self) {
-        let Ok(l) = self.ledger() else { return };
-        for s in l.settings() {
-            let Setting::GpuVoltage { slot, device, subsystem, .. } = s else { continue };
-            let Ok(dir) = self.gpu_dir(slot, device, subsystem) else { continue };
-            let Ok(Some(v)) = self.od_now(&dir).map(|od| od.offset) else { continue };
-            if v != 0
-                && let Err(e) = self.gpu_write(&dir, v)
-            {
-                self.log(&format!("re-commit of the graphics card's voltage after a power limit change failed: {e}"));
-            }
+    /// The card whose power limit this is, as its device folder ("/sys/class/drm/card1/device").
+    fn cap_card(&self, cap: &Setting) -> Option<String> {
+        let Setting::Sysfs { path, .. } = cap else { return None };
+        let now = self.sysfs_now(path);
+        now.split_once("/hwmon/").map(|(dev, _)| dev.to_string())
+    }
+
+    /// After the player changed a power limit: the offset that card holds now (a session's value: nothing else
+    /// sets one) goes in again, since kernel 7.2 drops it when the limit changes while the file still reads it. A
+    /// card at 0 gets nothing.
+    fn recommit(&mut self, cap: &Setting) {
+        let Some(dir) = self.cap_card(cap) else { return };
+        let Ok(Some(v)) = self.od_now(&dir).map(|od| od.offset) else { return };
+        if v != 0
+            && let Err(e) = self.gpu_write(&dir, v)
+        {
+            self.log(&format!("re-commit of the graphics card's voltage after a power limit change failed: {e}"));
+        }
+    }
+
+    /// The reapply unit had to write a power limit again (after a wake that lost it): on kernel 7.2 that dropped
+    /// the card's offset while its file still reads it. The card is set to 0 so its file tells the truth, and the
+    /// app offers the value again; the offset itself is never written back here.
+    fn limit_dropped_offset(&mut self, cap: &Setting) {
+        let Some(dir) = self.cap_card(cap) else { return };
+        if let Ok(Some(v)) = self.od_now(&dir).map(|od| od.offset)
+            && v != 0
+        {
+            self.log(&format!("a power limit was written again after a wake: the graphics card's {v} mV went back to 0"));
+            let _ = self.gpu_write(&dir, 0);
         }
     }
 
@@ -847,13 +876,15 @@ impl<R: Run> Sys<R> {
         self.read(gpu::TRIPPED).and_then(|t| gpu::parse_tripped(&t))
     }
 
-    /// The graphics card voltage jobs (`gpu` with {"do": ...}), none of them recorded:
-    /// - try: an offset for this session only, to be kept or taken back within seconds;
-    /// - back: the recorded offset again (0 when none, or when it tripped): the end of a try nobody kept;
-    /// - reset: 0, and the recorded offset and its trip forgotten (Safe reset);
-    /// - start: the recorded offset put back by the background helper once the session is up, unless it tripped;
-    /// - disarm: the crash mark cleared once the offset ran ten minutes;
-    /// - trip: the card reads 0 while an offset is recorded and none was asked for: the driver reset the card.
+    /// The graphics card voltage jobs (`gpu` with {"do": ...}), none of them recorded. The app runs them for its
+    /// checks; nothing runs them by itself at a start, a login or a wake:
+    /// - try: an offset for this session, to be kept or taken back within seconds (a new try clears a trip: the
+    ///   player chose again after reading it);
+    /// - back: going back to `offset` (0 when none: the card's own voltage), at the end of a try or a check that
+    ///   didn't pass;
+    /// - reset: 0, and any older record of an offset and its trip forgotten (Safe reset);
+    /// - trip: the card reads 0 while the crash mark of this boot still names an offset nobody took back: the
+    ///   driver reset the card.
     ///
     /// Answers what the card holds afterwards.
     pub fn gpu_job(&mut self, j: &Json) -> Result<i32, String> {
@@ -863,29 +894,36 @@ impl<R: Run> Sys<R> {
             return Err("That isn't a graphics card slot".into());
         }
         let ids = |j: &Json| (j.str_at("device").unwrap_or("").to_string(), j.str_at("subsystem").unwrap_or("").to_string());
-        let entry = self.gpu_entry(&slot);
-        let (device, subsystem) = match &entry {
-            Some(Setting::GpuVoltage { device, subsystem, .. }) => (device.clone(), subsystem.clone()),
+        let (device, subsystem) = match self.gpu_entry(&slot) {
+            Some(Setting::GpuVoltage { device, subsystem, .. }) => (device, subsystem),
             _ => ids(j),
         };
-        let kept = match &entry {
-            Some(Setting::GpuVoltage { offset, .. }) => Some(*offset),
-            _ => None,
+        // The offset asked for, checked like any setting's.
+        let asked = |j: &Json| -> Result<i32, String> {
+            if j.get("offset").is_none() {
+                return Ok(0);
+            }
+            let s = Setting::from_json(&Json::Obj(vec![("kind".into(), Json::Str("gpu-voltage".into())), ("slot".into(), Json::Str(slot.clone())), ("device".into(), Json::Str(device.clone())), ("subsystem".into(), Json::Str(subsystem.clone())), ("offset".into(), j.get("offset").cloned().unwrap_or(Json::Null))]))?;
+            match s {
+                Setting::GpuVoltage { offset, .. } => Ok(offset),
+                _ => Err("Not an offset".into()),
+            }
         };
         match what {
-            "try" => {
-                let s = Setting::from_json(&Json::Obj(vec![("kind".into(), Json::Str("gpu-voltage".into())), ("slot".into(), Json::Str(slot.clone())), ("device".into(), Json::Str(device.clone())), ("subsystem".into(), Json::Str(subsystem.clone())), ("offset".into(), j.get("offset").cloned().unwrap_or(Json::Null))]))?;
-                self.check_live(&s)?;
-                let Setting::GpuVoltage { offset, .. } = s else { return Err("Not an offset".into()) };
+            "try" | "back" => {
+                let offset = asked(j)?;
+                if what == "try" && j.get("offset").is_none() {
+                    return Err("Which offset to try?".into());
+                }
+                if offset != 0 {
+                    self.guard_installed()?;
+                }
                 let dir = self.gpu_dir(&slot, &device, &subsystem)?;
                 self.gpu_write(&dir, offset)?;
+                if what == "try" {
+                    let _ = fs::remove_file(self.p(gpu::TRIPPED));
+                }
                 Ok(offset)
-            }
-            "back" => {
-                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
-                let to = if self.tripped().is_some() { 0 } else { kept.unwrap_or(0) };
-                self.gpu_write(&dir, to)?;
-                Ok(to)
             }
             "reset" => {
                 let mut l = self.ledger()?;
@@ -898,37 +936,12 @@ impl<R: Run> Sys<R> {
                 self.disarm();
                 result.map(|_| 0)
             }
-            "start" => {
-                let Some(offset) = kept else { return Err("No graphics card voltage is kept".into()) };
-                if let Some((v, _)) = self.tripped() {
-                    return Err(format!("{} was turned off because the machine stopped unexpectedly, so it isn't put back", policy::mv_words(v)));
-                }
-                self.guard_installed()?;
-                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
-                if self.od_now(&dir)?.offset == Some(offset) {
-                    return Ok(offset);
-                }
-                self.gpu_write(&dir, offset)?;
-                Ok(offset)
-            }
-            "disarm" => {
-                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
-                let now = self.od_now(&dir)?.offset.unwrap_or(0);
-                if let Some((boot, at, _)) = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t))
-                    && boot == self.boot_id()
-                    && self.now >= at + gpu::ARMED_SECS
-                {
-                    self.disarm();
-                }
-                Ok(now)
-            }
             "trip" => {
                 let dir = self.gpu_dir(&slot, &device, &subsystem)?;
                 let now = self.od_now(&dir)?.offset.unwrap_or(0);
-                let asked = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t)).filter(|(boot, ..)| *boot == self.boot_id()).map(|(_, _, v)| v);
-                if let Some(k) = kept.filter(|k| *k != 0)
+                let armed = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t)).filter(|(boot, ..)| *boot == self.boot_id()).map(|(_, _, v)| v);
+                if let Some(k) = armed.filter(|k| *k != 0)
                     && now == 0
-                    && asked != Some(0)
                     && self.tripped().is_none()
                 {
                     self.write_file(gpu::TRIPPED, &gpu::tripped_text(k, self.now), 0o644)?;

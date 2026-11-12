@@ -128,25 +128,35 @@ gives the hwmon number.
      text written from the kernel's source; the real one replaces it).
    - The page now has the slider (-150 to 0 mV) and the power slider goes to 340 W.
 4. **Try 0 mV** is "already set"; move to -5 mV and back to 0 to see the before and after. Then Try **-10 mV**: the
-   dialog, then "Keep -10 mV? Going back to 0 mV in 15 s". Let it run out: it goes back by itself
-   (`pp_od_clk_voltage` reads `0mV` under OD_VDDGFX_OFFSET).
+   dialog, then "Keep -10 mV? Going back to 0 mV in 10 s" with Go back highlighted. Let it run out: it goes back by
+   itself (`pp_od_clk_voltage` reads `0mV` under OD_VDDGFX_OFFSET). Try again and press B: the same at once.
 5. Start the frame-capped game. In the terminal:
    `watch -n1 'cat /sys/class/drm/card1/device/hwmon/hwmon*/in0_input /sys/class/drm/card1/device/hwmon/hwmon*/power1_average'`
    (in0_input is the graphics voltage in mV, power1_average the draw in microwatts). Note both at 0 mV.
-6. Try -10, then -20, then -30 mV, each for a few minutes of play, keeping each one: in0_input should drop and
+6. Try -10 mV and press **Keep**: nothing is kept yet. The top bar and the Graphics card section say "Checking
+   -10 mV: 4:59 left" with Stop, counting down; `cat /var/lib/turbinehub/gpu-armed` names -10 all along. Press
+   **Stop**: back to 0 mV at once.
+7. Try -10, then -20, then -30 mV, each with Keep and the whole 5 minutes of play: in0_input should drop and
    power1_average fall a little at the same frame rate. Stop at the first crash, stutter or artifact and note the value.
-7. **Keep** -30 mV (or the last good one). The fold's badge says on probation; Home's checkup has the probation item.
-8. Sleep the PC and wake it. `pp_od_clk_voltage` still reads the kept value; Settings, Review changes lists
-   "Graphics card voltage set to -30 mV".
-9. Change the power limit (Graphics card, Power limit, 280 W). `tail /var/lib/turbinehub/helper.log` shows no
-   re-commit failure, `pp_od_clk_voltage` still reads -30 mV, and in0_input under the same game load is still the
-   lower one (kernel 7.2 drops the offset when the limit changes; Turbine Hub commits it again). Then the power
-   limit's **Safe reset**: the same.
-10. Restart: right after the start `pp_od_clk_voltage` reads 0 mV (the boot never puts it back); about a minute
-    after the session is up it reads -30 mV again (the background helper must be on).
-11. Undervolting's **Safe reset**: one press, no question, 0 mV at once, the probation item gone.
-12. **Turn tuning off**: the dialog lists the reset and the driver option going, then Restart now. After the restart
+8. At the end of the 5 minutes: "Still running well at -30 mV?" with 60 seconds. Let one run out once (back to the
+   value before). Then **Keep it for this session**: the section says "Lower voltage is on until the machine
+   restarts. It is never turned on by itself at start." Settings, Review changes lists no graphics card voltage.
+9. Close Turbine Hub during a 5 minute check (Try -35, Keep, then close the window): the card is back at -30 mV
+   (the value that passed) before the window is gone.
+10. Sleep the PC and wake it, then open Turbine Hub. `pp_od_clk_voltage` still reads -30 mV, and Turbine Hub says
+    "-30 mV is still on after the sleep". `journalctl -b -u turbinehub-reapply` and `tail /var/lib/turbinehub/helper.log`
+    show no offset written by the wake.
+11. Change the power limit (Graphics card, Power limit, 280 W). `tail /var/lib/turbinehub/helper.log` shows no
+    re-commit failure, `pp_od_clk_voltage` still reads -30 mV, and in0_input under the same game load is still the
+    lower one (kernel 7.2 drops the offset when the limit changes; Turbine Hub commits it again while a session's
+    value is on). Then the power limit's **Safe reset**: the same.
+12. Restart: `pp_od_clk_voltage` reads 0 mV right after the start and still 0 mV ten minutes after the session is
+    up (nothing puts it back, the background helper on or off). The section offers "Use -30 mV again": it asks the
+    10 second question only (same kernel), and Keep turns it on until the next restart.
+13. Undervolting's **Safe reset**: one press, no question, 0 mV at once.
+14. **Turn tuning off**: the dialog lists the reset and the driver option going, then Restart now. After the restart
     `ppfeaturemask` reads `0xfff7bfff` again, `pp_od_clk_voltage` is gone, `/etc/modprobe.d/turbinehub-amdgpu.conf`
     is gone, and the power slider stops at 304 W.
-- Not to try on purpose, but if a value freezes the machine: hold the power button. At the next start the page and
-  Home say the lower voltage was turned off because the machine stopped, and nothing puts it back by itself.
+- Not to try on purpose, but if a value freezes the machine: hold the power button. At the next start the card is at
+  0 mV, the page and Home say the lower voltage was turned off because the machine stopped, and that value isn't
+  offered with "Use again".

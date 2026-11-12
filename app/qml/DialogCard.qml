@@ -19,7 +19,9 @@ import TurbineHub
 // app (required): Main.qml's window. show(d): opens it with the engine's dialog. close(): closes it. Two dialogs
 // are answered here instead of by the engine: `local: "quit"` closes Turbine Hub on confirm, and `keep` (a change
 // that could leave the screen unreadable) counts down `keep.seconds` in its words ("{n}") and then goes back by
-// sending `keep.act`, as Cancel does; Keep sends `keep.keepAct` with `keep.keepValue` when it has one.
+// sending `keep.act`, as Cancel does; Keep sends `keep.keepAct` with `keep.keepValue` when it has one. A `keep`
+// with `engine` (undervolting's checks) is timed by the engine instead: the window sets `remaining` from its news
+// and closes it when the engine says, and never answers it by itself.
 Item {
     id: dlg
     required property var app
@@ -118,7 +120,7 @@ Item {
     property int remaining: 0
     Timer {
         interval: 1000; repeat: true
-        running: dlg.open && dlg.d.keep !== undefined && dlg.remaining > 0
+        running: dlg.open && dlg.d.keep !== undefined && dlg.d.keep.engine !== true && dlg.remaining > 0
         onTriggered: { dlg.remaining--; if (dlg.remaining <= 0) dlg.cancel() }
     }
 

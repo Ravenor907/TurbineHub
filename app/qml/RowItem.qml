@@ -17,7 +17,8 @@ import QtQuick.Layouts
 // only a picture of them). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up
 // and Down move between the lines of cards. A slider with `showFrom` shows where it starts and where it goes while
 // it moves, and its `notes` ({below, text}) each show a warning line while the value is below the mark. A row with
-// `alert` (a warning to read first) has a border in the stop color.
+// `alert` (a warning to read first) has a border in the stop color. A row with `liveTitle` takes its title from that
+// key of the top bar's status while it says something (undervolting's "Checking -30 mV: 4:12 left").
 //
 // app (required): Main.qml's window. m (required): the row.
 Focusable {
@@ -117,7 +118,8 @@ Focusable {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: r.app.px(2)
-                Label { app: r.app; Layout.fillWidth: true; text: r.m.title; font.pixelSize: r.app.fpx(17); font.weight: Font.DemiBold }
+                // A title that moves with the top bar's status (`liveTitle`: its key there), as a countdown does.
+                Label { app: r.app; Layout.fillWidth: true; text: r.m.liveTitle && (r.app.status[r.m.liveTitle] || "") !== "" ? r.app.status[r.m.liveTitle] : r.m.title; font.pixelSize: r.app.fpx(17); font.weight: Font.DemiBold }
                 Label { app: r.app; Layout.fillWidth: true; visible: text !== ""; text: r.m.line || ""; font.pixelSize: r.app.fpx(15); color: r.app.colors.muted }
                 Chip { app: r.app; visible: text !== "" && r.chipBelow; text: r.m.badge || ""; tone: r.m.tone || ""; Layout.topMargin: r.app.px(4) }
             }

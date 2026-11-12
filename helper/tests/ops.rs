@@ -434,16 +434,18 @@ fn a_try_arms_the_guard_writes_vo_then_c_and_records_nothing() {
 }
 
 #[test]
-fn kept_the_power_limit_goes_first_and_every_limit_change_commits_the_offset_again() {
+fn an_offset_is_never_recorded_the_power_limit_goes_first_and_every_limit_change_commits_it_again() {
     let mut sys = rx9070("keep");
     overdrive_on(&sys, 0);
     let cap = |w: u64| set(&format!(r#"{{"kind":"sysfs","path":"{CAP}","value":"{}"}}"#, w * 1_000_000));
+    // An offset is set for the session only: the record never takes one, so nothing could put it back.
+    assert!(sys.apply(voltage(-30)).unwrap_err().contains("isn't recorded"));
+    assert!(sys.ledger().unwrap().entries.is_empty() && od_calls(&sys).is_empty());
     sys.apply(cap(250)).unwrap();
     // Something else set the limit since (Steam, a reset): the recorded one goes in before the offset.
     fs::write(sys.p(CAP), "304000000\n").unwrap();
-    let id = sys.apply(voltage(-30)).unwrap();
+    assert_eq!(job(&mut sys, "try", Some(-30)), Ok(-30));
     assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 250000000)", "od c (cap 250000000)"]);
-    assert_eq!(sys.ledger().unwrap().find_key("gpu-voltage:0000:03:00.0").unwrap().id, id);
     // Kernel 7.2 drops the offset when the limit changes after it: the slider's next limit commits it again.
     sys.run.calls.clear();
     sys.apply(cap(280)).unwrap();
@@ -456,42 +458,51 @@ fn kept_the_power_limit_goes_first_and_every_limit_change_commits_the_offset_aga
     sys.run.calls.clear();
     sys.set_now(CAP, "260000000").unwrap();
     assert_eq!(od_calls(&sys).len(), 2);
-    // Undo takes the card back to its own voltage.
+    // Back at 0: a limit change writes no offset.
+    assert_eq!(job(&mut sys, "back", None), Ok(0));
     sys.run.calls.clear();
-    sys.undo(id).unwrap();
-    assert_eq!(od_calls(&sys), vec!["od vo 0 (cap 260000000)", "od c (cap 260000000)"]);
-    assert!(!sys.p(gpu::ARMED).exists());
+    sys.set_now(CAP, "250000000").unwrap();
+    assert!(od_calls(&sys).is_empty());
 }
 
 #[test]
-fn the_boot_never_puts_an_offset_back_and_a_wake_commits_it_again() {
+fn reapply_never_writes_an_offset_at_boot_or_after_a_wake() {
     let mut sys = rx9070("boot");
     overdrive_on(&sys, 0);
     sys.apply(set(&format!(r#"{{"kind":"sysfs","path":"{CAP}","value":"250000000"}}"#))).unwrap();
-    sys.apply(voltage(-30)).unwrap();
-    // A restart: the card starts at 0. The boot unit puts the power limit back, never the offset.
+    job(&mut sys, "try", Some(-30)).unwrap();
+    // After a wake the card keeps its offset and its limit: nothing is written, not even the limit (on kernel 7.2
+    // that would drop the offset).
+    sys.run.calls.clear();
+    sys.reapply().unwrap();
+    assert!(od_calls(&sys).is_empty());
+    assert!(!sys.run.calls.iter().any(|c| c.contains("power1_cap")));
+    assert_eq!(gpu::parse_od(&read(&sys, OD)).offset, Some(-30));
+    // A wake that lost the limit: it goes in again, which drops the offset, so the card is set to 0 to say so
+    // truthfully. The offset itself is never written back.
+    fs::write(sys.p(CAP), "304000000\n").unwrap();
+    sys.reapply().unwrap();
+    assert_eq!(read(&sys, CAP).trim(), "250000000");
+    assert_eq!(od_calls(&sys), vec!["od vo 0 (cap 250000000)", "od c (cap 250000000)"]);
+    // A restart: the card starts at 0, the boot unit puts the power limit back, never an offset.
     fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
+    fs::write(sys.p(CAP), "304000000\n").unwrap();
     sys.run.calls.clear();
     sys.reapply().unwrap();
     assert!(od_calls(&sys).is_empty());
     assert!(!sys.verify().unwrap().iter().any(|d| d.contains("voltage")));
-    // The background helper puts it back once the session is up.
-    assert_eq!(job(&mut sys, "start", None), Ok(-30));
-    assert_eq!(od_calls(&sys).len(), 2);
-    // Already there: nothing is written.
-    sys.run.calls.clear();
-    assert_eq!(job(&mut sys, "start", None), Ok(-30));
+    // The background helper's old jobs are gone: nothing can put a value back.
+    for gone in ["start", "disarm"] {
+        assert!(job(&mut sys, gone, None).unwrap_err().contains("Unknown"), "{gone}");
+    }
     assert!(od_calls(&sys).is_empty());
-    // After a wake the same unit writes the power limit again: the offset goes in again after it.
-    sys.reapply().unwrap();
-    assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 250000000)", "od c (cap 250000000)"]);
 }
 
 #[test]
 fn a_stop_while_armed_trips_the_offset_and_nothing_puts_it_back() {
     let mut sys = rx9070("guard");
     overdrive_on(&sys, 0);
-    sys.apply(voltage(-60)).unwrap();
+    job(&mut sys, "try", Some(-60)).unwrap();
     assert!(sys.p(gpu::ARMED).exists());
     // The guard's start in the same boot (the unit started again) changes nothing.
     assert_eq!(sys.gpu_guard("boot"), Ok(false));
@@ -502,54 +513,44 @@ fn a_stop_while_armed_trips_the_offset_and_nothing_puts_it_back() {
     assert_eq!(sys.gpu_guard("boot"), Ok(true));
     assert_eq!(gpu::parse_tripped(&read(&sys, gpu::TRIPPED)).map(|t| t.0), Some(-60));
     assert!(!sys.p(gpu::ARMED).exists());
-    // The background helper's start is refused, and a try nobody keeps goes back to 0, not to the tripped value.
-    assert!(job(&mut sys, "start", None).unwrap_err().contains("stopped unexpectedly"));
+    // Nothing put it back. A new try (the player chose again) clears the trip; going back goes to what is asked.
+    assert_eq!(gpu::parse_od(&read(&sys, OD)).offset, Some(0));
     assert_eq!(job(&mut sys, "try", Some(-40)), Ok(-40));
-    assert_eq!(job(&mut sys, "back", None), Ok(0));
-    // Keeping a smaller step clears the trip.
-    sys.apply(voltage(-40)).unwrap();
     assert!(!sys.p(gpu::TRIPPED).exists());
+    assert_eq!(job(&mut sys, "back", Some(-20)), Ok(-20));
+    assert_eq!(job(&mut sys, "back", None), Ok(0));
     // A clean shutdown and a sleep clear the mark: the next start trips nothing.
+    job(&mut sys, "try", Some(-40)).unwrap();
     sys.gpu_guard("stop").unwrap();
     assert!(!sys.p(gpu::ARMED).exists());
-    job(&mut sys, "start", None).unwrap();
-    sys.run.od_pending = None;
-    fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
-    job(&mut sys, "start", None).unwrap();
+    job(&mut sys, "try", Some(-45)).unwrap();
     sys.gpu_guard("sleep").unwrap();
     fs::write(sys.p(gpu::BOOT_ID), "third-boot\n").unwrap();
     assert_eq!(sys.gpu_guard("boot"), Ok(false));
     assert!(!sys.p(gpu::TRIPPED).exists());
-    // Safe reset: 0, the record and the trip gone.
+    // Safe reset: 0, the mark and any trip gone.
     assert_eq!(job(&mut sys, "reset", None), Ok(0));
-    assert!(sys.ledger().unwrap().entries.is_empty());
+    assert!(sys.ledger().unwrap().entries.is_empty() && !sys.p(gpu::ARMED).exists());
 }
 
 #[test]
-fn the_mark_clears_after_ten_minutes_and_a_reset_card_trips() {
+fn a_reset_card_trips_only_while_the_mark_still_names_an_offset() {
     let mut sys = rx9070("reset");
     overdrive_on(&sys, 0);
-    sys.apply(voltage(-30)).unwrap();
-    // Too early: the mark stays.
-    sys.now = 1000 + 300;
-    job(&mut sys, "disarm", None).unwrap();
-    assert!(sys.p(gpu::ARMED).exists());
-    sys.now = 1000 + gpu::ARMED_SECS;
-    job(&mut sys, "disarm", None).unwrap();
-    assert!(!sys.p(gpu::ARMED).exists());
+    job(&mut sys, "try", Some(-30)).unwrap();
     // While it reads -30 there is nothing to trip.
     job(&mut sys, "trip", None).unwrap();
     assert!(!sys.p(gpu::TRIPPED).exists());
-    // A player's try of 0 is no reset either.
-    job(&mut sys, "try", Some(0)).unwrap();
+    // Going back to 0 on purpose is no reset either: the mark says 0.
+    job(&mut sys, "back", None).unwrap();
     job(&mut sys, "trip", None).unwrap();
     assert!(!sys.p(gpu::TRIPPED).exists());
-    job(&mut sys, "back", None).unwrap();
-    let _ = fs::remove_file(sys.p(gpu::ARMED));
-    // The driver reset the card (a ring timeout): it reads 0 without anyone asking.
+    // The driver reset the card (a ring timeout): it reads 0 while the mark still names -30.
+    job(&mut sys, "try", Some(-30)).unwrap();
     fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
-    job(&mut sys, "trip", None).unwrap();
+    job(&mut sys, "trip", Some(-30)).unwrap();
     assert_eq!(gpu::parse_tripped(&read(&sys, gpu::TRIPPED)).map(|t| t.0), Some(-30));
+    assert!(!sys.p(gpu::ARMED).exists());
 }
 
 #[test]

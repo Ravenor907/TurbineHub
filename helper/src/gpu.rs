@@ -21,7 +21,7 @@ pub const DEEP_MV: i32 = -100;
 /// another boot's id, it means the machine went down while a new offset was on.
 pub const ARMED: &str = "/var/lib/turbinehub/gpu-armed";
 /// The offset that was turned off because the machine stopped (or the driver reset the card): "offset time". The
-/// background helper never puts a tripped offset back.
+/// app says so, and doesn't offer that value again.
 pub const TRIPPED: &str = "/var/lib/turbinehub/gpu-tripped";
 pub const BOOT_ID: &str = "/proc/sys/kernel/random/boot_id";
 pub const OSRELEASE: &str = "/proc/sys/kernel/osrelease";
@@ -31,14 +31,9 @@ pub const MASK_FILE: &str = "/sys/module/amdgpu/parameters/ppfeaturemask";
 pub const GUARD_UNIT: &str = "/etc/systemd/system/turbinehub-gpu-guard.service";
 pub const SLEEP_UNIT: &str = "/etc/systemd/system/turbinehub-gpu-sleep.service";
 
-/// How long the offset has to stay on before the crash mark is cleared, and how long it runs on probation (with at
-/// least one sleep and wake) before it counts as settled.
-pub const ARMED_SECS: u64 = 600;
-pub const SETTLE_SECS: u64 = 7200;
-/// The background helper puts a kept offset back this long after the session starts, never at boot.
-pub const START_DELAY_SECS: u64 = 60;
-/// How long a Try lasts before it goes back by itself.
-pub const TRY_SECS: u32 = 15;
+// Nothing ever puts an offset back by itself, at a start, a login or a wake: the owner turned that off until real
+// testing is done. A value is tried and checked by the app for the session only (engine `uvcheck`), and the crash
+// mark stays until a clean shutdown, a sleep, or the value going back to 0.
 
 /// The power firmware (SMU) versions of the cards offered: RX 7000 (13.0.0, 13.0.7 and 13.0.10) and RX 9000
 /// (14.0.2 and 14.0.3). Their driver code prints the offset's range and checks every value against it. Handheld and

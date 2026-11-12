@@ -377,44 +377,6 @@ pub struct Agent {
     new_os: String,
     /// How many times the kernel says the machine has slept, as last read.
     suspends: Option<u64>,
-    /// The kept graphics card voltage, watched.
-    uv: UvWatch,
-}
-
-/// How a kept graphics card voltage is doing, kept by the background helper in its own folder (`undervolt.json`)
-/// and shown by My machine: the offset it is about, the seconds it ran with nothing going wrong, the sleeps and
-/// wakes it went through, and whether it has settled (two hours with at least one sleep and wake).
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct UvProgress {
-    pub offset: i32,
-    pub healthy: u64,
-    pub sleeps: u32,
-    pub settled: bool,
-}
-
-impl UvProgress {
-    pub fn load(data: &Path) -> UvProgress {
-        let Some(j) = fs::read_to_string(dir(data).join("undervolt.json")).ok().and_then(|t| json::parse(&t).ok()) else { return UvProgress::default() };
-        let num = |k: &str| j.get(k).and_then(Json::as_f64).unwrap_or(0.0);
-        UvProgress { offset: num("offset") as i32, healthy: num("healthy") as u64, sleeps: num("sleeps") as u32, settled: j.get("settled").and_then(Json::as_bool) == Some(true) }
-    }
-    pub fn save(&self, data: &Path) {
-        let j = obj! {"offset": n(self.offset as f64), "healthy": n(self.healthy as f64), "sleeps": n(self.sleeps as f64), "settled": crate::ui::b(self.settled)};
-        let _ = crate::write_atomic(&dir(data).join("undervolt.json"), (j.to_text() + "\n").as_bytes());
-    }
-}
-
-/// What the background helper remembers about the kept voltage while it runs.
-#[derive(Debug, Default)]
-struct UvWatch {
-    /// The kept offset was put back (or found in place) in this session.
-    applied: bool,
-    /// The last look, for counting healthy time.
-    last: u64,
-    /// The crash mark (by its time) whose clearing was asked for already.
-    disarm_for: u64,
-    /// A reset was reported to the helper and not seen cleared yet.
-    trip_asked: bool,
 }
 
 impl Agent {
@@ -424,92 +386,12 @@ impl Agent {
         let state = State::load(&paths.data);
         let before = Report::load(&paths.data);
         let report = Report { at: 0, version: version.into(), game: None, ..before };
-        Agent { paths, state, report, running: None, last: None, last_sample: 0, wake_counts: Vec::new(), handheld: m.kind == crate::hardware::Kind::Handheld, docked: false, sound_wanted: false, sink_tries: 0, checking: false, verifying: false, verify_after: 0, boost_problem_told: false, not_games: Vec::new(), new_os: String::new(), suspends: None, uv: UvWatch::default() }
+        Agent { paths, state, report, running: None, last: None, last_sample: 0, wake_counts: Vec::new(), handheld: m.kind == crate::hardware::Kind::Handheld, docked: false, sound_wanted: false, sink_tries: 0, checking: false, verifying: false, verify_after: 0, boost_problem_told: false, not_games: Vec::new(), new_os: String::new(), suspends: None }
     }
 
-    /// The kept graphics card voltage, looked at every few seconds. `uptime`: seconds since this background helper
-    /// started with the session; `slept`: the machine woke since the last look. It reads the card's file itself,
-    /// and the helper's record, crash mark and trip from their files.
-    ///
-    /// - The kept offset is put back 60 seconds into the session, never at boot, and never once it tripped.
-    /// - After a wake it is looked at again and put back only when the card holds something else.
-    /// - The card reading 0 with no sleep in between means the driver reset it (a crash): the helper is told, and
-    ///   checks it again itself before it trips.
-    /// - Once it ran ten minutes the crash mark is cleared, so a crash hours later doesn't count against it.
-    /// - Two hours on with at least one sleep and wake, and it has settled.
-    pub fn undervolt(&mut self, now: u64, uptime: u64, slept: bool, m: &Machine, root: &Path) -> Vec<Do> {
-        use turbinehub_helper::gpu;
-        let read = |abs: &str| fs::read_to_string(root.join(abs.trim_start_matches('/'))).ok();
-        let Some(card) = modules::undervolt_card(m) else { return Vec::new() };
-        let (kept, _) = modules::undervolt_recorded(m, &helper::ledger(root));
-        let mut progress = UvProgress::load(&self.paths.data);
-        let Some(k) = kept else {
-            if progress != UvProgress::default() {
-                UvProgress::default().save(&self.paths.data);
-            }
-            self.uv = UvWatch::default();
-            return Vec::new();
-        };
-        if progress.offset != k {
-            progress = UvProgress { offset: k, ..UvProgress::default() };
-            progress.save(&self.paths.data);
-        }
-        if read(gpu::TRIPPED).is_some() {
-            self.uv.applied = false;
-            return Vec::new();
-        }
-        let live = read(&format!("/sys/bus/pci/devices/{}/pp_od_clk_voltage", card.slot)).and_then(|t| gpu::parse_od(&t).offset);
-        let job = |what: &str| modules::gpu_job(m, what, None).map(Do::Host);
-        let mut out = Vec::new();
-        let since = now.saturating_sub(self.uv.last).min(60);
-        self.uv.last = now;
-        if slept {
-            if self.uv.applied {
-                progress.sleeps += 1;
-                progress.save(&self.paths.data);
-                if live != Some(k) {
-                    out.extend(job("start"));
-                }
-            }
-            return out;
-        }
-        if !self.uv.applied {
-            if uptime >= gpu::START_DELAY_SECS {
-                self.uv.applied = true;
-                if live != Some(k) {
-                    out.extend(job("start"));
-                }
-            }
-            return out;
-        }
-        if live == Some(0) && k != 0 {
-            if !self.uv.trip_asked {
-                self.uv.trip_asked = true;
-                out.extend(job("trip"));
-            }
-            return out;
-        }
-        self.uv.trip_asked = false;
-        if live == Some(k) {
-            progress.healthy += since;
-            if !progress.settled && progress.healthy >= gpu::SETTLE_SECS && progress.sleeps >= 1 {
-                progress.settled = true;
-                self.note(now, &format!("The graphics card's lower voltage ({k} mV) has settled: two hours with no trouble"));
-            }
-            progress.save(&self.paths.data);
-            let boot = read(gpu::BOOT_ID).unwrap_or_default().trim().to_string();
-            if let Some((b, at, v)) = read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t))
-                && b == boot
-                && v == k
-                && now >= at + gpu::ARMED_SECS
-                && self.uv.disarm_for != at
-            {
-                self.uv.disarm_for = at;
-                out.extend(job("disarm"));
-            }
-        }
-        out
-    }
+    // Graphics card voltage: the background helper never puts an offset back, at a start, a login or a wake, and
+    // doesn't watch one either. The owner turned that off until real testing is done: a value is checked and kept
+    // by the app alone, for the session (see `crate::uvcheck` and docs/DESIGN.md, GPU undervolt).
 
     fn note(&self, now: u64, text: &str) {
         crate::ui::note_activity(&self.paths.folder, now, text);
@@ -911,63 +793,6 @@ mod tests {
     }
 
     const REAPER: &str = "4242 /home/deck/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=1145360 -- /home/deck/.local/share/Steam/ubuntu12_32/steam-launch-wrapper -- proton waitforexitandrun Hades2.exe\n";
-
-    #[test]
-    fn a_kept_voltage_goes_back_a_minute_into_the_session_and_settles_or_trips() {
-        use turbinehub_helper::gpu;
-        let mut f = fixture("undervolt", Preset::Desktop);
-        let root = f.agent.paths.root.clone();
-        let data = f.agent.paths.data.clone();
-        let od = root.join(format!("sys/bus/pci/devices/{}/pp_od_clk_voltage", fake::GPU_SLOT));
-        // Nothing kept: nothing to do, also on a handheld (its chip is never offered undervolting).
-        fake::undervolt(&root, "on", 0);
-        let m = machine(&f.agent.paths);
-        assert!(f.agent.undervolt(1000, 100, false, &m, &root).is_empty());
-        let mut l = helper::ledger(&root);
-        l.record(helper::Change::Set(modules::gpu_voltage(&m, -30).unwrap()), Vec::new(), 900, "3.9.5");
-        w(root.join(helper::LEDGER.trim_start_matches('/')), &l.to_text());
-        let start = Do::Host(modules::gpu_job(&m, "start", None).unwrap());
-        // The boot: the card is at 0. Not in the first minute of the session, then once.
-        assert!(f.agent.undervolt(1000, 20, false, &m, &root).is_empty());
-        assert_eq!(f.agent.undervolt(1050, 60, false, &m, &root), vec![start.clone()]);
-        fs::write(&od, gpu::od_rx9000(-30)).unwrap();
-        w(root.join(gpu::ARMED.trim_start_matches('/')), &gpu::armed_text("5e0c1d2a-0000-4000-8000-0000000000b1", 1050, -30));
-        assert!(f.agent.undervolt(1060, 70, false, &m, &root).is_empty());
-        // Ten minutes on: the crash mark is cleared, once.
-        let disarm = Do::Host(modules::gpu_job(&m, "disarm", None).unwrap());
-        assert_eq!(f.agent.undervolt(1650, 660, false, &m, &root), vec![disarm]);
-        assert!(f.agent.undervolt(1660, 670, false, &m, &root).is_empty());
-        // A sleep and wake with the offset still there: counted, nothing written.
-        assert!(f.agent.undervolt(5000, 680, true, &m, &root).is_empty());
-        assert_eq!(UvProgress::load(&data).sleeps, 1);
-        // A wake that lost it: put back.
-        fs::write(&od, gpu::od_rx9000(0)).unwrap();
-        assert_eq!(f.agent.undervolt(6000, 690, true, &m, &root), vec![start.clone()]);
-        fs::write(&od, gpu::od_rx9000(-30)).unwrap();
-        // Two hours of healthy looks: settled.
-        let mut t = 6000;
-        while !UvProgress::load(&data).settled {
-            t += 60;
-            f.agent.undervolt(t, 1000, false, &m, &root);
-            assert!(t < 6000 + 3 * 3600);
-        }
-        assert!(activity(&f.agent).iter().any(|a| a.contains("has settled")));
-        // The card reads 0 with no sleep in between: the driver reset it. The helper is told once.
-        fs::write(&od, gpu::od_rx9000(0)).unwrap();
-        let trip = Do::Host(modules::gpu_job(&m, "trip", None).unwrap());
-        assert_eq!(f.agent.undervolt(t + 60, 1000, false, &m, &root), vec![trip]);
-        assert!(f.agent.undervolt(t + 70, 1000, false, &m, &root).is_empty());
-        // Tripped: never put back, not even after a wake.
-        w(root.join(gpu::TRIPPED.trim_start_matches('/')), &gpu::tripped_text(-30, t + 70));
-        assert!(f.agent.undervolt(t + 5000, 1000, true, &m, &root).is_empty());
-        // A new value kept starts its probation over.
-        let _ = fs::remove_file(root.join(gpu::TRIPPED.trim_start_matches('/')));
-        let mut l = helper::ledger(&root);
-        l.record(helper::Change::Set(modules::gpu_voltage(&m, -20).unwrap()), Vec::new(), 900, "3.9.5");
-        w(root.join(helper::LEDGER.trim_start_matches('/')), &l.to_text());
-        f.agent.undervolt(t + 6000, 1000, false, &m, &root);
-        assert_eq!(UvProgress::load(&data), UvProgress { offset: -20, ..UvProgress::default() });
-    }
 
     #[test]
     fn the_made_up_machine_gives_the_background_helper_everything_to_do() {

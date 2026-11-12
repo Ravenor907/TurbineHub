@@ -154,13 +154,16 @@ pub struct Ui {
     pub(crate) storage: storage::Look,
     /// The Graphics card page's Advanced fold (undervolting) is open.
     pub(crate) uv_open: bool,
+    /// Undervolting's checks in this session (see `uvcheck`).
+    pub(crate) uv: undervolt::Watch,
 }
 
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { queue: queue::Queue::default(), storage: storage::Look::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, home_more: false, filter: BTreeMap::new(), files: files::Explorer::default(), uv_open: false }
+        let uv = undervolt::Watch::load(&data, &ctx.root);
+        Ui { queue: queue::Queue::default(), storage: storage::Look::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, home_more: false, filter: BTreeMap::new(), files: files::Explorer::default(), uv_open: false, uv }
     }
 
     pub fn machine(&self) -> Machine {

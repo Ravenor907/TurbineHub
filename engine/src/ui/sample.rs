@@ -132,14 +132,16 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("pc-gpu-uv-off", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=off"),
     ("pc-gpu-uv-pending", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=pending"),
     ("pc-gpu-uv-on", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=on"),
-    ("pc-gpu-uv-probation", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=probation"),
+    ("pc-gpu-uv-checking", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=checking"),
+    ("pc-gpu-uv-session", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=session"),
     ("pc-gpu-uv-deep", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=deep"),
-    ("pc-gpu-uv-settled", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=settled"),
+    ("pc-gpu-uv-again", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=again"),
     ("pc-gpu-uv-tripped", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=tripped"),
     ("pc-gpu-uv-leaving", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=leaving"),
     ("pc-gpu-uv-unsupported", "--page=module:gpu --machine=desktop --mode=veteran --undervolt=unsupported"),
-    ("pc-gpu-uv-guided", "--page=module:gpu --machine=desktop --mode=guided --undervolt=probation"),
-    ("tv-gpu-uv", "--page=module:gpu --machine=tv --mode=veteran --undervolt=probation"),
+    ("pc-gpu-uv-guided", "--page=module:gpu --machine=desktop --mode=guided --undervolt=session"),
+    ("pc-home-uv-checking", "--page=home --machine=desktop --mode=veteran --undervolt=checking"),
+    ("tv-gpu-uv", "--page=module:gpu --machine=tv --mode=veteran --undervolt=checking"),
     ("tv-gpu-uv-guided", "--page=module:gpu --machine=tv --mode=guided --undervolt=tripped"),
     ("uv-handheld", "--page=module:power --machine=handheld --mode=veteran --undervolt=on"),
     ("uv-handheld-machine", "--page=machine --machine=handheld --mode=veteran --undervolt=on"),
@@ -147,8 +149,10 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("dialog-uv-restart", "--page=module:gpu --act=uv-restart:on --machine=desktop --mode=veteran --undervolt=pending --helper"),
     ("dialog-uv-try", "--page=module:gpu --act=uv-try: --value=-30 --machine=desktop --mode=veteran --undervolt=on --helper"),
     ("dialog-uv-try-deep", "--page=module:gpu --act=uv-try: --value=-120 --machine=desktop --mode=veteran --undervolt=on --helper"),
-    ("dialog-uv-keep", "--page=module:gpu --act=uv-keep-ask: --value=-30 --machine=desktop --mode=veteran --undervolt=on --helper"),
-    ("dialog-uv-off", "--page=module:gpu --act=uv-off: --machine=desktop --mode=veteran --undervolt=probation --helper"),
+    ("dialog-uv-keep", "--page=module:gpu --act=uv-question: --machine=desktop --mode=veteran --undervolt=trying --helper"),
+    ("dialog-uv-still", "--page=module:gpu --act=uv-question: --machine=desktop --mode=veteran --undervolt=asking --helper"),
+    ("dialog-uv-again", "--page=module:gpu --act=uv-again: --machine=desktop --mode=veteran --undervolt=again --helper"),
+    ("dialog-uv-off", "--page=module:gpu --act=uv-off: --machine=desktop --mode=veteran --undervolt=session --helper"),
     ("pc-home-uv-tripped", "--page=home --machine=desktop --mode=veteran --undervolt=tripped"),
     // My machine: every section of each made-up machine, in both modes (the ones above are the rest of them).
     ("machine-veteran", "--page=machine --machine=handheld --mode=veteran"),
@@ -838,16 +842,20 @@ impl Ui {
         }
     }
     /// A sample run with the made-up desktop's RX 9070 XT in one of undervolting's states: "pending" (tuning turned
-    /// on, the restart not made yet), "on" (on after the restart, nothing kept), "probation" (-30 mV kept 40 minutes
-    /// ago), "deep" (-110 mV kept, both slider warnings showing), "settled" (the same as probation, settled),
-    /// "tripped" (-60 mV was on when the machine stopped), "leaving" (on, but turned off and waiting for the
-    /// restart), "unsupported" (an RX 6800 in its place). The Advanced fold opens.
+    /// on, the restart not made yet), "on" (on after the restart, the card at its own voltage), "trying" (-30 mV
+    /// just tried, the 10 second question), "checking" (-30 mV in its 5 minutes, 4:12 left), "asking" (the 5
+    /// minutes over, the 60 second question), "session" (-30 mV passed and is on until the restart), "deep" (-110
+    /// mV on, both slider warnings showing), "again" (after a restart: -30 mV passed before on this kernel, the card
+    /// at 0, "Use -30 mV again"), "tripped" (-60 mV was on when the machine stopped), "leaving" (on, but turned off
+    /// and waiting for the restart), "unsupported" (an RX 6800 in its place). The Advanced fold opens, and the
+    /// checks' clock stands still so the pictures look the same every time.
     pub fn sample_undervolt(&mut self, state: &str) {
-        use crate::agent::UvProgress;
+        use crate::uvcheck::{Stage, Underway};
         let root = self.ctx.root.clone();
         let mut l = self.ledger();
         let m = self.machine();
         let now = crate::now();
+        self.uv.clock.set(1_000_000);
         if state == "unsupported" {
             let dev = format!("sys/devices/pci0000:00/{}", fake::GPU_SLOT);
             w(&root, &format!("{dev}/device"), "0x73bf\n");
@@ -856,29 +864,36 @@ impl Ui {
             self.uv_open = true;
             return;
         }
-        let record = |l: &mut Ledger, st: Option<Setting>, ago: u64| {
-            if let Some(st) = st {
-                l.record(Change::Set(st), Vec::new(), now - ago, "3.9.5");
+        if matches!(state, "pending" | "on" | "trying" | "checking" | "asking" | "session" | "deep" | "again" | "tripped")
+            && let Some(st) = crate::modules::gpu_overdrive(&m)
+        {
+            l.record(Change::Set(st), Vec::new(), now - 86_400, "3.9.5");
+        }
+        let live = match state {
+            "trying" | "checking" | "asking" | "session" => ("kept", -30),
+            "deep" => ("kept", -110),
+            "on" | "leaving" | "again" | "tripped" => ("on", 0),
+            _ => ("", 0),
+        };
+        fake::undervolt(&root, live.0, live.1);
+        self.uv.slot = fake::GPU_SLOT.into();
+        let kernel = self.machine().kernel;
+        let at = self.uv.clock.now();
+        let underway = |stage, left_ms| Some(Underway { stage, offset: -30, back: 0, until: at + left_ms, short: false });
+        match state {
+            "trying" => self.uv.session.underway = underway(Stage::Ask, crate::uvcheck::ASK_MS),
+            "checking" => self.uv.session.underway = underway(Stage::Check, 252_000),
+            "asking" => self.uv.session.underway = underway(Stage::Again, crate::uvcheck::AGAIN_MS),
+            "session" | "deep" => {
+                self.uv.session.on = Some(live.1);
+                self.uv.note = Some(super::undervolt::Note { offset: live.1, kernel });
             }
-        };
-        if matches!(state, "pending" | "on" | "probation" | "settled" | "deep" | "tripped") {
-            record(&mut l, crate::modules::gpu_overdrive(&m), 86_400);
-        }
-        let (live, kept) = match state {
-            "on" | "leaving" => ("on", None),
-            "probation" | "settled" => ("kept", Some(-30)),
-            "deep" => ("kept", Some(-110)),
-            "tripped" => ("tripped", Some(-60)),
-            _ => ("", None),
-        };
-        fake::undervolt(&root, live, kept.unwrap_or(0));
-        if let Some(k) = kept {
-            let m = self.machine();
-            record(&mut l, crate::modules::gpu_voltage(&m, k), 2400);
-            UvProgress { offset: k, healthy: if state == "settled" { 9000 } else { 2400 }, sleeps: u32::from(state == "settled"), settled: state == "settled" }.save(&self.data);
-        }
-        if state == "tripped" {
-            w(&root, turbinehub_helper::gpu::TRIPPED.trim_start_matches('/'), &turbinehub_helper::gpu::tripped_text(-60, now - 600));
+            "again" => self.uv.note = Some(super::undervolt::Note { offset: -30, kernel }),
+            "tripped" => {
+                w(&root, turbinehub_helper::gpu::TRIPPED.trim_start_matches('/'), &turbinehub_helper::gpu::tripped_text(-60, now - 600));
+                self.uv.note = Some(super::undervolt::Note { offset: -40, kernel });
+            }
+            _ => {}
         }
         w(&root, crate::helper::LEDGER.trim_start_matches('/'), &l.to_text());
         self.uv_open = true;

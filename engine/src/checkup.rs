@@ -56,8 +56,8 @@ pub struct Facts {
     pub tiles_without_art: usize,
     /// Pictures Turbine Hub drew for such entries that are still there (`tile_art::drawn`): Undo takes them back.
     pub tiles_drawn: usize,
-    /// Graphics card undervolting (Veteran mode): a value that tripped (true: to look at), one on probation or a
-    /// restart that is due, as (look, title, line).
+    /// Graphics card undervolting (Veteran mode): a value that tripped (true: to look at) or a restart that is due,
+    /// as (look, title, line).
     pub undervolt: Option<(bool, String, String)>,
 }
 

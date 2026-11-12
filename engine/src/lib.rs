@@ -46,6 +46,7 @@ pub mod tar;
 pub mod tile_art;
 pub mod tuneup;
 pub mod ui;
+pub mod uvcheck;
 pub mod vdf;
 pub mod zip;
 

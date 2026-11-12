@@ -36,7 +36,8 @@ pub struct Settings {
     pub test_builds: bool,
     /// Kept so older settings files still read; Turbine Hub sends no reports anywhere.
     pub reports: bool,
-    /// First-run steps finished or skipped ("machine", "password", "games", "bring", "picks").
+    /// First-run steps finished or skipped ("machine", "games", "bring", "picks"). An older file may also list
+    /// "password", a step setup no longer has: it is read past.
     pub setup_done: Vec<String>,
     /// Bring it over steps finished ("stores", "gamepass", "windows", "apps", "tv").
     pub brought: Vec<String>,
@@ -46,7 +47,7 @@ pub const THEMES: &[&str] = &["dark", "black", "light", "contrast"];
 pub const ACCENTS: &[&str] = &["brass", "iron", "copper", "jade"];
 pub const MOTIONS: &[&str] = &["full", "reduced", "off"];
 pub const VISIONS: &[&str] = &["typical", "red", "green", "blue", "none"];
-pub const SETUP_STEPS: &[&str] = &["machine", "password", "games", "bring", "picks"];
+pub const SETUP_STEPS: &[&str] = &["machine", "games", "bring", "picks"];
 pub const BRING_STEPS: &[&str] = &["stores", "gamepass", "windows", "apps", "tv"];
 
 impl Default for Settings {
@@ -169,8 +170,13 @@ mod tests {
     #[test]
     fn round_trips_and_repairs() {
         let mut s = Settings { mode: Some(Mode::Veteran), ui_scale: 125, scale_chosen: true, game_boost: true, save_snapshots: true, ..Settings::default() };
-        s.setup_done = vec!["machine".into(), "password".into()];
+        s.setup_done = vec!["machine".into(), "games".into()];
         assert_eq!(Settings::parse(&s.to_json()), s);
+        // A file from when setup had a password step still reads: the step is passed over, the rest counts.
+        let old = Settings::parse(r#"{"mode":"guided","setupDone":["machine","password","games","bring","picks"]}"#);
+        assert_eq!((old.mode, old.setup_done.clone()), (Some(Mode::Guided), vec!["machine".to_string(), "games".into(), "bring".into(), "picks".into()]));
+        assert!(old.setup_finished() && !old.to_json().contains("password"));
+        assert_eq!(Settings::parse(r#"{"setupDone":["machine","password"]}"#).setup_done, vec!["machine"]);
         let bad = Settings::parse(r#"{"mode":"hacker","uiScale":900,"theme":"pink","accent":7,"setupDone":["machine","x","machine"],"extra":1}"#);
         assert_eq!((bad.mode, bad.ui_scale, bad.theme.as_str(), bad.accent.as_str()), (None, 150, "black", "jade"));
         assert_eq!(bad.setup_done, vec!["machine"]);

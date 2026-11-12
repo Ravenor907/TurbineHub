@@ -18,7 +18,7 @@ pub struct Facts {
     pub last_sleep: Option<(f64, Vec<String>)>,
     /// What the helper's drift check found (after a SteamOS update).
     pub drift: Vec<String>,
-    /// The machine has a password (sudo works).
+    /// The machine has a password (sudo works). Never a checkup item: only the first system change's dialog asks.
     pub has_password: Option<bool>,
     /// A Windows drive was found and not brought over yet.
     pub windows_not_brought: bool,
@@ -134,9 +134,7 @@ fn gb(bytes: u64) -> String {
 /// The checkup list, things to fix first.
 pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     let mut out = Vec::new();
-    if f.has_password == Some(false) {
-        out.push(item("password", Level::Look, "lock", "No password set yet".into(), "System changes need one, like the admin password on Windows.", ("Set password", "password")));
-    }
+    // A machine without a password is nothing to look at: the first system change asks for one, in its dialog.
     if !f.drift.is_empty() {
         out.push(item("drift", Level::Look, "shield", "Some settings need putting back".into(), "A SteamOS update reset them. One tap puts them back.", ("Put back", "reapply")));
     }

@@ -24,8 +24,9 @@ Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs.
 
 ### First run
 1. Mode picker (Guided or Veteran).
-2. Guided: Your machine (detected), Password, Will my games run?, Bring it over, Picks.
-3. Veteran: Quick setup, one screen of checkboxes, one password, one go. "Load My setup file" applies a saved setup.
+2. Guided: Your machine (detected), Will my games run?, Bring it over, Picks. Four steps.
+3. Veteran: Quick setup, one screen of checkboxes, one go. "Load My setup file" applies a saved setup.
+4. No step asks for the password, and nothing reminds the player to set one (no setup step, no checkup item). A password is invasive, so a new program doesn't open with it: it is asked only inside the dialog of the first system change (see 4.3). While the helper isn't set up (or is an older one), the picks that are system changes carry a "Needs your password" mark, and the Apply dialog starts with how many of the ticked changes it is for. Picks that change nothing of the system (Flathub apps, the library entry, Game Boost's own switch) apply without it. A settings file that still lists the old "password" step reads fine: the name is passed over.
 
 ### Home
 - Guided: what needs attention first ("Two things could use a look"), the checkup, health stats, a "Finish setting up" card until setup is done.
@@ -252,7 +253,7 @@ ID: `io.github.ravenor907.TurbineHub`.
 - Every change recorded, backed up first, undoable.
 - Survives SteamOS updates, or is put back automatically after one.
 - Never touches the read-only system: no pacman, no `steamos-readonly disable`, nothing under `/usr`.
-- One password, once.
+- One password, once, and never before the first system change needs it.
 
 ### 4.2 Where things live
 SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced. So:
@@ -269,7 +270,7 @@ SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced.
 The helper files are root-owned and not writable by the user, so the user account can't swap the binary that the rule allows.
 
 ### 4.3 How the app calls it
-1. **First install (the one password):** the in-app password dialog (works in Game Mode, where the system has no password dialog of its own) runs `flatpak-spawn --host sudo -S -k <helper inside the Flatpak> install` with the password on stdin. The helper copies itself to `/var/lib/turbinehub/bin`, writes the polkit rule and the boot unit, and records which user it serves. The password is never stored.
+1. **First install (the one password):** every system change is built by `ui/plan.rs` (`with_helper`), the only place a password is asked. While the helper is missing, that dialog starts with why the password is asked now ("This changes a system setting, so SteamOS asks for your password, like the admin prompt on Windows. Turbine Hub uses it once to set up its helper and never stores it."), lists the helper's setup first, and on a machine without a password has two boxes to create one (`passwd`), saying it can't be recovered if forgotten. The in-app password dialog (works in Game Mode, where the system has no password dialog of its own) runs `flatpak-spawn --host sudo -S -k <helper inside the Flatpak> install` with the password on stdin. The helper copies itself to `/var/lib/turbinehub/bin`, writes the polkit rule and the boot unit, and records which user it serves. The password is never stored.
 2. **After that:** `flatpak-spawn --host pkexec /var/lib/turbinehub/bin/turbinehub-helper <job> <json>`. The polkit rule says YES only for that exact program, for the active local session of its owner. No password, works in Game Mode.
 3. **Helper updates ask for the password again** (step 1). They are rare, and a password-free self-update would let any program running as the player replace the helper. An update of the app never replaces the installed helper by itself: the next change that goes through the helper sees that its file differs from the one in the Flatpak and installs the new one first.
 4. The helper refuses to run unless its folder and file are root's and writable by nobody else, and refuses callers other than its owner.

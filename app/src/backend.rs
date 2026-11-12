@@ -271,6 +271,9 @@ fn make_ui() -> Ui {
     if option("no-password").is_some() {
         ui.facts.has_password = Some(false);
     }
+    if option("helper").is_some() {
+        ui.sample_with_helper();
+    }
     if option("steam-running").is_some() {
         ui.steam_running = true;
     }

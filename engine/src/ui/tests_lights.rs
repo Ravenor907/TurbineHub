@@ -230,7 +230,8 @@ fn a_helper_older_than_the_app_is_updated_before_it_is_asked_to_open_the_lights(
     parse(&u.act("light-test", "", "")).unwrap();
     let plan = u.confirm().unwrap();
     assert_eq!((plan.steps[0].clone(), plan.ask), (Step::HelperInstall, Ask::Current));
-    assert!(plan.items.iter().any(|(t, l)| t.contains("asked once more") && l.contains("older version")), "{:?}", plan.items);
+    assert_eq!(plan.items[0].0, "Update Turbine Hub's helper", "{:?}", plan.items);
+    assert!(plan.text.starts_with("This changes a system setting, and Turbine Hub's helper on this machine is from an older version. Updating it takes your SteamOS password once more"), "{}", plan.text);
     assert!(matches!(plan.steps.last(), Some(Step::LightsCheck { exact: false, .. })));
     assert!(super::games::report_text(&u, lighting::REPORT, "now").contains("helper: installed (older than this Turbine Hub)"));
     // The same helper as the app's: no password, nothing to update.

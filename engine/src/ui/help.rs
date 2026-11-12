@@ -14,7 +14,7 @@ pub const WHERE: &[(&str, &str)] = &[
     ("Windows Update", "Steam's Settings, System, Updates. Drivers come with SteamOS updates."),
     ("Screenshots", "Steam button and R1. They're in Steam's Media page."),
     ("Device Manager and drivers", "Built in. If something isn't detected, Turbine Hub's checkup on Home says so."),
-    ("Admin password", "The SteamOS password. Turbine Hub's first-run steps set it, and Desktop Mode's System Settings, Users, changes it."),
+    ("Admin password", "The SteamOS password. Turbine Hub asks for it only when you first change a system setting, and helps you make one then if there is none. Desktop Mode's System Settings, Users, changes it."),
     ("Control Panel", "Steam's Settings in Game Mode, System Settings in Desktop Mode. My machine here has the gaming ones."),
     ("Alt+Tab", "The Steam button shows what's running. In Desktop Mode, Alt+Tab works as on Windows."),
     ("Recording clips", "Steam's Settings, Game Recording. Steam button and R1 saves a clip while it records in the background."),
@@ -45,8 +45,8 @@ const ABOUT: &[(&str, &str)] = &[
     ("bring", "What to bring over from Windows: other stores, your Windows drive, your Windows apps, TV and streaming."),
     ("windrive", "Games and saves on your Windows drive, copied to this machine. The drive is only read, never changed."),
     ("winapps", "The Windows apps you use and their SteamOS versions, installed in one go."),
-    ("setup", "The first steps, one at a time. The list on the left shows where you are."),
-    ("quick", "Quick setup: tick what you want, then apply it all in one go."),
+    ("setup", "The first steps, one at a time. The list on the left shows where you are. No step asks for a password: Picks marks the ones that need it, and only applying those asks."),
+    ("quick", "Quick setup: tick what you want, then apply it all in one go. Only picks marked \"Needs your password\" ask for it, when you apply them."),
     ("pick", "How Turbine Hub talks to you: Guided explains things, Veteran shows every control. Settings switches any time."),
 ];
 
@@ -143,7 +143,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         return None;
     }
     Some(match arg {
-        "password" => return super::setup::act(ui, "password", "", value),
         "reapply" => return super::settings::act(ui, "reapply", "", value),
         "update-all" => return super::store::act(ui, "update-all", "", value),
         "update-app" => return super::settings::act(ui, "update-app", "", value),

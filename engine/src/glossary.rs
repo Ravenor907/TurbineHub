@@ -23,7 +23,7 @@ pub const TERMS: &[Term] = &[
     Term { term: "Decky Loader", means: "Adds plugins to Steam's quick menu.", windows: "" },
     Term { term: "Quick panel", means: "Turbine Hub's page in Steam's quick menu while you play.", windows: "Xbox Game Bar" },
     Term { term: "Game library", means: "A drive or folder Steam installs games to.", windows: "A Steam library folder" },
-    Term { term: "Password", means: "The SteamOS password for system changes.", windows: "The admin password" },
+    Term { term: "Password", means: "The SteamOS password. Asked only when you first change a system setting, never stored. No password yet? That dialog makes one.", windows: "The admin password" },
     Term { term: "Review changes", means: "Every change Turbine Hub made, each with Undo or the place to undo it.", windows: "System Restore, one change at a time" },
     Term { term: "Kernel", means: "The core of the system that talks to the hardware. Its settings decide how memory, the processor and devices behave.", windows: "The Windows core and its registry settings" },
     Term { term: "zram", means: "Memory that squeezes what's in it, so more fits before games run short. SteamOS uses it as its swap.", windows: "Memory compression" },

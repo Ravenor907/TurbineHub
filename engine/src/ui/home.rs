@@ -13,7 +13,6 @@ const SHOWN: usize = 3;
 pub(crate) fn step_title(id: &str) -> &'static str {
     match id {
         "machine" => "Your machine",
-        "password" => "Password",
         "games" => "Your games",
         "bring" => "Bring it over",
         _ => "Picks",

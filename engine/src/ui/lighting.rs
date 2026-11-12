@@ -1120,7 +1120,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             let writes = light_writes(&ui.ctx.root, &m, &Lighting { route: route.clone(), ..l.clone() });
             let mut p = Plan::new("Set up the lights?", "Turbine Hub's helper lets the background helper set the lights from now on, after restarts and sleep too.", "Set up");
             if !has_access {
-                p.items.push((access.name(), if ui.veteran() { access.exact() } else { "Asked once, so lighting never needs the password again.".into() }));
+                p.items.push((access.name(), if ui.veteran() { access.exact() } else { "Set up once, so the lights never need a password.".into() }));
             } else if let Some(sh) = &shut {
                 // Set up before, closed now: the helper opens them again, and Turbine Hub looks again afterwards.
                 p = Plan::new("Open the lights again?", "The one-time setup is done, but the lights are closed to Turbine Hub right now. Its helper opens them again, then Turbine Hub checks that they stayed open and says so if they didn't.", "Open them");

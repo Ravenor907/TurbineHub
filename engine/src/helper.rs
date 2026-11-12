@@ -57,7 +57,7 @@ pub fn launch_problem(stderr: &str, code: i32) -> Option<String> {
     } else if s.contains("not authorized") || code == 127 && s.contains("pkexec") {
         Some("Turbine Hub's helper isn't set up yet.".into())
     } else if s.contains("no password was provided") || s.contains("a password is required") {
-        Some("This machine has no password yet. Set one first.".into())
+        Some("This machine has no password yet. Try again: Turbine Hub then helps you make one.".into())
     } else {
         None
     }

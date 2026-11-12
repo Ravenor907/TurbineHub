@@ -71,8 +71,9 @@ fn the_checkup_lists_problems_first_with_their_fix() {
     let handheld = read(Preset::Handheld, "handheld");
     let f = Facts { last_sleep: Some((6.0, vec!["A USB dongle".into()])), has_password: Some(false), ..Facts::default() };
     let items = checkup::items(&handheld, &f);
-    assert_eq!(items.iter().map(|i| i.id).collect::<Vec<_>>(), ["password", "sleep", "charge"]);
-    assert_eq!(items[1].line, "A USB dongle woke the machine. Stop it from waking it?");
-    assert_eq!(items[2].level, Level::Tip);
+    // A machine without a password is nothing to look at: only the first system change's dialog asks for one.
+    assert_eq!(items.iter().map(|i| i.id).collect::<Vec<_>>(), ["sleep", "charge"]);
+    assert_eq!(items[0].line, "A USB dongle woke the machine. Stop it from waking it?");
+    assert_eq!(items[1].level, Level::Tip);
     assert_eq!(checkup::headline(&[]).0, "Everything is running fine");
 }

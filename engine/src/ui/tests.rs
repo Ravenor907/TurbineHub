@@ -40,7 +40,7 @@ fn every_page_is_valid_and_plainly_worded() {
     for (preset, mode) in [(HANDHELD, Mode::Guided), (HANDHELD, Mode::Veteran), (Preset::Desktop, Mode::Guided), (Preset::TvPc, Mode::Veteran)] {
         let mut u = ui("pages", preset, mode);
         assert!(parse(&u.state()).is_ok());
-        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "password", "games", "bring", "picks", "steam:1086940", "steam:367520", "steam:1172470", "steam:1245620", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix", "nsl"] {
+        for sections in ["", "apps", "decky", "launchers", "tv", "emulation", "installed", "look", "updates", "setup", "help", "about", "machine", "games", "bring", "picks", "steam:1086940", "steam:367520", "steam:1172470", "steam:1245620", "com.discordapp.Discord", "com.spotify.Client", "tile:netflix", "nsl"] {
             for p in PAGES {
                 let text = u.page(p, sections);
                 let j = parse(&text).unwrap_or_else(|e| panic!("{p} {sections}: {e}"));
@@ -133,7 +133,7 @@ fn home_shows_problems_first_and_setup_until_done() {
     let items = j.get("items").unwrap().as_array();
     assert!(items.len() <= 3 && items[0].get("look").and_then(Json::as_bool) == Some(true));
     let setup = j.get("setup").unwrap();
-    assert_eq!((setup.get("show").and_then(Json::as_bool), setup.get("done").and_then(Json::as_f64)), (Some(true), Some(3.0)));
+    assert_eq!((setup.get("show").and_then(Json::as_bool), setup.get("done").and_then(Json::as_f64), setup.get("total").and_then(Json::as_f64)), (Some(true), Some(2.0), Some(4.0)));
     assert_eq!(j.get("tiles").unwrap().as_array()[0].str_at("value"), Some("78%"));
     // Show all lists the tips too.
     u.act("home-all", "", "");
@@ -266,7 +266,7 @@ fn system_changes_ask_first_and_install_the_helper_once() {
         assert_eq!(j.get("dialog").unwrap().str_at("ask"), Some("new"));
         assert!(j.get("open").is_none());
         let plan = n.confirm().unwrap();
-        assert_eq!(plan.steps[..3], [Step::SetPassword, Step::Done { setup: Some("password"), brought: None }, Step::HelperInstall]);
+        assert_eq!(plan.steps[..2], [Step::SetPassword, Step::HelperInstall]);
     }
     done("plan");
 }
@@ -404,7 +404,7 @@ fn first_run_walks_the_steps_and_quick_setup_counts_its_changes() {
         }
         assert!(seen.len() < 9);
     }
-    assert_eq!(seen, vec!["machine", "password", "games", "bring", "picks"]);
+    assert_eq!(seen, vec!["machine", "games", "bring", "picks"]);
     assert!(u.settings().setup_finished());
     // Veteran: the defaults, minus what is on already, as one plan with the helper's part first.
     let mut v = Ui::sample(&dir("setup"), HANDHELD, None);
@@ -763,7 +763,7 @@ fn help_is_about_the_page_it_was_asked_on() {
 const WITH_ARGS: &[(&str, &str)] = &[
     ("home", ""), ("games", ""), ("games", "steam:1086940"), ("library", ""), ("store", ""), ("store", "apps"), ("store-item", "com.heroicgameslauncher.hgl"), ("tool", ""), ("proton", "steam:1086940"), ("saves", "steam:1086940"),
     ("machine", ""), ("module:lighting", ""), ("module:power", ""), ("module:tuneup", ""), ("module:battery", ""), ("settings", ""), ("settings", "look"), ("changes", ""), ("bring", ""), ("windrive", ""), ("winapps", ""),
-    ("wheres", ""), ("help", "games@"), ("pick", ""), ("setup", "machine"), ("setup", "password"), ("setup", "games"), ("setup", "picks"), ("quick", ""),
+    ("wheres", ""), ("help", "games@"), ("pick", ""), ("setup", "machine"), ("setup", "games"), ("setup", "picks"), ("quick", ""),
 ];
 
 #[test]
@@ -865,4 +865,184 @@ fn the_menu_leads_to_help_for_the_page_it_was_opened_on() {
     assert_eq!((rows[0].str_at("title"), rows[0].str_at("act"), rows[0].str_at("arg"), rows[0].str_at("key")), (Some("Help for this page"), Some("open"), Some("help|games@steam:1086940"), Some("f1")));
     assert_eq!(rows.last().unwrap().str_at("title"), Some("Close Turbine Hub"));
     done("menuhelp");
+}
+
+/// The dialog an action shows: (ask, text, item titles), with the plan it would run.
+fn asked(u: &mut Ui, action: &str, arg: &str, value: &str) -> (String, String, Vec<String>, super::plan::Plan) {
+    let j = parse(&u.act(action, arg, value)).unwrap();
+    let d = j.get("dialog").unwrap_or_else(|| panic!("{action} {arg} shows no dialog: {j:?}"));
+    let out = (d.str_at("ask").unwrap().to_string(), d.str_at("text").unwrap().to_string(), d.get("items").unwrap().as_array().iter().map(|i| i.str_at("title").unwrap().to_string()).collect());
+    let plan = u.confirm().unwrap_or_else(|| panic!("{action} {arg} keeps no plan"));
+    (out.0, out.1, out.2, plan)
+}
+
+#[test]
+fn setup_has_four_steps_and_none_of_them_is_a_password() {
+    for has in [Some(true), Some(false), None] {
+        let mut u = ui("nopw-steps", HANDHELD, Mode::Guided);
+        u.facts.has_password = has;
+        let mut st = u.settings();
+        st.setup_done.clear();
+        u.save(&st);
+        for (i, step) in crate::settings::SETUP_STEPS.iter().enumerate() {
+            let page = parse(&u.page("setup", step)).unwrap();
+            let rail: Vec<&str> = page.get("rail").unwrap().as_array().iter().map(|r| r.str_at("title").unwrap()).collect();
+            assert_eq!(rail, ["Your machine", "Your games", "Bring it over", "Picks"]);
+            assert_eq!(page.str_at("count").unwrap(), format!("Step {} of 4", i + 1));
+            // No step is about a password or has a button that sets one.
+            assert!(!page.str_at("title").unwrap().to_lowercase().contains("password"), "{step}");
+            for b in page.get("buttons").unwrap().as_array() {
+                assert!(!b.str_at("label").unwrap().to_lowercase().contains("password") && b.str_at("act") != Some("password"), "{step}");
+            }
+        }
+        // A step named "password" (an old link) is just the first step not done, and the old press does nothing.
+        assert_eq!(parse(&u.page("setup", "password")).unwrap().str_at("step"), Some("machine"));
+        assert!(parse(&u.act("password", "", "")).unwrap().entries().is_empty());
+        assert!(parse(&u.act("checkup", "password", "")).unwrap().entries().is_empty());
+        assert!(parse(&u.act("setup-next", "password", "")).unwrap().get("root").is_none());
+        assert!(u.settings().setup_done.is_empty());
+        // Home's card counts four, and nothing on Home or in the checkup is about a password.
+        let home = parse(&u.page("home", "")).unwrap();
+        assert_eq!(home.get("setup").unwrap().get("total").and_then(Json::as_f64), Some(4.0));
+        u.act("home-all", "", "");
+        let mut all = Vec::new();
+        strings(&parse(&u.page("home", "")).unwrap(), &mut all);
+        assert!(all.iter().all(|t| !t.to_lowercase().contains("password")), "{all:?}");
+        assert!(crate::checkup::items(&u.machine(), &u.facts_now()).iter().all(|i| i.id != "password" && !i.title.to_lowercase().contains("password")));
+        done("nopw-steps");
+    }
+}
+
+#[test]
+fn picks_say_which_ones_need_the_password_and_the_rest_apply_without_it() {
+    for mode in [Mode::Guided, Mode::Veteran] {
+        let mut u = ui("nopw-picks", HANDHELD, mode);
+        // Decky Loader isn't on this machine yet, so it is a pick.
+        std::fs::remove_dir_all(u.ctx.home.join("homebrew")).unwrap();
+        let (name, arg) = if mode == Mode::Guided { ("setup", "picks") } else { ("quick", "") };
+        let page = parse(&u.page(name, arg)).unwrap();
+        let marked: Vec<String> = rows(&page).iter().filter(|r| r.str_at("badge") == Some("Needs your password")).map(|r| r.str_at("arg").unwrap().to_string()).collect();
+        // The system settings and Decky Loader are marked; apps, the library entry and Game Boost never are.
+        assert!(marked.iter().any(|a| a == "quick|decky") && marked.iter().any(|a| a.starts_with("quick|tune:")), "{marked:?}");
+        assert_eq!(marked.iter().any(|a| a == "quick|ssh"), mode == Mode::Veteran);
+        assert!(marked.iter().all(|a| a == "quick|decky" || a == "quick|charge80" || a == "quick|ssh" || a.starts_with("quick|tune:") || a.starts_with("quick|wake:")), "{marked:?}");
+        let words = page.str_at(if mode == Mode::Guided { "text" } else { "intro" }).unwrap();
+        assert!(words.contains("\"Needs your password\"") && !words.contains("One password"), "{words}");
+        // The dialog's first words count them, then say why the password is asked now.
+        let ticked: Vec<String> = rows(&page).iter().filter(|r| r.get("on").and_then(Json::as_bool) == Some(true)).map(|r| r.str_at("arg").unwrap().to_string()).collect();
+        let system = ticked.iter().filter(|a| marked.contains(a)).count();
+        assert!(system > 1 && system < ticked.len());
+        let (ask, text, items, plan) = asked(&mut u, "quick-apply", "", "");
+        assert_eq!(ask, "current");
+        assert!(text.starts_with(&format!("{system} of these {} changes are system settings, so SteamOS asks for your password, like the admin prompt on Windows. Turbine Hub uses it once to set up its helper and never stores it.", ticked.len())), "{text}");
+        assert_eq!((items[0].as_str(), items.len()), ("Set up Turbine Hub's helper", ticked.len() + 1));
+        assert_eq!(plan.steps[0], Step::HelperInstall);
+        // Without a password on the machine the same dialog makes one, and says it can't be recovered.
+        u.facts.has_password = Some(false);
+        let (ask, text, items, plan) = asked(&mut u, "quick-apply", "", "");
+        assert_eq!(ask, "new");
+        assert!(text.starts_with(&format!("{system} of these {} changes are system settings, so SteamOS asks for a password, like the admin prompt on Windows. This machine has none yet, so you create one now. SteamOS can't recover it if you forget it.", ticked.len())), "{text}");
+        assert_eq!(items[..2], ["Create this machine's password", "Set up Turbine Hub's helper"]);
+        assert_eq!(plan.steps[..2], [Step::SetPassword, Step::HelperInstall]);
+        // Only picks that change nothing of the system ticked: nothing is asked, with or without a password.
+        for id in &marked {
+            if ticked.contains(id) {
+                u.act("tick", id, "");
+            }
+        }
+        let left = rows(&parse(&u.page(name, arg)).unwrap()).iter().filter(|r| r.get("on").and_then(Json::as_bool) == Some(true)).count();
+        assert!(left >= 3, "an app, the library entry and Game Boost stay ticked");
+        let (ask, text, items, plan) = asked(&mut u, "quick-apply", "", "");
+        assert_eq!((ask.as_str(), plan.ask, items.len()), ("", Ask::None, left));
+        assert!(!text.to_lowercase().contains("password") && items.iter().all(|t| !t.to_lowercase().contains("password")), "{text}");
+        assert!(!plan.steps.contains(&Step::HelperInstall) && !plan.steps.contains(&Step::SetPassword) && plan.helper_jobs() == 0);
+        assert_eq!(plan.steps.last(), Some(&Step::SetupFinished { boost: true }));
+        done("nopw-picks");
+        // With the helper set up nothing is marked and nothing is asked.
+        let mut h = ui("nopw-picks", HANDHELD, mode);
+        h.sample_with_helper();
+        let page = parse(&h.page(name, arg)).unwrap();
+        assert!(rows(&page).iter().all(|r| r.str_at("badge") != Some("Needs your password")));
+        assert!(!page.str_at(if mode == Mode::Guided { "text" } else { "intro" }).unwrap().contains("password"));
+        let (ask, text, _, plan) = asked(&mut h, "quick-apply", "", "");
+        assert!(ask.is_empty() && !text.contains("password") && plan.helper_jobs() > 0 && !plan.steps.contains(&Step::HelperInstall));
+        done("nopw-picks");
+    }
+}
+
+#[test]
+fn every_system_change_works_from_a_machine_with_no_password_and_no_helper() {
+    // (machine, action, arg, value): each way into a system change.
+    let ways: &[(Preset, &str, &str, &str)] = &[
+        (HANDHELD, "quick-apply", "", ""),
+        (HANDHELD, "tuneup", "all", ""),
+        (HANDHELD, "tuneup", "swap", ""),
+        (HANDHELD, "light-test", "", ""),
+        (HANDHELD, "charge", "", "4"),
+        (HANDHELD, "tdp", "", "20"),
+        (HANDHELD, "wake", "045e:028e", ""),
+        (Preset::Desktop, "gpu-power", "", "250"),
+        (Preset::Desktop, "wake", "3554:fa09", ""),
+        (Preset::Desktop, "windows-boot", "", ""),
+        (HANDHELD, "decky", "", ""),
+        (HANDHELD, "decky-off", "", ""),
+        (HANDHELD, "boost", "", ""),
+        (HANDHELD, "undo", "4", ""),
+        (HANDHELD, "undo-all", "", ""),
+        (HANDHELD, "reapply", "", ""),
+        (HANDHELD, "remove-app", "", ""),
+    ];
+    for (preset, action, arg, value) in ways {
+        for mode in [Mode::Guided, Mode::Veteran] {
+            let what = format!("{action} {arg} {value}");
+            // No password, no helper: the dialog makes the password, sets the helper up, then makes the change.
+            let mut u = ui("nopw-ways", *preset, mode);
+            u.facts.has_password = Some(false);
+            let (ask, text, items, plan) = asked(&mut u, action, arg, value);
+            assert_eq!(ask, "new", "{what}");
+            let lead = text.split(", so SteamOS asks").next().unwrap();
+            assert!(lead == "This changes a system setting" || lead.ends_with("system settings"), "{what}: {text}");
+            assert!(text.contains(", so SteamOS asks for a password, like the admin prompt on Windows. This machine has none yet, so you create one now. SteamOS can't recover it if you forget it. Turbine Hub uses it once to set up its helper and never stores it."), "{what}: {text}");
+            assert_eq!(items[..2], ["Create this machine's password", "Set up Turbine Hub's helper"], "{what}");
+            assert_eq!((plan.ask, &plan.steps[..2]), (Ask::New, &[Step::SetPassword, Step::HelperInstall][..]), "{what}");
+            // The change itself comes after both (Game Boost's is its own switch, flipped last).
+            assert!(plan.helper_jobs() > 0 || plan.steps.last() == Some(&Step::Choice { key: "boost", on: true }), "{what}");
+            assert!(plan.steps[2..].iter().all(|x| !matches!(x, Step::SetPassword | Step::HelperInstall)), "{what}");
+            done("nopw-ways");
+            // A password, no helper: asked once, with the reason first.
+            let mut u = ui("nopw-ways", *preset, mode);
+            let (ask, text, items, plan) = asked(&mut u, action, arg, value);
+            assert_eq!((ask.as_str(), plan.steps[0].clone()), ("current", Step::HelperInstall), "{what}");
+            assert!(text.contains(", so SteamOS asks for your password, like the admin prompt on Windows. Turbine Hub uses it once to set up its helper and never stores it."), "{what}: {text}");
+            assert!(!text.contains("can't recover") && items[0] == "Set up Turbine Hub's helper" && !plan.steps.contains(&Step::SetPassword), "{what}");
+            done("nopw-ways");
+            // The helper is there: nothing is asked and no word of a password, also on a machine without one.
+            let mut u = ui("nopw-ways", *preset, mode);
+            u.sample_with_helper();
+            u.facts.has_password = Some(false);
+            if *action == "boost" {
+                // Game Boost just turns on.
+                assert!(parse(&u.act(action, arg, value)).unwrap().get("dialog").is_none());
+            } else {
+                let (ask, text, items, plan) = asked(&mut u, action, arg, value);
+                assert_eq!((ask.as_str(), plan.ask), ("", Ask::None), "{what}");
+                // (The one setting with the word in its name is "Lighting without a password".)
+                assert!(!text.to_lowercase().contains("password") && items.iter().all(|t| !t.to_lowercase().contains("password") || *action == "light-test"), "{what}: {text} {items:?}");
+                assert!(!plan.steps.contains(&Step::HelperInstall) && !plan.steps.contains(&Step::SetPassword) && plan.helper_jobs() > 0, "{what}");
+            }
+            done("nopw-ways");
+        }
+    }
+    // A helper from an older version: the password once more, and the dialog says that first.
+    let mut u = ui("nopw-old", HANDHELD, Mode::Guided);
+    u.sample_with_helper();
+    let newer = dir("nopw-old").join("helper-new");
+    std::fs::write(&newer, "newer").unwrap();
+    u.helper_bundled = Some(newer);
+    let (ask, text, items, plan) = asked(&mut u, "charge", "", "4");
+    assert_eq!((ask.as_str(), plan.steps[0].clone()), ("current", Step::HelperInstall));
+    assert!(text.starts_with("This changes a system setting, and Turbine Hub's helper on this machine is from an older version. Updating it takes your SteamOS password once more"), "{text}");
+    assert_eq!(items[0], "Update Turbine Hub's helper");
+    assert!(rows(&parse(&u.page("setup", "picks")).unwrap()).iter().any(|r| r.str_at("badge") == Some("Needs your password")));
+    done("nopw-old");
 }

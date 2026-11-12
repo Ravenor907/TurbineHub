@@ -5,19 +5,24 @@ or feels off; that's the list to tweak from.
 
 ## Before you start
 - Turbine Hub 0.1 is installed for your user. To update it later: `cd ~/Projects/TurbineHub && sh tools/dev-build.sh --pull`.
-- Have a controller connected, and your SteamOS password ready (asked once).
+- Have a controller connected. Your SteamOS password is asked once, by the first system change (section 2), never before.
 
 ## 1. First start (Desktop Mode)
 1. Open the app launcher, find **Turbine Hub**, open it.
    - You see the mode picker: Guided on the left, Veteran ("I know more than you.") on the right.
-2. Pick **Guided**. Walk through Your machine, Password, Your games, Bring it over and Picks.
+2. Pick **Guided**. Walk through Your machine, Your games, Bring it over and Picks (four steps, none asks for a password).
    - Your machine says Desktop PC, your CPU, the RX 9070 XT and SteamOS 3.9.5.
-3. In Picks, leave **Turbine Hub in your Game Mode library** ticked. Quit Steam first if the step says so.
+3. In Picks, the picks that change system settings carry a **Needs your password** mark. Untick those, leave
+   **Turbine Hub in your Game Mode library** and the apps ticked, and apply. Quit Steam first if the step says so.
+   - The dialog asks for no password.
    - Afterwards Turbine Hub is under Non-Steam in your library, with its own art.
 
 ## 2. The helper (your password, once)
 1. Make any system change, for example My machine, Tune-up, **Huge pages**.
-   - The dialog lists exactly what changes and asks for your password once.
+   - The dialog's first lines say why the password is asked now (a system setting, like the admin prompt on
+     Windows), then it lists exactly what changes and asks for your password once.
+   - On a machine that has no password yet, the same dialog has two boxes to make one, and says SteamOS can't
+     recover it if it is forgotten.
 2. Enter it.
    - The change is made. Settings, **Review changes** lists it in plain words.
 3. Press **Undo** on it.

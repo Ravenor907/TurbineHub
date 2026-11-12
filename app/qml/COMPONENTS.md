@@ -124,7 +124,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | CardsPage | My machine, Bring it over. |
 | RowsPage | Every card's controls, the library check, a Store item's own page, Turbine Hub in Steam, a game's Proton, a game's saves, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
 | PickPage | Guided or Veteran. |
-| SetupPage | Guided's five steps. |
+| SetupPage | Guided's four steps. |
 
 ## Pictures
 

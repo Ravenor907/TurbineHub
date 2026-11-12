@@ -29,7 +29,7 @@ Made for people coming from Windows, with a mode for people who already know the
 
 |   |   |
 |---|---|
-| 🧭 **Two ways in** | **Guided** walks a newcomer through five short steps in plain words. **Veteran** ("I know more than you.") is one screen of switches with the exact values |
+| 🧭 **Two ways in** | **Guided** walks a newcomer through four short steps in plain words. **Veteran** ("I know more than you.") is one screen of switches with the exact values |
 | 🩺 **Home at a glance** | Battery, temperatures, power and fan, and a checkup that shows only what needs you, each with its fix |
 | 🎮 **Games** | Will my games run? for your whole library, per-game switches instead of typing launch options (FSR 4 on Radeon RX 9000, frame generation, Proton log), Try another Proton with Undo, and help when a game won't start. Games with online anti-cheat are never touched |
 | 🕰️ **Save time machine** | A snapshot of a game's saves every time it starts, restore in one press, and Undo. Saves from your Windows drive come along too |
@@ -94,9 +94,9 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
 <details>
 <summary><b>Guided and Veteran</b></summary>
 
-- **Guided** explains everything in plain words, with no jargon. Setup is five steps: your machine, a password
-  (SteamOS's version of the Windows admin password), your games, bringing things over from Windows, and a few
-  picks. Skip anything; Home keeps a reminder.
+- **Guided** explains everything in plain words, with no jargon. Setup is four steps: your machine, your games,
+  bringing things over from Windows, and a few picks. No step asks for a password: the picks that change system
+  settings are marked "Needs your password", and the rest apply without one. Skip anything; Home keeps a reminder.
 - **Veteran** skips the tour: one screen of picks, every control at once, exact keys, values and file paths in
   every dialog.
 - Switch any time in Settings.
@@ -191,8 +191,10 @@ F1 on a keyboard) lists all of them.
   anything. Risky ones open with Cancel highlighted.
 - **Everything can be undone.** Settings, Review changes lists every change, both system settings and what
   Turbine Hub put in your own folders, each with Undo. **Undo all** puts the machine back.
-- **One password, once.** System settings go through a small helper that accepts only a fixed list of known
-  settings with safe values. Your password sets it up once and is never stored.
+- **One password, once, and only when it is needed.** Turbine Hub never asks for a password up front. System
+  settings go through a small helper that accepts only a fixed list of known settings with safe values. The first
+  time you change one, its dialog says why SteamOS asks for your password (like the admin prompt on Windows), uses
+  it once to set the helper up and never stores it. A machine without a password makes one in that same dialog.
 - **SteamOS stays read only.** Turbine Hub never unlocks or changes the read-only system, so SteamOS updates keep
   working. After an update it checks your changes are still in place.
 - **Downloads are checked.** Decky Loader comes from its official release and is checked against GitHub's

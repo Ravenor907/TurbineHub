@@ -1,6 +1,7 @@
-//! First run: the mode picker, Guided's five steps and Veteran's one-screen quick setup.
+//! First run: the mode picker, Guided's four steps and Veteran's one-screen quick setup. No step asks for the
+//! password: the picks that change system settings are marked, and the dialog that applies them asks, with the reason.
 use super::home::step_title;
-use super::plan::{Ask, Plan, Step, dialog, helper_plan, toast};
+use super::plan::{Plan, Step, asks_password, dialog, helper_plan_because};
 use super::store::{self, HEROIC, LUDUSAVI};
 use super::{Ui, arr, b, kind_word, n, obj, row, s, section, with};
 use crate::helper::{self, Setting};
@@ -38,6 +39,17 @@ struct Pick {
     locked: Option<&'static str>,
     settings: Vec<Setting>,
     app: Option<&'static str>,
+}
+
+/// The mark on a pick that changes a system setting, while that still asks for the password.
+pub(crate) const NEEDS_PASSWORD: &str = "Needs your password";
+
+impl Pick {
+    /// Is this a system change, made by Turbine Hub's helper? The settings, and Decky Loader. Apps from Flathub,
+    /// the library entry and Game Boost's own switch change nothing of the system.
+    fn system(&self) -> bool {
+        !self.settings.is_empty() || self.id == "decky"
+    }
 }
 
 fn picks_for(ui: &Ui, guided: bool) -> Vec<Pick> {
@@ -124,7 +136,8 @@ fn chosen(ui: &mut Ui, guided: bool) -> (Vec<Pick>, BTreeSet<String>) {
     (all, picked)
 }
 
-fn pick_sections(all: &[Pick], picked: &BTreeSet<String>) -> (Vec<Json>, usize) {
+/// `mark`: the next system change asks for the password, so the picks that are one say so on their card.
+fn pick_sections(all: &[Pick], picked: &BTreeSet<String>, mark: bool) -> (Vec<Json>, usize) {
     let mut groups: Vec<&'static str> = Vec::new();
     for p in all {
         if !groups.contains(&p.group) {
@@ -143,7 +156,10 @@ fn pick_sections(all: &[Pick], picked: &BTreeSet<String>) -> (Vec<Json>, usize) 
                         // Not done and not something a tick can do: the steps, never a badge that looks done.
                         Some(PANEL_STEPS) => with(with(row("panel-guide", "", "button", &p.title, &p.note), "button", s("How")), "icon", s("help")),
                         Some(why) => with(with(row("none", "", "info", &p.title, &p.note), "badge", s(why)), "tone", s("ok")),
-                        None => with(row("tick", &format!("quick|{}", p.id), "check", &p.title, &p.note), "on", b(picked.contains(&p.id))),
+                        None => {
+                            let tick = with(row("tick", &format!("quick|{}", p.id), "check", &p.title, &p.note), "on", b(picked.contains(&p.id)));
+                            if mark && p.system() { with(tick, "badge", s(NEEDS_PASSWORD)) } else { tick }
+                        }
                     })
                     .collect(),
             )
@@ -159,7 +175,8 @@ fn changes_words(count: usize) -> String {
 /// Veteran's quick setup: everything on one screen.
 pub(crate) fn quick(ui: &mut Ui) -> Json {
     let (all, picked) = chosen(ui, false);
-    let (sections, count) = pick_sections(&all, &picked);
+    let mark = asks_password(ui);
+    let (sections, count) = pick_sections(&all, &picked, mark);
     let has_file = super::settings::setup_file(ui).is_file();
     let mut options = vec![super::controls::page_button("Tick all", "tick-all", "quick")];
     if has_file {
@@ -168,7 +185,7 @@ pub(crate) fn quick(ui: &mut Ui) -> Json {
     obj! {
         "crumb": s("Veteran mode"),
         "title": s("Quick setup"),
-        "intro": s("Tick what you want. One password, one go. Everything can be undone from Settings."),
+        "intro": s(if mark { "Tick what you want and apply it in one go. Picks marked \"Needs your password\" change system settings; the rest never ask. Everything can be undone from Settings." } else { "Tick what you want and apply it in one go. Everything can be undone from Settings." }),
         "flow": s("columns"),
         "sections": arr(sections),
         "note": s(format!("Turbine Hub backs up every setting first. {}.", changes_words(count))),
@@ -192,28 +209,20 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let next = button("Continue", "a", "setup-next", step, true);
     let (title, text, embed, sections, buttons, note): (&str, String, &str, Vec<Json>, Vec<Json>, String) = match step {
         "machine" => ("This is your machine", format!("Turbine Hub shows only what this {} has. Everything it changes is shown first, saved first and can be undone.", kind_word(&m)), "", Vec::new(), vec![next], String::new()),
-        "password" if ui.facts.has_password == Some(true) => ("This machine has a password", "SteamOS asks for a password before changing system settings, like the admin password on Windows. Turbine Hub asks for it once, uses it only for changes you approve, and never stores it.".into(), "", Vec::new(), vec![next], String::new()),
-        "password" => (
-            "One password for system changes",
-            "SteamOS asks for a password before changing system settings, like the admin password on Windows. Turbine Hub asks for it once, uses it only for changes you approve, and never stores it.".into(),
-            "",
-            Vec::new(),
-            vec![button("Set password", "a", "password", "", true), button("I already have one", "", "setup-next", step, false), button("Skip for now", "", "setup-next", step, false)],
-            "Write it down somewhere safe. SteamOS can't recover it.".into(),
-        ),
         "games" => ("", String::new(), "library", Vec::new(), vec![button("Next", "start", "setup-next", step, true)], String::new()),
         "bring" => ("", String::new(), "bring", Vec::new(), vec![button("Next", "start", "setup-next", step, true)], String::new()),
         _ => {
             let (all, picked) = chosen(ui, true);
-            let (sections, count) = pick_sections(&all, &picked);
-            ("Picks", "A good start for most people. Untick what you don't want.".into(), "", sections, vec![button(&if count == 0 { "Finish".to_string() } else { format!("Apply {}", changes_words(count)) }, "start", "quick-apply", "", true)], "Turbine Hub backs up every setting first. Everything can be undone from Settings.".into())
+            let mark = asks_password(ui);
+            let (sections, count) = pick_sections(&all, &picked, mark);
+            ("Picks", if mark { "A good start for most people. Untick what you don't want. Picks marked \"Needs your password\" change system settings, so SteamOS asks for it when you apply them. The rest never ask.".into() } else { "A good start for most people. Untick what you don't want.".into() }, "", sections, vec![button(&if count == 0 { "Finish".to_string() } else { format!("Apply {}", changes_words(count)) }, "start", "quick-apply", "", true)], "Turbine Hub backs up every setting first. Everything can be undone from Settings.".into())
         }
     };
     obj! {
         "rail": rail,
         "step": s(step),
         "count": s(format!("Step {} of {}", index + 1, SETUP_STEPS.len())),
-        "found": if step == "machine" || step == "password" { found } else { Json::Null },
+        "found": if step == "machine" { found } else { Json::Null },
         "title": s(title),
         "text": s(text),
         "note": s(note),
@@ -248,17 +257,6 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             let next = SETUP_STEPS.iter().position(|x| *x == arg).and_then(|i| SETUP_STEPS.get(i + 1)).copied().unwrap_or("");
             Some(if finished { obj! {"state": b(true), "root": s("home"), "toast": s("Setup done")} } else { obj! {"state": b(true), "setupStep": s(next), "refresh": b(true)} })
         }
-        "password" => {
-            if ui.facts.has_password == Some(true) {
-                return Some(toast("This machine has a password already."));
-            }
-            let mut p = Plan::new("Set a password", "The SteamOS password for system changes. Write it down somewhere safe: SteamOS can't recover it.", "Set password");
-            p.ask = Ask::New;
-            p.steps.push(Step::SetPassword);
-            p.steps.push(Step::Done { setup: Some("password"), brought: None });
-            p.done = "Password set".into();
-            Some(dialog(ui, p))
-        }
         "quick-apply" => {
             let guided = !ui.veteran();
             let (all, picked) = chosen(ui, guided);
@@ -291,7 +289,15 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             Some(if needs_helper {
                 // The helper's settings go first, so a wrong password stops everything before any app installs.
                 let rest = std::mem::take(&mut p.steps);
-                let j = helper_plan(ui, p, &settings);
+                // How many of the ticked picks the password is for, so the dialog's first words say it.
+                let system = go.iter().filter(|x| x.system()).count();
+                let lead = match (system, go.len()) {
+                    (1, 1) => "This changes a system setting".to_string(),
+                    (1, all) => format!("1 of these {all} changes is a system setting"),
+                    (n, all) if n == all => format!("These {all} changes are system settings"),
+                    (n, all) => format!("{n} of these {all} changes are system settings"),
+                };
+                let j = helper_plan_because(ui, p, &settings, &lead);
                 if let Some(plan) = ui.pending.as_mut() {
                     plan.steps.extend(rest);
                 }

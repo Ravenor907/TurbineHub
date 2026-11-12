@@ -384,7 +384,7 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
     }
     if arg == "decky" {
         let has = decky_installed(ui);
-        let action = with(with(row("decky", "", "button", if has { "Repair or update" } else { "Install" }, if has { "Installs the newest release again, over the one that is here" } else { "Asks for your SteamOS password once" }), "icon", s(if has { "refresh" } else { "download" })), "button", s(if has { "Repair" } else { "Install" }));
+        let action = with(with(row("decky", "", "button", if has { "Repair or update" } else { "Install" }, if has { "Installs the newest release again, over the one that is here" } else if super::plan::asks_password(ui) { "A system change, so its dialog asks for your SteamOS password" } else { "The official release, checked before it is installed" }), "icon", s(if has { "refresh" } else { "download" })), "button", s(if has { "Repair" } else { "Install" }));
         let newest = match (&ui.decky_tag, ui.offline) {
             (Some(tag), false) => format!("Version {tag}"),
             (Some(tag), true) => format!("Version {tag}, as found last. Offline now."),

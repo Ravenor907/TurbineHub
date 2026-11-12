@@ -168,37 +168,65 @@ pub fn set_choice(st: &mut crate::settings::Settings, key: &str, on: bool) {
     }
 }
 
+/// Does the next system change ask for the password? Only while Turbine Hub's helper isn't on the machine, or is
+/// the one of an older version. Nothing asks for it before that change, and nothing after it.
+pub(crate) fn asks_password(ui: &Ui) -> bool {
+    ui.helper_outdated() || !helper::installed(&ui.ctx.root)
+}
+
+/// How a dialog that asks for the password starts, when the plan doesn't say it in its own words.
+const SYSTEM_CHANGE: &str = "This changes a system setting";
+
 /// A plan that sends settings to the helper. When the helper isn't installed yet the plan installs it first and the
 /// dialog asks for the password once; without a password on the machine the same dialog sets one first.
-pub(crate) fn helper_plan(ui: &mut Ui, mut plan: Plan, settings: &[Setting]) -> Json {
+pub(crate) fn helper_plan(ui: &mut Ui, plan: Plan, settings: &[Setting]) -> Json {
+    helper_plan_because(ui, plan, settings, SYSTEM_CHANGE)
+}
+
+/// The same, with the dialog's own first words about what in it is a system change ("3 of these 9 changes are
+/// system settings").
+pub(crate) fn helper_plan_because(ui: &mut Ui, mut plan: Plan, settings: &[Setting], lead: &str) -> Json {
     for st in settings {
         if let Err(e) = st.check() {
             return toast(&format!("That change isn't allowed: {e}"));
         }
         plan.steps.push(Step::Host(helper::apply(st)));
     }
-    with_helper(ui, plan)
+    ask_for_helper(ui, plan, lead)
 }
 
 /// Puts the helper's install in front of a plan that needs it. A machine without a password gets one in the same
 /// dialog: it is typed twice, set first, then used once for the helper.
-pub(crate) fn with_helper(ui: &mut Ui, mut plan: Plan) -> Json {
-    if ui.helper_outdated() {
+pub(crate) fn with_helper(ui: &mut Ui, plan: Plan) -> Json {
+    ask_for_helper(ui, plan, SYSTEM_CHANGE)
+}
+
+/// This is the only place Turbine Hub ever asks for the password, so the dialog's first lines say why it is asked
+/// now, before the dialog's own words, and what is done with it is listed first.
+fn ask_for_helper(ui: &mut Ui, mut plan: Plan, lead: &str) -> Json {
+    let why = if ui.helper_outdated() {
         // The helper on the machine is from an older Turbine Hub: a new one only ever arrives with the password.
         plan.steps.insert(0, Step::HelperInstall);
         plan.ask = Ask::Current;
-        plan.items.push(("Your SteamOS password, asked once more".into(), "Turbine Hub's helper on this machine is from an older version and this needs the new one. Updating it takes the password, which is never stored.".into()));
+        plan.items.insert(0, ("Update Turbine Hub's helper".into(), "Asked once for each new helper. System changes after this ask for nothing.".into()));
+        format!("{lead}, and Turbine Hub's helper on this machine is from an older version. Updating it takes your SteamOS password once more, like the admin prompt on Windows. Turbine Hub never stores it.")
     } else if !helper::installed(&ui.ctx.root) {
         plan.steps.insert(0, Step::HelperInstall);
+        plan.items.insert(0, ("Set up Turbine Hub's helper".into(), "Once. It makes the system changes you approve and records each one. Later changes ask for no password.".into()));
         if ui.facts.has_password == Some(false) {
-            plan.steps.insert(0, Step::Done { setup: Some("password"), brought: None });
             plan.steps.insert(0, Step::SetPassword);
             plan.ask = Ask::New;
-            plan.items.push(("A password for this machine first".into(), "System changes need one, like the admin password on Windows. Turbine Hub sets it, uses it once to set up its helper and never stores it. Write it down somewhere safe: SteamOS can't recover it.".into()));
+            plan.items.insert(0, ("Create this machine's password".into(), "Typed twice below. Write it down somewhere safe.".into()));
+            format!("{lead}, so SteamOS asks for a password, like the admin prompt on Windows. This machine has none yet, so you create one now. SteamOS can't recover it if you forget it. Turbine Hub uses it once to set up its helper and never stores it.")
         } else {
             plan.ask = Ask::Current;
-            plan.items.push(("Your SteamOS password, asked once".into(), "It sets up Turbine Hub's helper, which makes system changes and records each one. The password is never stored.".into()));
+            format!("{lead}, so SteamOS asks for your password, like the admin prompt on Windows. Turbine Hub uses it once to set up its helper and never stores it.")
         }
+    } else {
+        String::new()
+    };
+    if !why.is_empty() {
+        plan.text = if plan.text.is_empty() { why } else { format!("{why}\n\n{}", plan.text) };
     }
     dialog(ui, plan)
 }

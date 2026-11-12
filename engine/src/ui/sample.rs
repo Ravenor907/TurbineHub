@@ -23,9 +23,12 @@ pub const HANDHELD: Preset = Preset::Handheld;
 pub const SHOTS: &[(&str, &str)] = &[
     ("pick", "--page=pick --machine=handheld"),
     ("setup-machine", "--page=setup --arg=machine --machine=handheld --mode=guided"),
-    ("setup-password", "--page=setup --arg=password --machine=handheld --mode=guided"),
-    ("setup-password-new", "--page=setup --arg=password --machine=handheld --mode=guided --no-password"),
-    ("dialog-password", "--page=setup --arg=password --act=password: --machine=handheld --mode=guided --no-password"),
+    // The only place the password is asked: the dialog of the first system change. On a machine with a password,
+    // on one without (it makes one), and with the helper set up already (nothing is asked).
+    ("dialog-password", "--page=setup --arg=picks --act=quick-apply: --machine=handheld --mode=guided"),
+    ("dialog-password-new", "--page=setup --arg=picks --act=quick-apply: --machine=handheld --mode=guided --no-password"),
+    ("dialog-password-helper", "--page=setup --arg=picks --act=quick-apply: --machine=handheld --mode=guided --helper"),
+    ("setup-picks-helper", "--page=setup --arg=picks --machine=handheld --mode=guided --helper"),
     ("setup-games", "--page=setup --arg=games --machine=handheld --mode=guided"),
     ("setup-bring", "--page=setup --arg=bring --machine=handheld --mode=guided"),
     ("setup-picks", "--page=setup --arg=picks --machine=handheld --mode=guided"),
@@ -166,7 +169,7 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("home-dense", "--page=home --machine=handheld --mode=veteran --finger=74"),
     ("games-dense", "--page=games --arg=steam:1086940 --machine=handheld --mode=guided --finger=74"),
     ("look-dense", "--page=settings --arg=look --machine=handheld --mode=guided --finger=74"),
-    ("dialog-dense", "--page=setup --arg=password --act=password: --machine=handheld --mode=guided --no-password --finger=74"),
+    ("dialog-dense", "--page=module:tuneup --act=tuneup:all --machine=handheld --mode=guided --no-password --finger=74"),
     ("menu-dense", "--page=home --act=menu: --machine=handheld --mode=guided --finger=74"),
     // Animations at Full and Reduced (pictures are otherwise taken with them off): the page is worked with presses
     // while everything moves, then must come to rest on the very picture the same presses give with animations off.
@@ -331,7 +334,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     let ctx = Ctx { root: root.clone(), home: dir.join("home"), config_home: dir.join("config"), efibootmgr: if preset == Preset::TvPc { String::new() } else { fake::EFI_WITH_WINDOWS.into() }, version: "0.1".into() };
     home(&ctx.home);
     ledger(&root, preset, now);
-    let st = Settings { mode, setup_done: vec!["machine".into(), "password".into(), "games".into()], ..Settings::default() };
+    let st = Settings { mode, setup_done: vec!["machine".into(), "games".into()], ..Settings::default() };
     let _ = st.save(&ctx.config_home);
     let mut ui = Ui::new(ctx, dir.join("cache"));
     cache(&ui.cache, now, false);
@@ -396,6 +399,10 @@ impl Ui {
     pub fn sample_with_unseen_library(&mut self) {
         let steam = self.ctx.home.join(".local/share/Steam");
         w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{UNSEEN_LIBRARY}\"\n}}\n}}\n", steam.display()));
+    }
+    /// A sample run where Turbine Hub's helper is set up already: no change asks for the password.
+    pub fn sample_with_helper(&mut self) {
+        w(&self.ctx.root, crate::helper::BIN.trim_start_matches('/'), "");
     }
     /// A sample run where the host couldn't say whether Steam is running.
     pub fn sample_steam_unsure(&mut self) {

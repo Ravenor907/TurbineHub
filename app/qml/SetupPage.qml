@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Layouts
 import TurbineHub
 
-// Guided's first run: the five steps down the left, the step itself on the right. A step is either a few words
-// with its buttons (your machine, the password), another page shown inside (the library check, Bring it over), or
+// Guided's first run: the four steps down the left, the step itself on the right. A step is either a few words
+// with its buttons (your machine), another page shown inside (the library check, Bring it over), or
 // a list of things to tick (the picks). B goes to the step before; on the first step it leaves, and the Home page's
 // setup card comes back to the first step not done.
 //

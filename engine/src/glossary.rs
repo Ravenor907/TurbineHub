@@ -21,6 +21,8 @@ pub const TERMS: &[Term] = &[
     Term { term: "Game Mode", means: "The full-screen console view SteamOS starts in.", windows: "Steam Big Picture, but it's the whole system" },
     Term { term: "Desktop Mode", means: "A regular desktop with windows, a mouse and a file manager.", windows: "The Windows desktop" },
     Term { term: "Proton", means: "What lets Windows games run on SteamOS. Steam picks one per game.", windows: "" },
+    Term { term: "Shader cache", means: "Small programs for the graphics card that Steam prepares for each game so it doesn't stutter. Steam builds it again by itself, so the cache of a game that is gone is safe to clear.", windows: "The shader cache of the graphics driver" },
+    Term { term: "Leftovers", means: "What stays on a drive after a game or an app is removed: its shader cache, its Windows files, an unfinished download. My machine, Storage finds them and says which are safe to clear.", windows: "What Disk Cleanup finds" },
     Term { term: "Windows files", means: "The folder of Windows bits each game gets, where many games keep their saves and settings.", windows: "C:\\Users and C:\\Windows, one per game" },
     Term { term: "Game switches", means: "Per-game options like FSR 4 and frame generation.", windows: "AMD Adrenalin or NVIDIA app game profiles" },
     Term { term: "Power limit", means: "How much power the processor may use. Lower is quieter and lasts longer.", windows: "Armoury Crate operating modes" },

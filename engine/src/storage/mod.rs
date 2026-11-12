@@ -132,7 +132,7 @@ impl Group {
     }
     pub fn title(self) -> &'static str {
         match self {
-            Group::Safe => "Safe to free",
+            Group::Safe => "Safe to clear",
             Group::Check => "Check first",
             Group::Never => "In use",
         }
@@ -246,8 +246,17 @@ pub struct Finding {
     pub ticked: bool,
     /// The Steam app it belongs to, when it belongs to one.
     pub app_id: String,
-    /// Inside a Steam library's steamapps: only touched while Steam is closed.
+    /// Inside a Steam library's steamapps: only touched while Steam is closed, unless it is an `orphan`.
     pub steam: bool,
+}
+
+impl Finding {
+    /// Is it what a game that is no longer installed left behind (its shader cache, its Windows files, its
+    /// unfinished download)? Steam has no use for those, so they may go while Steam runs; everything else inside
+    /// a library waits for Steam to be closed.
+    pub fn orphan(&self) -> bool {
+        matches!(self.kind, Kind::ShaderCache | Kind::Compatdata) || (self.kind == Kind::Download && self.group == Group::Safe)
+    }
 }
 
 /// One drive and what is on it.
@@ -1022,7 +1031,7 @@ impl Report {
                 "howWords": s(f.how.words()),
                 "ticked": b(f.group != Group::Never && ticked.contains(&f.id)),
                 "offered": b(f.group != Group::Never),
-                "needsSteamClosed": b(f.steam),
+                "needsSteamClosed": b(f.steam && !f.orphan()),
                 "paths": arr(f.paths.iter().map(|p| s(p.to_string_lossy()))),
             }
         };
@@ -1099,4 +1108,53 @@ impl Here {
     pub fn site(&self, when: When) -> Site<'_> {
         Site { fs: &self.disk, places: &self.places, folder: &self.folder, data: &self.data, when }
     }
+}
+
+/// A question put to the host: the command line and what is typed into it (None: nothing). Its exit code and what
+/// it printed, or None when it couldn't run.
+pub type AskTyped<'a> = &'a mut dyn FnMut(&[String], Option<&str>) -> Option<(i32, String)>;
+
+/// What the host says for a look: whether Steam runs, which games run, and what Flatpak calls unused (its own
+/// list, with "n" typed into it so it only ever lists).
+pub fn ask_host(ask: AskTyped) -> Host {
+    let steam = Steam::from_answer(ask(&Steam::question(), None).as_ref().map(|(code, out)| (*code, out.as_str())));
+    let running = match steam {
+        Steam::Closed => Some(Vec::new()),
+        Steam::Unknown => None,
+        // pgrep ends with 1 when it found nothing.
+        Steam::Running => ask(&crate::agent::games_question(), None).filter(|(code, _)| matches!(code, 0 | 1)).map(|(_, out)| crate::agent::running_games(&out)),
+    };
+    // Flatpak asks once for each place apps are installed in (the system, the user): every question gets a no.
+    let flatpak_unused = ask(&unused_question(), Some("n\nn\nn\nn\n")).map(|(_, out)| out);
+    let flatpak_sizes = flatpak_unused.as_ref().and_then(|_| ask(&sizes_question(), None)).filter(|(code, _)| *code == 0).map(|(_, out)| out);
+    Host { steam, running, flatpak_unused, flatpak_sizes }
+}
+
+/// One whole look on the machine the app runs on, for the app's worker thread: the places are read, the host is
+/// asked, then everything is counted. It reads only, and can take seconds on a slow card.
+pub fn look_here(home: &Path, folder: &Path, data: &Path, ask: AskTyped) -> (Report, Host) {
+    let here = Here::read(Path::new("/"), home, folder, data);
+    let zone = ask(&["date".to_string(), "+%z".to_string()], None).map(|(_, out)| out).unwrap_or_default();
+    let host = ask_host(ask);
+    (scan(&here.site(When::from_date_z(crate::now(), &zone)), &host, &Limits::default()), host)
+}
+
+/// The checkup's line from the drives alone (how full each is, nothing counted), for the moment before any look
+/// was taken: quick enough for every start. None when no drive is nearly full.
+pub fn nearly_full(fs: &dyn Fs, places: &Places) -> Option<(String, String)> {
+    Report { at: 0, drives: drives(fs, places), games: Vec::new(), findings: Vec::new(), problems: Vec::new() }.checkup()
+}
+
+/// `nearly_full` on the machine the app runs on.
+pub fn nearly_full_here(home: &Path, folder: &Path, data: &Path) -> Option<(String, String)> {
+    let here = Here::read(Path::new("/"), home, folder, data);
+    nearly_full(&here.disk, &here.places)
+}
+
+/// What one game really takes on the machine the app runs on, by Turbine Hub's id for it, for the app's worker
+/// thread. None when the game isn't installed.
+pub fn game_size_here(home: &Path, folder: &Path, data: &Path, id: &str) -> Option<GameSize> {
+    let game = crate::scan_games(home).games.into_iter().find(|g| g.id() == id)?;
+    let here = Here::read(Path::new("/"), home, folder, data);
+    Some(game_size(&here.disk, &here.places, &game, &Limits::default()))
 }

@@ -338,6 +338,13 @@ fn make_ui() -> Ui {
     if option("whats-new").is_some() {
         ui.sample_whats_new();
     }
+    // The storage saver in one of its states, and blank library tiles (to fix, or drawn already).
+    if let Some(state) = option("tile-art") {
+        ui.sample_tile_art(&state);
+    }
+    if let Some(state) = option("storage") {
+        ui.sample_storage(&state);
+    }
     // An app the made-up machine has as well ("--installed=<app id>").
     if let Some(id) = option("installed") {
         ui.installed.push(id);
@@ -386,7 +393,7 @@ impl HubRust {
             return;
         }
         let st = self.ui.settings();
-        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, want_notes: self.ui.whats_new_wanted(), helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root), check_now };
+        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, want_notes: self.ui.whats_new_wanted(), helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root), folder: self.ui.folder(), data: self.ui.data.clone(), check_now };
         run::gather(g, self.tx.clone());
     }
 
@@ -436,6 +443,9 @@ impl HubRust {
             let windows_here = ui.machine().drives.iter().any(|d| d.role == turbinehub_engine::hardware::DriveRole::Windows);
             ui.facts.not_in_library = ui::selftile::missing(ui);
             ui.facts.windows_not_brought = windows_here && !ui.settings().brought.iter().any(|b| b == "windows");
+            if let Some(line) = f.storage {
+                ui.storage_quick(line);
+            }
         }
         if let Some(online) = f.online {
             ui.offline = !online;
@@ -462,6 +472,19 @@ impl HubRust {
     fn job(&self, id: u64, plan: &Plan, password: String, stop: Arc<AtomicBool>) -> Job {
         let st = self.ui.settings();
         Job { id, stop, steps: plan.steps.clone(), password, home: self.ui.ctx.home.clone(), folder: self.ui.folder(), data: self.ui.data.clone(), version: self.ui.ctx.version.clone(), cache: self.ui.cache.clone(), test_builds: st.test_builds }
+    }
+
+    /// What the storage saver waits for is started on a worker thread: its look (asked for by its page, by Look
+    /// again, by a nearly full drive at the start and after every cleaning), and the size of the game the Games
+    /// tab shows. Neither is ever counted on the interface thread.
+    fn storage_work(&mut self) {
+        if self.ui.storage_take_wanted() {
+            crate::log::line("storage", "Looking");
+            run::storage_look(self.ui.ctx.home.clone(), self.ui.folder(), self.ui.data.clone(), self.tx.clone());
+        }
+        if let Some(id) = self.ui.storage_take_size_wanted() {
+            run::game_size(self.ui.ctx.home.clone(), self.ui.folder(), self.ui.data.clone(), id, self.tx.clone());
+        }
     }
 
     /// The next job of the line of work starts, when nothing of it runs. On a made-up machine it only counts as
@@ -598,6 +621,8 @@ impl qobject::Hub {
         if name == "help" && no_pad {
             text = with_pad_hint(&text);
         }
+        // The page may have asked for the storage saver's look, or for a game's size.
+        self.as_mut().rust_mut().storage_work();
         QString::from(text.as_str())
     }
 
@@ -739,8 +764,10 @@ impl qobject::Hub {
                 run::quick(line);
             }
         }
-        // A press may have put a copy of Files into the line, or ended a made-up machine's job.
+        // A press may have put a copy of Files into the line, or ended a made-up machine's job; Look again asks
+        // for the storage saver's look.
         self.as_mut().rust_mut().pump();
+        self.as_mut().rust_mut().storage_work();
         self.as_mut().refresh_status();
         QString::from(text.as_str())
     }
@@ -920,6 +947,15 @@ impl qobject::Hub {
                     self.as_mut().rust_mut().take(*f);
                     tick = true;
                 }
+                Event::Storage(found) => {
+                    let (report, host) = *found;
+                    self.as_mut().rust_mut().ui.storage_found(report, host);
+                    tick = true;
+                }
+                Event::GameSize(id, size) => {
+                    self.as_mut().rust_mut().ui.storage_game_size(&id, size.map(|s| *s));
+                    tick = true;
+                }
                 Event::Done(_, result) => {
                     let plan = self.as_mut().rust_mut().running.take();
                     let result = match (&plan, result) {
@@ -954,8 +990,10 @@ impl qobject::Hub {
             out.push(("job", text));
             status = true;
         }
-        // The next job's turn, and the top bar: at once when the line changed, else every few seconds.
+        // The next job's turn, and the top bar: at once when the line changed, else every few seconds. A cleaning
+        // that just ended, or a nearly full drive found at the start, asks for the storage saver's look.
         self.as_mut().rust_mut().pump();
+        self.as_mut().rust_mut().storage_work();
         if status || tick || self.rust().status_at.elapsed() >= STATUS_EVERY || out.iter().any(|(k, _)| *k == "files") {
             self.as_mut().refresh_status();
         }

@@ -24,6 +24,7 @@ pub const WHERE: &[(&str, &str)] = &[
     ("Antivirus", "Not needed. SteamOS keeps its system read only, and apps from the Store run fenced off from it."),
     ("Bluetooth and Wi-Fi", "Steam's Settings, Bluetooth and Internet."),
     ("The on-screen keyboard", "Steam button and X."),
+    ("Disk Cleanup and Storage Sense", "My machine, Storage. It shows what is using each drive and the leftovers that can go: the safe ones ticked, the rest only after you tick them."),
     ("Game saves (Documents, My Games)", "Most games keep saves in Steam Cloud, and they come back by themselves. The others: Games, the game, Saves and snapshots. Saves on your Windows drive come over with Bring it over, Your Windows drive."),
 ];
 
@@ -167,6 +168,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "lighting" => open("module:lighting"),
         "self-tile" => return super::selftile::act(ui, "self-tile", "add", value),
         "tile-art" => return super::onepress::act(ui, "tile-art", "fix", value),
+        "tile-art-undo" => return super::onepress::act(ui, "tile-art", "undo", value),
+        "storage" => open("module:storage"),
         "help:panel" => return super::store::act(ui, "panel-guide", "", value),
         "help:controller" => guide(
             "Using a controller in Desktop Mode",

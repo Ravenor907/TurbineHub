@@ -285,6 +285,12 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         chips.push(obj! {"text": s(t.chip()), "tone": s(t.tone())});
     }
     let playable = l.verdict.label != Label::WontRun;
+    // What the game really takes (its files, its shader cache and its Windows files), once it was counted. The
+    // page never waits for it: it is asked for and shows when it is here.
+    let mut line = format!("{} \u{b7} {} \u{b7} {}", l.game.store.label(), runs_with(&l.game), l.verdict.note);
+    if let Some(size) = super::storage::game_words(ui, &l.game) {
+        line = format!("{} \u{b7} {size}", line.trim_end_matches('.'));
+    }
     obj! {
         "side": side,
         "sideTitle": s(side_title),
@@ -293,7 +299,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         "header": obj! {
             "title": s(&l.game.name),
             "chips": arr(chips),
-            "line": s(format!("{} \u{b7} {} \u{b7} {}", l.game.store.label(), runs_with(&l.game), l.verdict.note)),
+            "line": s(line),
         },
         "sections": arr(panel(ui, l, &tv).into_iter().chain(unseen_section(ui))),
         // Holding Start plays the game the highlight is on.

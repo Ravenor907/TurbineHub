@@ -3,6 +3,11 @@
 //! Nothing is taken on trust from the look: right before each thing goes, Steam's lists are read again and the
 //! thing has to be exactly what it was offered as (still a leftover, still in its own folder and not behind a
 //! link, Steam closed for anything inside a library). What fails a check is left alone and named with the reason.
+//!
+//! One thing inside a library may go while Steam runs (in Game Mode it always runs): what a game that is no longer
+//! installed left behind (its shader cache, its Windows files, its unfinished download). Steam has no use for
+//! those, and right before each one goes Steam's lists are read once more: still no manifest in any library, not
+//! named in the library list, not a non-Steam game, and no game with that id running.
 
 use super::{Finding, Group, How, Host, Kind, Report, World, downloads_dir, drives, old_steam_files, plain_folder, reset_leftover, unused_step};
 use crate::compat_tool;
@@ -63,8 +68,9 @@ const CHANGED: &str = "It changed since the look, so it was left alone. Look aga
 const BACK: &str = "The game is in Steam again, so its files stay";
 
 /// Why this thing can't go right now, from what the host says. Three answers about Steam, as everywhere: a
-/// question that couldn't be asked is not a "no".
-pub(crate) fn refusal(steam_item: bool, app_id: &str, steam: Steam, running: Option<&[String]>) -> Option<&'static str> {
+/// question that couldn't be asked is not a "no". `orphan`: it is what a game that is no longer installed left
+/// behind, which may go while Steam runs once it is known that no game with its id is running.
+pub(crate) fn refusal(steam_item: bool, orphan: bool, app_id: &str, steam: Steam, running: Option<&[String]>) -> Option<&'static str> {
     if !app_id.is_empty() && running.is_some_and(|r| r.iter().any(|x| x == app_id)) {
         return Some(GAME_OPEN);
     }
@@ -72,6 +78,7 @@ pub(crate) fn refusal(steam_item: bool, app_id: &str, steam: Steam, running: Opt
         // With Steam closed none of its games runs.
         return match steam {
             Steam::Closed => None,
+            Steam::Running if orphan && !app_id.is_empty() => running.is_none().then_some(GAME_UNSURE),
             Steam::Running => Some(STEAM_OPEN),
             Steam::Unknown => Some(STEAM_UNSURE),
         };
@@ -88,8 +95,7 @@ fn undo_file(folder: &Path) -> PathBuf {
 }
 
 fn item_of(f: &Finding) -> Item {
-    let orphan = matches!(f.kind, Kind::ShaderCache | Kind::Compatdata) || (f.kind == Kind::Download && f.group == Group::Safe);
-    Item { id: f.id.clone(), kind: f.kind, how: f.how, title: f.title.clone(), paths: f.paths.clone(), inside: f.inside.clone(), app_id: f.app_id.clone(), steam: f.steam, orphan }
+    Item { id: f.id.clone(), kind: f.kind, how: f.how, title: f.title.clone(), paths: f.paths.clone(), inside: f.inside.clone(), app_id: f.app_id.clone(), steam: f.steam, orphan: f.orphan() }
 }
 
 /// The dialog for the ticked findings: every thing by name with its size and what happens to it (erased for good,
@@ -102,7 +108,7 @@ pub fn plan(report: &Report, ticked: &[String], host: &Host) -> Result<Plan, Str
     }
     let (mut go, mut left): (Vec<&Finding>, Vec<(&Finding, &str)>) = (Vec::new(), Vec::new());
     for f in chosen {
-        match refusal(f.steam, &f.app_id, host.steam, host.running.as_deref()) {
+        match refusal(f.steam, f.orphan(), &f.app_id, host.steam, host.running.as_deref()) {
             Some(why) => left.push((f, why)),
             None => go.push(f),
         }
@@ -226,6 +232,8 @@ struct Binned {
     trash: PathBuf,
     name: String,
     original: PathBuf,
+    /// The Steam app whose leftover it is ("" for anything else): it may go back while Steam runs, as it went.
+    orphan: String,
 }
 
 impl Binned {
@@ -233,13 +241,13 @@ impl Binned {
         Trashed { trash: self.trash.clone(), name: self.name.clone(), at: self.trash.join("files").join(&self.name), original: self.original.clone(), deleted: String::new() }
     }
     fn to_json(&self) -> Json {
-        obj! {"title": s(&self.title), "trash": s(self.trash.to_string_lossy()), "name": s(&self.name), "original": s(self.original.to_string_lossy())}
+        obj! {"title": s(&self.title), "trash": s(self.trash.to_string_lossy()), "name": s(&self.name), "original": s(self.original.to_string_lossy()), "orphan": s(&self.orphan)}
     }
 }
 
 fn read_undo(folder: &Path) -> Vec<Binned> {
     let Some(j) = std::fs::read_to_string(undo_file(folder)).ok().and_then(|t| json::parse(&t).ok()) else { return Vec::new() };
-    j.get("items").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| Some(Binned { title: x.str_at("title")?.into(), trash: x.str_at("trash")?.into(), name: x.str_at("name")?.into(), original: x.str_at("original")?.into() })).collect()
+    j.get("items").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| Some(Binned { title: x.str_at("title")?.into(), trash: x.str_at("trash")?.into(), name: x.str_at("name")?.into(), original: x.str_at("original")?.into(), orphan: x.str_at("orphan").unwrap_or("").into() })).collect()
 }
 
 fn write_undo(folder: &Path, at: u64, items: &[Binned]) {
@@ -274,7 +282,7 @@ fn free_one(item: &Item, site: &Site, binned: &mut Vec<Binned>) -> Result<(), St
         (_, How::Bin) => {
             for p in item.paths.iter().filter(|p| fs.meta(p).is_ok()) {
                 let t = trash::put(fs, places, p, site.when).map_err(|e| e.trim_end_matches('.').to_string())?;
-                binned.push(Binned { title: item.title.clone(), trash: t.trash, name: t.name, original: t.original });
+                binned.push(Binned { title: item.title.clone(), trash: t.trash, name: t.name, original: t.original, orphan: if item.orphan { item.app_id.clone() } else { String::new() } });
             }
             Ok(())
         }
@@ -310,9 +318,12 @@ pub fn run(job: &Job, site: &Site, say: &dyn Fn(String), ask: Ask) -> Result<Str
             let (mut binned, mut skipped, mut done): (Vec<Binned>, Vec<(String, String)>, usize) = (Vec::new(), Vec::new(), 0);
             for item in items {
                 say(format!("Freeing: {}", item.title));
-                let result = match refusal(item.steam, &item.app_id, steam, running.as_deref()) {
+                // While Steam runs its lists can change under the cleaning: a leftover is looked up in them again
+                // right before it goes, not in what was read when the cleaning began.
+                let fresh = (item.orphan && steam != Steam::Closed).then(|| World::read(fs, places, site.folder, site.data));
+                let result = match refusal(item.steam, item.orphan, &item.app_id, steam, running.as_deref()) {
                     Some(why) => Err(why.to_string()),
-                    None => still_right(item, &world, site).map_err(String::from).and_then(|_| free_one(item, site, &mut binned)),
+                    None => still_right(item, fresh.as_ref().unwrap_or(&world), site).map_err(String::from).and_then(|_| free_one(item, site, &mut binned)),
                 };
                 match result {
                     Ok(()) => done += 1,
@@ -341,13 +352,17 @@ pub fn run(job: &Job, site: &Site, say: &dyn Fn(String), ask: Ask) -> Result<Str
             if items.is_empty() {
                 return Err("There is nothing to put back.".into());
             }
-            // Putting something back into a Steam library needs Steam closed just as taking it out did.
+            // Putting something back into a Steam library needs Steam closed just as taking it out did; what a
+            // removed game left behind goes back while Steam runs, as long as the game is still gone.
             let in_steam = |b: &Binned| world.libs.iter().any(|l| b.original.starts_with(l.join("steamapps")));
+            let still_gone = |b: &Binned| !b.orphan.is_empty() && !world.installed(&b.orphan) && !world.shortcuts.contains_key(&b.orphan);
             let steam = if items.iter().any(in_steam) { steam_now(&mut *ask) } else { Steam::Closed };
+            let running: Option<Vec<String>> = if steam == Steam::Running && items.iter().any(|b| in_steam(b) && still_gone(b)) { ask(&crate::agent::games_question()).filter(|(code, _)| matches!(code, 0 | 1)).map(|(_, out)| crate::agent::running_games(&out)) } else { None };
             let (mut kept, mut problems, mut back) = (Vec::new(), Vec::new(), 0);
             for b in items {
                 say(format!("Putting back: {}", b.title));
-                let result = match refusal(in_steam(&b), "", steam, None) {
+                let gone = still_gone(&b);
+                let result = match refusal(in_steam(&b), gone, if gone { &b.orphan } else { "" }, steam, running.as_deref()) {
                     Some(why) => Err(format!("{why}.")),
                     None => trash::restore(fs, places, &b.trashed(), false).map(|_| ()),
                 };

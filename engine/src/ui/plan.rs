@@ -382,6 +382,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
         .or_else(|| super::selftile::act(ui, action, arg, value))
         .or_else(|| super::onepress::act(ui, action, arg, value))
         .or_else(|| super::machine::act(ui, action, arg, value))
+        .or_else(|| super::storage::act(ui, action, arg, value))
         .or_else(|| super::store::act(ui, action, arg, value))
         .or_else(|| super::nsl::act(ui, action, arg, value))
         .or_else(|| super::bring::act(ui, action, arg, value))

@@ -407,6 +407,46 @@ pub const SHOTS: &[(&str, &str)] = &[
     // The Store worked with real keys and the controller: a row's button, the line of work, the sections.
     ("check-store-row", "--page=store --arg=apps --check=store-row --machine=handheld --mode=guided"),
     ("check-queue", "--page=store --arg=apps --check=queue --machine=desktop --mode=guided --queue=2"),
+    // The storage saver's section of My machine: the made-up handheld with leftovers of removed games and an SD
+    // card that is nearly full, the same on the desktop and the TV PC, a Check first row ticked, the plan, after
+    // a cleaning (with its Undo), while a look runs, with nothing to clear, and where the fixes are offered.
+    ("storage", "--page=module:storage --machine=handheld --mode=guided --storage=full"),
+    ("storage-veteran", "--page=module:storage --machine=handheld --mode=veteran --storage=full"),
+    ("storage-plain", "--page=module:storage --machine=handheld --mode=guided"),
+    ("storage-pc", "--page=module:storage --machine=desktop --mode=guided --storage=full"),
+    ("storage-tv", "--page=module:storage --machine=tv --mode=guided --storage=full"),
+    ("storage-ticked", "--page=module:storage --keys=down,down,down,down,down,down,down,a --machine=handheld --mode=guided --storage=full"),
+    ("storage-unticked", "--page=module:storage --keys=a,down,a --machine=handheld --mode=guided --storage=full"),
+    ("storage-steam-running", "--page=module:storage --machine=handheld --mode=guided --storage=full --steam-running"),
+    ("dialog-storage", "--page=module:storage --act=storage-free: --machine=handheld --mode=guided --storage=full"),
+    ("dialog-storage-steam-running", "--page=module:storage --act=storage-free: --machine=handheld --mode=veteran --storage=full --steam-running"),
+    ("dialog-storage-danger", "--page=module:storage --keys=down,down,down,down,down,down,down,down,down,down,down,down,down,a,start --machine=desktop --mode=guided --storage=full"),
+    ("storage-cleaned", "--page=module:storage --machine=handheld --mode=guided --storage=cleaned"),
+    ("dialog-storage-undo", "--page=module:storage --act=storage-undo: --machine=handheld --mode=guided --storage=cleaned"),
+    ("storage-looking", "--page=module:storage --machine=handheld --mode=guided --storage=looking"),
+    ("storage-nothing", "--page=module:storage --machine=handheld --mode=guided --storage=empty"),
+    ("storage-size-150", "--page=module:storage --machine=handheld --mode=guided --storage=full --scale=150"),
+    ("storage-size-50", "--page=module:storage --machine=handheld --mode=guided --storage=full --scale=50"),
+    ("storage-light", "--page=module:storage --machine=handheld --mode=guided --storage=full --theme=light"),
+    ("storage-contrast", "--page=module:storage --machine=tv --mode=veteran --storage=full --theme=contrast"),
+    ("storage-window", "--page=module:storage --machine=desktop --mode=veteran --storage=full --window"),
+    ("storage-narrow", "--page=module:storage --half --machine=handheld --mode=guided --storage=full"),
+    ("dialog-storage-light", "--page=module:storage --act=storage-free: --machine=handheld --mode=guided --storage=full --theme=light"),
+    ("dialog-storage-size-150", "--page=module:storage --act=storage-free: --machine=tv --mode=guided --storage=full --scale=150"),
+    ("home-storage-full", "--page=home --machine=handheld --mode=guided --storage=full"),
+    ("home-veteran-storage-full", "--page=home --machine=handheld --mode=veteran --storage=full"),
+    ("machine-storage-full", "--page=machine --machine=handheld --mode=guided --storage=full"),
+    ("games-size-veteran", "--page=games --arg=steam:1086940 --machine=handheld --mode=veteran --storage=full"),
+    ("help-storage", "--page=help --arg=module:storage@ --machine=handheld --mode=guided --storage=full"),
+    ("dialog-about-storage", "--page=module:storage --act=about:storage --machine=handheld --mode=guided --storage=full"),
+    ("motion-storage", "--page=module:storage --keys=down,down,a,down --machine=handheld --mode=guided --storage=full --motion=full"),
+    // Pictures drawn for blank library tiles, and their Undo where the fix was offered and in Review changes.
+    ("home-tile-art", "--page=home --act=home-all: --machine=desktop --mode=guided --tile-art=fix"),
+    ("home-tile-art-drawn", "--page=home --act=home-all: --machine=desktop --mode=guided --tile-art=drawn"),
+    ("dialog-tile-art-undo", "--page=home --act=checkup:tile-art-undo --machine=desktop --mode=guided --tile-art=drawn"),
+    ("changes-own-undo", "--page=changes --machine=desktop --mode=guided --tile-art=drawn --storage=cleaned"),
+    // Storage worked with the pointer and Start: a Check first row ticked, the dialog lists it.
+    ("check-storage", "--page=module:storage --check=storage --machine=handheld --mode=guided --storage=full"),
 ];
 
 fn w(base: &Path, rel: &str, text: &str) {
@@ -432,6 +472,19 @@ const GAMES: &[(&str, &str, &str, u32)] = &[
 const ANTICHEAT: &str = r#"[{"name":"Elden Ring","status":"Supported","storeIds":{"steam":"1245620"}},{"name":"Helldivers 2","status":"Supported","storeIds":{"steam":"553850"}},{"name":"Rocket League","status":"Running","storeIds":{"steam":"252950"}},{"name":"Apex Legends","status":"Denied","storeIds":{"steam":"1172470"}}]"#;
 const FIXES: &str = r#"{"1091500":{"kind":"switch","value":"fsr4","words":"One tap: turn on the FSR 4 upgrade for a sharper picture."}}"#;
 
+/// Steam's own settings on the made-up machine: its Proton for all games, one game on Turbine Hub's tool, one on
+/// Turbine Mod Manager's, and whatever else a sample state sets (app id, tool).
+pub(super) fn steam_config(steam: &Path, more: &[(&str, &str)]) {
+    let mut map = format!("\"0\"\n{{\n\"name\" \"proton_11\"\n}}\n\"1086940\"\n{{\n\"name\" \"{}\"\n}}\n\"367520\"\n{{\n\"name\" \"{}\"\n}}\n", crate::compat_tool::TOOL_NAME, crate::compat_tool::MOD_TOOL_NAME);
+    for (id, tool) in more {
+        map.push_str(&format!("\"{id}\"\n{{\n\"name\" \"{tool}\"\n}}\n"));
+    }
+    w(steam, "config/config.vdf", &format!("\"InstallConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"CompatToolMapping\"\n{{\n{map}}}\n}}\n}}\n}}\n}}\n"));
+}
+
+/// What each made-up game takes on its drive (its main file is only said to be this big; nothing is written).
+const GAME_BYTES: &[(&str, u64)] = &[("Baldurs Gate 3", 122_400_000_000), ("ELDEN RING", 48_700_000_000), ("Cyberpunk 2077", 68_300_000_000), ("Helldivers 2", 71_900_000_000), ("rocketleague", 26_100_000_000), ("Apex Legends", 74_500_000_000), ("Hollow Knight", 9_200_000_000), ("Balatro", 412_000_000)];
+
 fn home(home: &Path) {
     let steam = home.join(".local/share/Steam");
     w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n}}\n", steam.display()));
@@ -451,8 +504,7 @@ fn home(home: &Path) {
     w(&steam, "compatibilitytools.d/GE-Proton10-4/proton", "");
     w(&steam, "compatibilitytools.d/GE-Proton10-4/toolmanifest.vdf", &manifest(""));
     w(&steam, "compatibilitytools.d/GE-Proton10-4/compatibilitytool.vdf", "\"compatibilitytools\"\n{\n  \"compat_tools\"\n  {\n    \"GE-Proton10-4\"\n    {\n      \"install_path\" \".\"\n    }\n  }\n}\n");
-    // Steam's own settings: its Proton for all games, one game on Turbine Hub's tool, one on Turbine Mod Manager's.
-    w(&steam, "config/config.vdf", &format!("\"InstallConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"CompatToolMapping\"\n{{\n\"0\"\n{{\n\"name\" \"proton_11\"\n}}\n\"1086940\"\n{{\n\"name\" \"{}\"\n}}\n\"367520\"\n{{\n\"name\" \"{}\"\n}}\n}}\n}}\n}}\n}}\n}}\n", crate::compat_tool::TOOL_NAME, crate::compat_tool::MOD_TOOL_NAME));
+    steam_config(&steam, &[]);
     // A signed-in Steam account, with no non-Steam games yet.
     let _ = fs::create_dir_all(steam.join("userdata/1001/config"));
     w(home, "homebrew/services/PluginLoader", "");
@@ -593,6 +645,11 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     let ctx = Ctx { root: root.clone(), home: root.join(fake::FILES_HOME.trim_start_matches('/')), config_home: dir.join("config"), efibootmgr: if preset == Preset::TvPc { String::new() } else { fake::EFI_WITH_WINDOWS.into() }, version: "0.1".into() };
     home(&ctx.home);
     explorer_files(&root, &ctx.home, now);
+    for (dir, bytes) in GAME_BYTES {
+        if let Ok(f) = fs::File::options().write(true).open(ctx.home.join(".local/share/Steam/steamapps/common").join(dir).join("game.exe")) {
+            let _ = f.set_len(*bytes);
+        }
+    }
     ledger(&root, preset, now);
     let st = Settings { mode, setup_done: vec!["machine".into(), "games".into()], ..Settings::default() };
     let _ = st.save(&ctx.config_home);
@@ -743,6 +800,18 @@ impl Ui {
             if let Setting::Sysfs { path, value } = x {
                 w(&self.ctx.root, path.trim_start_matches('/'), &format!("{value}\n"));
             }
+        }
+    }
+    /// A sample run with non-Steam games that show as blank tiles ("fix"), or with their pictures drawn by Turbine
+    /// Hub already ("drawn"), so there is something to undo.
+    pub fn sample_tile_art(&mut self, state: &str) {
+        let file = self.ctx.home.join(".local/share/Steam/userdata/1001/config/shortcuts.vdf");
+        for (name, exe) in [("Heroic Games Launcher", "/usr/bin/flatpak"), ("Old Tower Defense", "/home/deck/Games/tower/tower.x86_64")] {
+            let entry = crate::shortcuts::NewShortcut { name: name.into(), exe: format!("\"{exe}\""), start_dir: "\"/home/deck/\"".into(), launch_options: format!("--sample-entry={}", name.replace(' ', "-")), flatpak_id: String::new(), icon: String::new() };
+            let _ = crate::shortcuts::add_shortcut(&file, &entry, &entry.launch_options, crate::shortcuts::Steam::Closed);
+        }
+        if state == "drawn" {
+            let _ = crate::tile_art::fix(&self.ctx.home, &self.folder(), crate::shortcuts::Steam::Closed);
         }
     }
     /// A sample run as if the internet were gone: the lists were fetched three days ago.

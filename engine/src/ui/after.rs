@@ -58,6 +58,8 @@ impl Ui {
                 }
                 // The new version is on the machine; this run is still the one from before.
                 Step::SelfUpdate => self.update_installed = self.update.clone(),
+                // What the last look found is no longer what is there.
+                Step::Storage(_) => self.storage_changed(),
                 _ => {}
             }
         }
@@ -112,6 +114,14 @@ impl Ui {
                 Step::Saves(job @ (Job::Backup { .. } | Job::Restore { .. } | Job::Undo { .. })) => {
                     let places = saves::Places { folder: &folder, data: &data, home: &home };
                     saves::run(job, &places, crate::now(), &|_: String| {}, &mut stand_in_ludusavi(job))?;
+                }
+                // The storage saver works on the made-up machine's own files, and so do the library pictures
+                // (drawn into the made-up Steam's folder), so pictures and checks can show before and after.
+                Step::Storage(job) => self.storage_sample_step(job)?,
+                Step::TileArt | Step::TileArtUndo => {
+                    let steam = if self.steam_unsure { crate::shortcuts::Steam::Unknown } else if self.steam_running { crate::shortcuts::Steam::Running } else { crate::shortcuts::Steam::Closed };
+                    let client = crate::net::Client::new(&self.ctx.version, &self.cache);
+                    super::onepress::run_step(st, &home, &folder, &self.cache, &client, steam, &|_: &str, _: Option<f64>| true).unwrap_or(Ok(()))?;
                 }
                 _ => {}
             }

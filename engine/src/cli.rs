@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(j.get("machine").unwrap().str_at("name"), Some("Desktop PC"));
         assert_eq!(j.get("machine").unwrap().get("windows").and_then(Json::as_bool), Some(true));
         let (text, _) = run("cards", &c);
-        assert_eq!(parse(&text).unwrap().get("cards").unwrap().as_array().len(), 8);
+        assert_eq!(parse(&text).unwrap().get("cards").unwrap().as_array().len(), 9);
         let (text, code) = run("rm", &c);
         assert_eq!(code, 2);
         assert!(text.contains("\"ok\":false"));

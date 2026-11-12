@@ -191,6 +191,13 @@ fn own_changes(ui: &Ui) -> Vec<Json> {
     for t in super::store::TILES.iter().filter(|t| super::store::tile_added(ui, t)) {
         out.push(button(row("tile-remove", t.id, "button", &format!("{} in your library", t.name), "A tile among Steam's non-Steam games"), "Remove", "remove"));
     }
+    let drawn = crate::tile_art::drawn(&ui.folder());
+    if drawn > 0 {
+        out.push(button(row("tile-art", "undo", "button", &if drawn == 1 { "1 picture drawn for a blank library tile".to_string() } else { format!("{drawn} pictures drawn for blank library tiles") }, "In Steam's folder for library pictures. Undo removes exactly what was drawn, never a picture of your own."), "Undo", "restore"));
+    }
+    if crate::storage::undo_plan(&super::storage::disk(ui), &ui.folder()).is_some() {
+        out.push(button(row("storage-undo", "", "button", "The last storage cleaning", "What it moved to the Recycle Bin can go back to where it was."), "Undo", "restore"));
+    }
     if ui.agent_running() {
         out.push(button(row("agent", "", "button", "Background helper", "A start-up entry in your own folder, so it runs while you play"), "Turn off", "remove"));
     }

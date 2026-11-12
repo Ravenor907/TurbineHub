@@ -64,6 +64,7 @@ pub(crate) fn section_title(id: &str, m: &Machine) -> &'static str {
         "sleep" => "Sleep and wake",
         "gpu" => "Graphics card",
         "drives" => "Drives",
+        "storage" => "Storage",
         "sound" => "Sound",
         "dock" => "Dock",
         "tuneup" => "Tune-up",
@@ -112,6 +113,17 @@ pub(crate) fn about(id: &str) -> (&'static str, Vec<(&'static str, &'static str)
         "drives" => (
             "Every drive in this machine and what it is used for.",
             vec![("Game library", "Steam installs games there."), ("Ready to set up", "An empty drive. Steam formats it and adds it as a library; Turbine Hub shows the steps and never formats anything itself."), ("Windows drive", "Read only here. Games can't run from it, but they can be copied.")],
+        ),
+        "storage" => (
+            "What is using the room on each drive, and the leftovers that can go. A look only reads; nothing goes before you say so in the dialog.",
+            vec![
+                ("Safe to clear", "Leftovers nothing needs: shader caches and unfinished downloads of games that are gone, Steam's old logs, app parts Flatpak calls unused. Steam builds or fetches them again if they are ever needed. They start ticked."),
+                ("Check first", "Things that may hold saves or settings: Windows files of games that are gone, unused Protons, what removed apps left behind, the Recycle Bin, big old downloads. Nothing here is ticked until you tick it, and each row says whether it goes to the Recycle Bin or is erased for good."),
+                ("Free", "Start shows the plan first: every thing by name, what is erased for good and what goes to the Recycle Bin, and the room before and after. Each thing is checked once more right before it goes."),
+                ("While Steam runs", "What games that are gone left behind can go while Steam runs, as long as no game with that id is running. Everything else inside Steam's library waits until Steam is closed."),
+                ("Undo the last cleaning", "Puts back what went to the Recycle Bin. What was erased for good can't come back, which is why only things that rebuild themselves are erased."),
+                ("Biggest games", "Each game's real size: its files, its shader cache and its Windows files together."),
+            ],
         ),
         "sound" => ("Where sound goes: the speakers, a headset or the TV.", vec![("Output", "Picked at once, no restart. Steam's quick menu has the same choice.")]),
         "dock" => (
@@ -162,7 +174,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         options.push(super::controls::page_button("Undo all", "undo-all", ""));
     }
     options.push(super::controls::option(&if id == "overview" { "About My machine".to_string() } else { format!("About {}", section_title(id, &m)) }, "about", id));
-    let focus = if id == "overview" { cards.first().map(|c| format!("card:{}", c.id)).unwrap_or_default() } else { first_control(&j) };
+    let focus = if id == "overview" { cards.first().map(|c| format!("card:{}", c.id)).unwrap_or_default() } else { j.str_at("focus").filter(|f| !f.is_empty()).map(String::from).unwrap_or_else(|| first_control(&j)) };
     // The line under the chips: what the section is (Overview: which machine this is).
     let line = j.str_at("intro").unwrap_or("").to_string();
     let at = if id == "overview" { 0 } else { cards.iter().position(|c| c.id == id).map(|i| i + 1).unwrap_or(0) };
@@ -220,6 +232,7 @@ fn overview(ui: &mut Ui, m: &Machine, cards: &[modules::Card]) -> Json {
             }
             "windows" => own = Some(("", false, false, "Restart".into(), "windows-boot", String::new(), if needs { NEEDS_PASSWORD } else { "" })),
             "dock" => value = dock_words(&lighting),
+            "storage" => value = super::storage::card_value(ui).unwrap_or(value),
             "sound" => value = ui.sound.iter().find(|(name, _)| *name == ui.sound_now).map(|(_, words)| words.clone()).unwrap_or(value),
             _ => {}
         }
@@ -530,6 +543,15 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
             (if m.on_tv() { "TV" } else { "Monitors" }.into(), String::new(), out)
         }
         "drives" => ("Drives".into(), "Steam can install games on any drive marked Game library.".into(), vec![section("", m.drives.iter().map(drive_row).collect())]),
+        "storage" => {
+            let (line, sections, primary, options) = super::storage::module(ui);
+            // The highlight starts on the first thing to tick, whatever marks the rows below it carry.
+            let first = sections.iter().flat_map(|sec| sec.get("rows").map(Json::as_array).unwrap_or(&[]).iter()).find(|r| r.str_at("kind") == Some("check")).and_then(|r| r.str_at("id")).unwrap_or("").to_string();
+            extra.push(("focus", s(first)));
+            extra.push(("primary", primary));
+            extra.push(("options", arr(options)));
+            ("Storage".into(), line, sections)
+        }
         "sound" => {
             let idx = ui.sound.iter().position(|(name, _)| *name == ui.sound_now).map(|i| i as f64).unwrap_or(-1.0);
             let rows = if ui.sound.is_empty() {

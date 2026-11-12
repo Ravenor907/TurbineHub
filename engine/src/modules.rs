@@ -25,7 +25,13 @@ fn watts(microwatts: u64) -> u64 {
     (microwatts + 500_000) / 1_000_000
 }
 
-/// The cards for this machine. `boost_on` is the player's Game Boost setting.
+/// The storage saver's card: every machine has drives that fill up. Its value is the page's to say (the room that
+/// can be freed, once a look was taken).
+fn storage_card() -> Card {
+    card("storage", "Storage", "drive", "Free up space".into(), "What is using the room on each drive, and the leftovers that can go.")
+}
+
+/// The cards for this machine.`boost_on` is the player's Game Boost setting.
 pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<Card> {
     let mut out = Vec::new();
     let tune = tuneup::plan(root, ledger);
@@ -61,6 +67,7 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
             out.push(card("battery", "Battery", "battery", v, "Charge limit and battery health history."));
         }
         out.push(card("sleep", "Sleep", "moon", wake_value.clone(), "What woke the machine and how much each sleep used."));
+        out.push(storage_card());
         out.push(card("tuneup", "Tune-up", "shield", tune_value, "Memory and kernel settings from Bazzite and CachyOS."));
         if m.kind == Kind::Handheld {
             out.push(card("dock", "Dock", "dock", "Off".into(), "Lighting and HDMI audio when docked to a TV."));
@@ -85,6 +92,7 @@ pub fn cards(root: &Path, m: &Machine, ledger: &Ledger, boost_on: bool) -> Vec<C
         }
         let unused = m.drives.iter().filter(|d| d.role == DriveRole::Empty).count();
         out.push(card("drives", "Drives", "drive", if unused > 0 { format!("{unused} not set up") } else { format!("{} drives", m.drives.len()) }, "Add drives as game libraries. Windows drives are read only."));
+        out.push(storage_card());
         out.push(card("sound", "Sound", "speaker", "Output".into(), "Pick the output: speakers, headset or the TV."));
         out.push(card("sleep", "Sleep and wake", "moon", wake_value, "Wake from the controller, the network or the keyboard."));
         out.push(card("tuneup", "Tune-up", "shield", tune_value, "Memory and kernel settings from Bazzite and CachyOS."));

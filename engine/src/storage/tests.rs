@@ -205,19 +205,34 @@ fn the_plan_names_every_thing_and_says_what_is_for_good() {
     let bin = by(&r, Kind::RecycleBin, "Recycle Bin on SD card").id.clone();
     assert!(plan(&r, std::slice::from_ref(&bin), &closed()).unwrap().danger);
 
-    // Steam running or not known: what is inside its libraries is refused, the rest still goes.
+    // Steam running: what a game that is still installed owns inside the libraries is refused (a reset backup,
+    // an unfinished update, one of Steam's Protons); the rest still goes.
     let running = Host { steam: Steam::Running, running: Some(Vec::new()), ..Host::default() };
-    assert_eq!(plan(&r, std::slice::from_ref(&windows), &running).unwrap_err(), "Close Steam first: Steam uses its library folders while it runs.");
-    assert!(plan(&r, std::slice::from_ref(&windows), &Host::default()).unwrap_err().starts_with("Turbine Hub couldn't check whether Steam is running"));
-    let p = plan(&r, &r.default_ticks(), &running).unwrap();
-    let Job::Clean(items) = clean_job(&p) else { panic!() };
-    assert_eq!(items.iter().map(|i| i.kind).collect::<Vec<_>>(), [Kind::SteamLogs, Kind::SteamLogs]);
-    assert!(p.text.contains("4 things are left alone. Close Steam first"), "{}", p.text);
-    assert!(p.items.iter().any(|(t, l)| t == "Left alone: Shader cache of Hades II" && l.starts_with("Close Steam first")));
-    // A game that runs keeps its own things, whatever else is known.
     let reset = by(&r, Kind::ResetBackup, "Cyberpunk").id.clone();
-    let playing = Host { steam: Steam::Running, running: Some(vec!["1091500".into()]), ..Host::default() };
+    let update = by(&r, Kind::Download, "Unfinished update of Baldur's Gate 3").id.clone();
+    let nine = by(&r, Kind::Proton, "Proton 9.0").id.clone();
+    for id in [&reset, &update, &nine] {
+        assert_eq!(plan(&r, std::slice::from_ref(id), &running).unwrap_err(), "Close Steam first: Steam uses its library folders while it runs.", "{id}");
+    }
+    assert!(plan(&r, std::slice::from_ref(&windows), &Host::default()).unwrap_err().starts_with("Turbine Hub couldn't check whether Steam is running"));
+    // What games that are gone left behind goes while Steam runs: in Game Mode it always runs.
+    let p = plan(&r, std::slice::from_ref(&windows), &running).unwrap();
+    assert!(p.items[0].0.starts_with("Windows files of Hades II") && !p.text.contains("left alone"), "{:?} {}", p.items, p.text);
+    let mut ticked = r.default_ticks();
+    ticked.extend([reset.clone(), update, nine]);
+    let p = plan(&r, &ticked, &running).unwrap();
+    let Job::Clean(items) = clean_job(&p) else { panic!() };
+    assert_eq!(items.len(), r.default_ticks().len());
+    assert_eq!(items.iter().filter(|i| i.steam).map(|i| (i.kind, i.orphan)).collect::<Vec<_>>(), [(Kind::Download, true), (Kind::ShaderCache, true), (Kind::ShaderCache, true), (Kind::ShaderCache, true)]);
+    assert!(p.text.contains("3 things are left alone. Close Steam first"), "{}", p.text);
+    assert!(p.items.iter().any(|(t, l)| t == "Left alone: Proton 9.0" && l.starts_with("Close Steam first")), "{:?}", p.items);
+    // Which games run couldn't be asked: a leftover might belong to one of them, so it waits.
+    let unasked = Host { steam: Steam::Running, running: None, ..Host::default() };
+    assert_eq!(plan(&r, std::slice::from_ref(&windows), &unasked).unwrap_err(), "Turbine Hub couldn't check whether the game is running, so it left this alone.");
+    // A game that runs keeps its own things, whatever else is known.
+    let playing = Host { steam: Steam::Running, running: Some(vec!["1091500".into(), HADES.into()]), ..Host::default() };
     assert_eq!(plan(&r, &[reset], &playing).unwrap_err(), "The game is running. Close it first.");
+    assert_eq!(plan(&r, &[windows], &playing).unwrap_err(), "The game is running. Close it first.");
 }
 
 #[test]
@@ -259,9 +274,12 @@ fn a_cleaning_erases_what_rebuilds_and_bins_the_rest_and_undo_brings_it_back() {
     let undo = undo_plan(&m.disk, &m.folder).unwrap();
     assert_eq!((undo.steps.clone(), undo.confirm.as_str()), (vec![Step::Storage(Job::Undo)], "Put back"));
     assert!(undo.items.iter().any(|(t, l)| t == "Windows files of Hades II" && l.ends_with("steamapps/compatdata/1145360")), "{:?}", undo.items);
-    assert_eq!(m.run(&Job::Undo, Steam::Running, "").unwrap(), "3 put back. 4 still in the Recycle Bin: Close Steam first: Steam uses its library folders while it runs.");
-    assert!(!m.t.has(&format!("{STEAM}/steamapps/compatdata/1145360")) && m.t.has(&format!("{STEAM}/compatibilitytools.d/GE-Proton10-4/proton")));
-    assert_eq!(m.run(&Job::Undo, Steam::Closed, "").unwrap(), "4 put back.");
+    // With Steam running, what a removed game left behind goes back (the game is still gone); what belongs to an
+    // installed game or to Steam itself waits for Steam to be closed.
+    assert_eq!(m.run(&Job::Undo, Steam::Running, "").unwrap(), "4 put back. 3 still in the Recycle Bin: Close Steam first: Steam uses its library folders while it runs.");
+    assert!(m.t.has(&format!("{STEAM}/steamapps/compatdata/1145360/pfx")) && m.t.has(&format!("{STEAM}/compatibilitytools.d/GE-Proton10-4/proton")));
+    assert!(!m.t.has(&format!("{STEAM}/steamapps/common/Proton 9.0")) && !m.t.has(&format!("{STEAM}/steamapps/compatdata/1091500/pfx.turbinehub-backup-1794000000")));
+    assert_eq!(m.run(&Job::Undo, Steam::Closed, "").unwrap(), "3 put back.");
     for back in ["steamapps/compatdata/1145360/pfx/drive_c/users/steamuser/Saved Games/Hades II/Profile1.sav", "steamapps/compatdata/1091500/pfx.turbinehub-backup-1794000000", "steamapps/common/Proton 9.0/proton", "steamapps/appmanifest_2805730.acf", "compatibilitytools.d/GE-Proton10-4/proton"] {
         assert!(m.t.has(&format!("{STEAM}/{back}")), "{back}");
     }
@@ -274,25 +292,94 @@ fn a_cleaning_erases_what_rebuilds_and_bins_the_rest_and_undo_brings_it_back() {
 fn steam_is_asked_again_right_before_anything_inside_its_folders_goes() {
     let m = Made::new("steam");
     let r = m.scan();
-    // The plan was made while Steam was closed; it was started since.
-    let p = plan(&r, &r.default_ticks(), &closed()).unwrap();
-    for (steam, word) in [(Steam::Running, "Close Steam first"), (Steam::Unknown, "couldn't check whether Steam is running")] {
-        let done = m.run(&clean_job(&p), steam, "").unwrap();
-        assert_eq!(done, "2 freed, 4 left alone.", "{steam:?}");
-        assert!(m.t.has(&format!("{STEAM}/steamapps/shadercache/1145360")) && m.t.has(&format!("{STEAM}/steamapps/downloading/1145360")));
-        let note = done_words(&p.steps, &m.folder, &m.disk).unwrap_or_default();
-        assert!(note.contains("Left alone: ") && note.contains("(and 3 more)") && note.contains(word), "{note}");
-        fake::storage(&m.t.0, &m.t.at(fake::FILES_HOME));
+    // The plan was made while Steam was closed; it was started since. The Safe things, and three things of
+    // installed games and of Steam itself.
+    let mut ticked = r.default_ticks();
+    ticked.extend(ids(&r, &[Kind::ResetBackup]));
+    ticked.push(by(&r, Kind::Download, "Unfinished update").id.clone());
+    ticked.push(by(&r, Kind::Proton, "Proton 9.0").id.clone());
+    let p = plan(&r, &ticked, &closed()).unwrap();
+    let kept = ["steamapps/downloading/1086940", "steamapps/common/Proton 9.0/proton", "steamapps/compatdata/1091500/pfx.turbinehub-backup-1794000000"];
+    let orphans = ["steamapps/shadercache/1145360", "steamapps/shadercache/570", "steamapps/downloading/1145360"];
+    // Whether Steam runs couldn't be asked: everything inside its libraries stays.
+    assert_eq!(m.run(&clean_job(&p), Steam::Unknown, "").unwrap(), "2 freed, 7 left alone.");
+    for there in kept.iter().chain(&orphans) {
+        assert!(m.t.has(&format!("{STEAM}/{there}")), "{there}");
     }
-    // Only things inside the libraries ticked: nothing done is an error with the reason.
-    let only = plan(&r, &ids(&r, &[Kind::ShaderCache]), &closed()).unwrap();
+    let note = done_words(&p.steps, &m.folder, &m.disk).unwrap_or_default();
+    assert!(note.contains("Left alone: ") && note.contains("(and 6 more)") && note.contains("couldn't check whether Steam is running"), "{note}");
+    fake::storage(&m.t.0, &m.t.at(fake::FILES_HOME));
+    // Steam runs, and so does the game with app id 570: its leftover waits, the other removed games' leftovers
+    // go, and what installed games and Steam itself own stays until Steam is closed.
+    let playing = "123 /home/deck/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=570 -- game\n";
+    assert_eq!(m.run(&clean_job(&p), Steam::Running, playing).unwrap(), "5 freed, 4 left alone.");
+    assert!(m.t.has(&format!("{STEAM}/steamapps/shadercache/570")));
+    for gone in ["steamapps/shadercache/1145360", "steamapps/downloading/1145360"] {
+        assert!(!m.t.has(&format!("{STEAM}/{gone}")), "{gone}");
+    }
+    assert!(!m.t.has("/run/media/deck/sdcard/steamapps/shadercache/632470"));
+    for there in kept {
+        assert!(m.t.has(&format!("{STEAM}/{there}")), "{there}");
+    }
+    let record = m.t.read("/config/turbinehub/storage-last.json");
+    assert!(record.contains("The game is running. Close it first") && record.contains("Close Steam first"), "{record}");
+    // No game runs: the last leftover goes too, and nothing else does.
+    assert_eq!(m.run(&clean_job(&p), Steam::Running, "").unwrap(), "1 freed, 8 left alone.");
+    assert!(!m.t.has(&format!("{STEAM}/steamapps/shadercache/570")) && m.t.has(&format!("{STEAM}/steamapps/shadercache")));
+    // Only things of installed games ticked: nothing done is an error with the reason.
+    let only = plan(&r, &ids(&r, &[Kind::ResetBackup]), &closed()).unwrap();
     let why = m.run(&clean_job(&only), Steam::Running, "").unwrap_err();
     assert!(why.starts_with("Nothing was freed. ") && why.ends_with("Close Steam first: Steam uses its library folders while it runs."), "{why}");
-    // A game's own snapshots stay while that game runs.
-    assert_eq!(super::clean::refusal(false, "570", Steam::Running, Some(&["570".to_string()][..])), Some("The game is running. Close it first"));
-    assert_eq!(super::clean::refusal(false, "570", Steam::Running, Some(&[][..])), None);
-    assert_eq!(super::clean::refusal(false, "570", Steam::Unknown, None), Some("Turbine Hub couldn't check whether the game is running, so it left this alone"));
-    assert_eq!(super::clean::refusal(false, "", Steam::Unknown, None), None);
+    // The running games couldn't be listed: a leftover might be one of theirs, so it waits.
+    fake::storage(&m.t.0, &m.t.at(fake::FILES_HOME));
+    let shaders = plan(&r, &ids(&r, &[Kind::ShaderCache]), &closed()).unwrap();
+    let mut no_list = |line: &[String]| if *line == *Steam::question() { Some((0, "3\n".to_string())) } else { None };
+    let why = run(&clean_job(&shaders), &m.site(), &|_| {}, &mut no_list).unwrap_err();
+    assert!(why.ends_with("Turbine Hub couldn't check whether the game is running, so it left this alone."), "{why}");
+    assert!(m.t.has(&format!("{STEAM}/steamapps/shadercache/1145360")));
+
+    // The rule itself. A game's own snapshots stay while that game runs.
+    use super::clean::refusal;
+    assert_eq!(refusal(false, false, "570", Steam::Running, Some(&["570".to_string()][..])), Some("The game is running. Close it first"));
+    assert_eq!(refusal(false, false, "570", Steam::Running, Some(&[][..])), None);
+    assert_eq!(refusal(false, false, "570", Steam::Unknown, None), Some("Turbine Hub couldn't check whether the game is running, so it left this alone"));
+    assert_eq!(refusal(false, false, "", Steam::Unknown, None), None);
+    // Inside a library: a leftover of a removed game goes while Steam runs and its id isn't running; anything
+    // else, and anything at all when Steam couldn't be asked, waits.
+    assert_eq!(refusal(true, true, "570", Steam::Running, Some(&[][..])), None);
+    assert_eq!(refusal(true, true, "570", Steam::Running, Some(&["570".to_string()][..])), Some("The game is running. Close it first"));
+    assert_eq!(refusal(true, true, "570", Steam::Running, None), Some("Turbine Hub couldn't check whether the game is running, so it left this alone"));
+    assert_eq!(refusal(true, true, "570", Steam::Unknown, Some(&[][..])), Some("Turbine Hub couldn't check whether Steam is running, so it left Steam's folders alone. Close Steam, then try again"));
+    assert_eq!(refusal(true, false, "570", Steam::Running, Some(&[][..])), Some("Close Steam first: Steam uses its library folders while it runs"));
+    assert_eq!(refusal(true, true, "", Steam::Running, Some(&[][..])), Some("Close Steam first: Steam uses its library folders while it runs"));
+    assert_eq!(refusal(true, false, "570", Steam::Closed, None), None);
+}
+
+/// While Steam runs its lists can change during a cleaning: each leftover is looked up in them again right before
+/// it goes. A game that came back in the meantime (a manifest, the library list, a non-Steam game) keeps its files.
+#[test]
+fn a_leftover_is_checked_against_steams_lists_right_before_it_goes_while_steam_runs() {
+    let m = Made::new("orphans");
+    let r = m.scan();
+    let mut ticked = ids(&r, &[Kind::ShaderCache, Kind::Compatdata]);
+    ticked.push(by(&r, Kind::Download, "Unfinished download").id.clone());
+    let p = plan(&r, &ticked, &Host { steam: Steam::Running, running: Some(Vec::new()), ..Host::default() }).unwrap();
+    assert!(!p.text.contains("left alone"), "{}", p.text);
+    // Since the look, with Steam running all along: Hades II is being installed again (Steam wrote its manifest),
+    // the library list names app 570 on a card that is out, and the card's leftover became a non-Steam game.
+    m.t.write(&format!("{STEAM}/steamapps/appmanifest_{HADES}.acf"), format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{HADES}\"\n\t\"name\"\t\t\"Hades II\"\n\t\"StateFlags\"\t\t\"1026\"\n\t\"installdir\"\t\t\"Hades II\"\n}}\n").as_bytes());
+    let list = m.t.read(&format!("{STEAM}/steamapps/libraryfolders.vdf"));
+    let end = list.trim_end().strip_suffix('}').unwrap();
+    m.t.write(&format!("{STEAM}/steamapps/libraryfolders.vdf"), format!("{end}\"2\"\n{{\n\"path\" \"/run/media/deck/other-card\"\n\"apps\"\n{{\n\"570\" \"1\"\n}}\n}}\n}}\n").as_bytes());
+    let why = m.run(&clean_job(&p), Steam::Running, "");
+    // The card's shader cache (app 632470) is the one thing that is still a leftover.
+    assert_eq!(why.unwrap(), "1 freed, 4 left alone.");
+    for kept in ["steamapps/shadercache/1145360", "steamapps/compatdata/1145360/pfx", "steamapps/downloading/1145360", "steamapps/shadercache/570"] {
+        assert!(m.t.has(&format!("{STEAM}/{kept}")), "{kept}");
+    }
+    assert!(!m.t.has("/run/media/deck/sdcard/steamapps/shadercache/632470"));
+    let record = m.t.read("/config/turbinehub/storage-last.json");
+    assert_eq!(record.matches("The game is in Steam again, so its files stay").count(), 4, "{record}");
 }
 
 #[test]
@@ -475,9 +562,9 @@ fn the_page_gets_everything_as_json_and_scripts_get_the_same() {
     let j = crate::json::parse(&r.to_json(&r.default_ticks()).to_text()).unwrap();
     let groups = j.get("groups").unwrap().as_array();
     assert_eq!(groups.iter().map(|g| g.str_at("key").unwrap()).collect::<Vec<_>>(), ["safe", "check", "never"]);
-    assert_eq!(groups[0].str_at("title"), Some("Safe to free"));
+    assert_eq!(groups[0].str_at("title"), Some("Safe to clear"));
     let first = &groups[0].get("items").unwrap().as_array()[0];
-    assert_eq!((first.str_at("title"), first.str_at("how"), first.get("ticked").and_then(Json::as_bool), first.get("needsSteamClosed").and_then(Json::as_bool)), (Some("Unfinished download of Hades II"), Some("erase"), Some(true), Some(true)));
+    assert_eq!((first.str_at("title"), first.str_at("how"), first.get("ticked").and_then(Json::as_bool), first.get("needsSteamClosed").and_then(Json::as_bool)), (Some("Unfinished download of Hades II"), Some("erase"), Some(true), Some(false)));
     assert_eq!(first.get("size").unwrap().str_at("words"), Some("9 KB"));
     assert!(groups[1].get("items").unwrap().as_array().iter().all(|i| i.get("ticked").and_then(Json::as_bool) == Some(false)));
     assert!(groups[2].get("items").unwrap().as_array().iter().all(|i| i.get("offered").and_then(Json::as_bool) == Some(false)));
@@ -496,4 +583,44 @@ fn the_page_gets_everything_as_json_and_scripts_get_the_same() {
     assert_eq!(s.get("drives").unwrap().as_array().len(), 2);
     assert!(s.get("groups").unwrap().as_array()[0].get("items").unwrap().as_array().iter().any(|i| i.str_at("title") == Some("Shader cache of a removed game (app 570)")));
     assert!(m.t.has(&format!("{STEAM}/steamapps/shadercache/570")));
+}
+
+/// What a look asks the host: Steam, the running games, and Flatpak's own list of what is unused, which is only
+/// ever answered with no (a look reads, it never removes).
+#[test]
+fn a_look_asks_the_host_and_only_ever_answers_no_to_flatpak() {
+    let asked: RefCell<Vec<(Vec<String>, Option<String>)>> = RefCell::new(Vec::new());
+    let mut ask = |line: &[String], typed: Option<&str>| {
+        asked.borrow_mut().push((line.to_vec(), typed.map(String::from)));
+        if *line == *Steam::question() {
+            Some((0, "2\n".to_string()))
+        } else if *line == *crate::agent::games_question() {
+            Some((0, "9 /home/deck/.local/share/Steam/ubuntu12_32/reaper SteamLaunch AppId=570 -- game\n".to_string()))
+        } else if *line == *unused_question() {
+            Some((1, " 1. org.kde.Platform 6.7\n".to_string()))
+        } else if *line == *sizes_question() {
+            Some((0, "org.kde.Platform\t6.7\t1.2 GB\n".to_string()))
+        } else {
+            None
+        }
+    };
+    let host = ask_host(&mut ask);
+    assert_eq!((host.steam, host.running.clone()), (Steam::Running, Some(vec!["570".to_string()])));
+    assert!(host.flatpak_unused.is_some() && host.flatpak_sizes.is_some());
+    assert_eq!(asked.borrow().len(), 4);
+    for (line, typed) in asked.borrow().iter() {
+        assert!(!line.iter().any(|a| a == "-y" || a == "--noninteractive"), "{line:?}");
+        if *line == unused_question() {
+            assert!(typed.as_deref().is_some_and(|t| t.lines().count() >= 2 && t.lines().all(|l| l == "n")), "{typed:?}");
+        } else {
+            assert_eq!(*typed, None, "{line:?}");
+        }
+    }
+    // Steam closed: no game runs, and that isn't asked. Steam not known: the running games aren't known either.
+    let mut closed = |line: &[String], _: Option<&str>| if *line == *Steam::question() { Some((1, "0\n".to_string())) } else { None };
+    let host = ask_host(&mut closed);
+    assert_eq!((host.steam, host.running, host.flatpak_unused), (Steam::Closed, Some(Vec::new()), None));
+    let mut silent = |_: &[String], _: Option<&str>| None;
+    let host = ask_host(&mut silent);
+    assert_eq!((host.steam, host.running), (Steam::Unknown, None));
 }

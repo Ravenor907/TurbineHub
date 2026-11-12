@@ -12,8 +12,10 @@ import QtQuick.Layouts
 // takes no highlight, and it plays only with Animations at Full: at Reduced and Off it shows its first frame),
 // chart (a small line over time: `points` from oldest to newest on a scale from `min` to `max`, null where nothing
 // was read, with the scale's ends in words as `low` and `high` and the time's as `from` and `to`; its title, its
-// newest value and its line say in words what the picture shows). A choice with `cards` shows its options as cards
-// with a strip of their `palettes`; Up and Down move between the lines of cards.
+// newest value and its line say in words what the picture shows), meter (how full something is: a bar filled to
+// `part`, 0 to 1, in the warning color when the row's `tone` is "warn"; its words say the same, so the bar is
+// only a picture of them). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up
+// and Down move between the lines of cards.
 //
 // app (required): Main.qml's window. m (required): the row.
 Focusable {
@@ -31,11 +33,12 @@ Focusable {
     tapActivates: kind !== "choice" && kind !== "slider"
     // For a screen reader: the kind of control, then its title with its state in words, then the line under it.
     sayRole: kind === "toggle" || kind === "check" ? Accessible.CheckBox : kind === "slider" ? Accessible.Slider : kind === "choice" ? Accessible.ComboBox : kind === "button" ? Accessible.Button : kind === "preview" || kind === "chart" ? Accessible.Graphic : Accessible.StaticText
+    // (A meter's bar is said in words: "93% full".)
     readonly property string sayState: kind === "toggle" ? (m.on ? "on" : "off") : kind === "check" ? (m.on ? "ticked" : "not ticked")
         : kind === "slider" ? val + (m.unit || "")
         : kind === "choice" ? (options.length > 0 ? String(options[Math.max(0, Math.min(options.length - 1, m.index))]) + (cur !== m.index && cur < options.length ? ", highlight on " + options[cur] : "") : "")
         : (m.value !== undefined && kind !== "input" ? String(m.value) : "")
-    sayName: [m.title || "", sayState, m.badge || "", kind === "button" ? (m.button || "") : ""].filter(x => x !== "").join(", ")
+    sayName: [m.title || "", sayState, kind === "meter" ? (m.partWords || "") : "", m.badge || "", kind === "button" ? (m.button || "") : ""].filter(x => x !== "").join(", ")
     sayMore: m.line || ""
     Accessible.checkable: kind === "toggle" || kind === "check"
     Accessible.checked: (kind === "toggle" || kind === "check") && m.on === true
@@ -129,6 +132,19 @@ Focusable {
             Toggle { app: r.app; visible: r.kind === "toggle"; on: r.m.on === true }
             ActionButton { app: r.app; visible: r.kind === "button" && (r.m.button || "") !== ""; plain: true; primary: r.m.primary === true; label: r.m.button || ""; cap: r.focused ? "a" : "" }
             Icon { app: r.app; visible: r.kind === "button" && (r.m.button || "") === ""; d: r.app.icons.chevron; size: 20 }
+        }
+        // A meter: how full it is, as a bar under the words that say it.
+        Item {
+            visible: r.kind === "meter"
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? r.app.px(10) : 0
+            Rectangle { anchors.fill: parent; radius: height / 2; color: r.app.colors.raised; border.width: 1; border.color: r.app.colors.line }
+            Rectangle {
+                height: parent.height
+                width: Math.max(height, parent.width * Math.max(0, Math.min(1, r.m.part || 0)))
+                radius: height / 2
+                color: r.m.tone === "warn" ? r.app.colors.warn : r.app.colors.accent
+            }
         }
         // The slider's track, with its ends named when the row names them.
         RowLayout {

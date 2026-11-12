@@ -9,7 +9,8 @@ import QtQuick.Layouts
 // Side by side, each column of sections scrolls by itself (a short one never scrolls away under a long one), and a
 // section's heading stays pinned at the top of its column while the section scrolls under it.
 //
-// app (required): Main.qml's window. sections: [{title, rows, columns, empty}]. flow: "" or "columns".
+// app (required): Main.qml's window. sections: [{title, note, rows, columns, empty}] (`note`: a line under the
+// heading that says what the section holds). flow: "" or "columns".
 // ground: the color the list sits on (for the fades).
 Item {
     id: rv
@@ -64,6 +65,7 @@ Item {
             width: parent.width
             spacing: rv.app.px(10)
             Heading { id: heading; visible: sec.title !== ""; width: parent.width; text: sec.title }
+            Label { app: rv.app; visible: text !== ""; width: parent.width; text: sec.modelData.note || ""; color: rv.app.colors.muted; font.pixelSize: rv.app.fpx(15) }
             Label { app: rv.app; visible: text !== ""; width: parent.width; text: sec.modelData.empty || ""; color: rv.app.colors.muted; topPadding: rv.app.px(8); bottomPadding: rv.app.px(8) }
             // Rows side by side share their line's height.
             GridLayout {

@@ -27,13 +27,13 @@ fn helper_accepts(s: &Setting) {
 #[test]
 fn a_handheld_and_a_desktop_get_their_own_cards() {
     let (root, handheld) = machine(Preset::Handheld, "handheld");
-    assert_eq!(ids(&root, &handheld), ["power", "display", "lighting", "battery", "sleep", "tuneup", "dock", "windows"]);
+    assert_eq!(ids(&root, &handheld), ["power", "display", "lighting", "battery", "sleep", "storage", "tuneup", "dock", "windows"]);
     let cards = modules::cards(&root, &handheld, &Ledger::default(), false);
     assert_eq!(cards[0].value, "17 W");
     assert_eq!((cards[1].value.as_str(), cards[2].value.as_str()), ("48 to 120 Hz", "1 light"));
     assert_eq!(cards[3].value, "Charges to 100%");
     let (root2, pc) = machine(Preset::Desktop, "pc");
-    assert_eq!(ids(&root2, &pc), ["gpu", "cpu", "monitors", "drives", "sound", "sleep", "tuneup", "windows"]);
+    assert_eq!(ids(&root2, &pc), ["gpu", "cpu", "monitors", "drives", "storage", "sound", "sleep", "tuneup", "windows"]);
     let cards = modules::cards(&root2, &pc, &Ledger::default(), true);
     assert_eq!(cards[0].value, "304 W limit");
     assert_eq!(cards[1].value, "Game Boost on");

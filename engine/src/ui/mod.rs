@@ -23,6 +23,7 @@ pub mod saves;
 pub mod selftile;
 pub mod settings;
 mod setup;
+pub mod storage;
 pub mod store;
 pub mod whatsnew;
 
@@ -148,13 +149,15 @@ pub struct Ui {
     pub(crate) files: files::Explorer,
     /// The line of work that runs while the player browses (installs, updates, copies).
     pub(crate) queue: queue::Queue,
+    /// The storage saver: its last look, the ticks and what waits to be counted.
+    pub(crate) storage: storage::Look,
 }
 
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { queue: queue::Queue::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, home_more: false, filter: BTreeMap::new(), files: files::Explorer::default() }
+        Ui { queue: queue::Queue::default(), storage: storage::Look::default(), host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, home_more: false, filter: BTreeMap::new(), files: files::Explorer::default() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -235,7 +238,7 @@ impl Ui {
         let decky_there = store::decky_installed(self);
         let decky_off = self.ledger().settings().iter().any(|x| matches!(x, crate::helper::Setting::Service { unit, enabled: false } if unit == "plugin_loader.service"));
         let decky_stopped = self.host_lights.asked && decky_there && !decky_off && !self.host_lights.decky_running;
-        Facts { decky_stopped, decky_running: decky_there && self.host_lights.decky_running, app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, tiles_without_art: crate::tile_art::to_fix(&self.ctx.home).len(), ..self.facts.clone() }
+        Facts { decky_stopped, decky_running: decky_there && self.host_lights.decky_running, app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, tiles_without_art: crate::tile_art::to_fix(&self.ctx.home).len(), tiles_drawn: crate::tile_art::drawn(&self.folder()), storage_full: self.storage_checkup(), ..self.facts.clone() }
     }
 
     /// Is the helper on this machine older than the one this Turbine Hub came with? Its file differs then. The
@@ -279,6 +282,10 @@ impl Ui {
     /// One page as JSON. `arg` is the page's own (a section, a game, a search). Every page leaves here with its
     /// Options menu and its footer hints worked out the same way (`controls::finish`).
     pub fn page(&mut self, name: &str, arg: &str) -> String {
+        // The Storage section itself asks for its look; a card or a link that only looks into it never does.
+        if storage::is_page(name, arg) {
+            storage::ensure(self);
+        }
         let j = self.raw(name, arg);
         controls::finish(self, name, arg, j).to_text()
     }
@@ -465,3 +472,5 @@ mod tests_onepress;
 mod tests_store;
 #[cfg(test)]
 mod tests_upfront;
+#[cfg(test)]
+mod tests_storage;

@@ -54,6 +54,8 @@ pub struct Facts {
     pub storage_full: Option<(String, String)>,
     /// Non-Steam games in the library that have no pictures (`tile_art::to_fix`): blank tiles.
     pub tiles_without_art: usize,
+    /// Pictures Turbine Hub drew for such entries that are still there (`tile_art::drawn`): Undo takes them back.
+    pub tiles_drawn: usize,
 }
 
 /// One screen as Desktop Mode has it set now.
@@ -212,6 +214,10 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     if f.tiles_without_art > 0 {
         out.push(item("tile-art", Level::Tip, "games", crate::ui::onepress::checkup_title(f.tiles_without_art), "They show as blank tiles. Turbine Hub draws a cover, a banner and a background for each, never over your own.", ("Fix", "tile-art")));
+    }
+    if f.tiles_drawn > 0 {
+        let n = f.tiles_drawn;
+        out.push(item("tile-art-undo", Level::Tip, "restore", if n == 1 { "Turbine Hub drew 1 picture for your library".to_string() } else { format!("Turbine Hub drew {n} pictures for your library") }, "For entries that showed as blank tiles. Undo removes exactly what was drawn, never a picture of your own.", ("Undo", "tile-art-undo")));
     }
     if f.no_controller {
         out.push(item("controller", Level::Tip, "games", "No controller found".into(), "Start Turbine Hub from its Steam entry to use a controller.", ("How", "help:controller")));

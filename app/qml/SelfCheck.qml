@@ -68,6 +68,10 @@ import TurbineHub
 //           failure says why; R lists Remove, Details and the source; [ and ], LT and RT change the section
 //   queue   with three jobs in the line everything still works (highlight, tabs, the menu); closing asks first
 //           ("3 things are still running. Close anyway?"); the jobs end one after the other
+//   storage  My machine's Storage section: the safe leftovers start ticked and the Check first ones don't; the
+//           controller's pointer on a Check first row takes the highlight and R3 ticks it; the main button's
+//           size grows with the tick; Start opens the plan, which lists that row with what happens to it (to the
+//           Recycle Bin) beside the safe ones (erased for good); Esc closes it and the tick stays
 //   files-mouse, files-keys, files-pad   Files worked the way Explorer is: see them in `script`
 // Each prints "INPUTCHECK ok: <name>" when nothing failed.
 //
@@ -655,6 +659,54 @@ Item {
                     app.padPress("lt")
                 }],
                 [ready, () => { if (at() !== v.lastId) fail("sections: LT on the first section didn't go round to the last (" + at() + ")") }],
+            ]
+        }
+        if (name === "storage") {
+            const rowOf = (pred) => { for (const sec of app.model.sections || []) for (const r of sec.rows || []) if (pred(r)) return r; return null }
+            const windows = (r) => r.act === "storage-tick" && r.title === "Windows files of Hades II"
+            const r3 = () => { app.padEvent("r3", true); app.padEvent("r3", false) }
+            return [
+                [ready, () => {
+                    if (app.model.section !== "storage") fail("storage: the page isn't the Storage section (" + app.model.section + ")")
+                    const safe = rowOf(r => r.act === "storage-tick" && r.title === "Shader cache of Hades II")
+                    if (!safe || safe.on !== true) fail("storage: a safe leftover doesn't start ticked")
+                    const r = rowOf(windows)
+                    if (!r) { fail("storage: no Check first row to try"); return }
+                    if (r.on === true) fail("storage: a Check first row starts ticked")
+                    if (r.badge !== "Goes to the Recycle Bin") fail("storage: the row doesn't say what happens to it (" + r.badge + ")")
+                    if (!app.model.primary || app.model.primary.label.indexOf("Free ") !== 0) { fail("storage: no Free button on Start"); return }
+                    v.label = app.model.primary.label
+                    v.fid = r.id
+                    const it = byFid(r.id)
+                    if (!it) { fail("storage: the row isn't drawn"); return }
+                    app.reveal(it)
+                }],
+                [ready, () => { const it = byFid(v.fid); if (it) steer(middle(it)) }],
+                [100, () => {
+                    if (app.lastFid !== v.fid) fail("storage: the pointer on the row didn't take the highlight (it is on " + app.lastFid + ")")
+                    r3()
+                }],
+                [ready, () => {
+                    const r = rowOf(windows)
+                    if (!r || r.on !== true) fail("storage: R3 on the row didn't tick it")
+                    if (dialog.open) fail("storage: a tick opened a dialog")
+                    if (!app.model.primary || app.model.primary.label === v.label) fail("storage: the button's size didn't grow with the tick (" + v.label + ")")
+                    app.padPress("start")
+                }],
+                [ready, () => {
+                    if (!dialog.open) { fail("storage: Start didn't open the plan"); return }
+                    const items = dialog.d.items || []
+                    if (!items.some(i => i.title.indexOf("Windows files of Hades II") === 0 && i.line.indexOf("Goes to the Recycle Bin") === 0)) fail("storage: the plan doesn't list the ticked row with what happens to it (" + items.map(i => i.title).join(", ") + ")")
+                    if (!items.some(i => i.title.indexOf("Shader cache of Hades II") === 0 && i.line === "Erased for good.")) fail("storage: the plan doesn't list a safe leftover as erased for good")
+                    if (dialog.d.confirm !== app.model.primary.label) fail("storage: the plan's button isn't the page's (" + dialog.d.confirm + ", " + app.model.primary.label + ")")
+                    if (dialog.d.danger === true) fail("storage: a plan that erases nothing that may hold saves is marked dangerous")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => {
+                    if (dialog.open) fail("storage: Esc didn't close the plan")
+                    const r = rowOf(windows)
+                    if (!r || r.on !== true) fail("storage: the tick was lost with the dialog")
+                }],
             ]
         }
         // The Store with real keys: a row's own button, the line of work, browsing while it runs.

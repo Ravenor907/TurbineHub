@@ -85,6 +85,12 @@ pub fn undoable(folder: &Path) -> usize {
     ArtRecord::load(&record(folder)).files.iter().filter(|(p, h)| sha256::file_hex(Path::new(p)).is_ok_and(|now| sha256::same_digest(&now, h))).count()
 }
 
+/// How many pictures of the record are still on the disk, without reading them: for screens that only have to
+/// know whether there is something to undo.
+pub fn drawn(folder: &Path) -> usize {
+    ArtRecord::load(&record(folder)).files.iter().filter(|(p, _)| Path::new(p).is_file()).count()
+}
+
 // ---- Drawing ----
 
 /// Turbine Hub's dark ground and the color of its words.

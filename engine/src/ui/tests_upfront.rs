@@ -48,13 +48,13 @@ fn my_machine_is_one_page_with_a_section_for_each_part() {
     let mut u = ui("sections", HANDHELD, Mode::Guided);
     let j = page(&mut u, "machine", "");
     assert_eq!(j.str_at("section"), Some("overview"));
-    assert_eq!(ids(&j, "chips"), ["overview", "power", "display", "lighting", "battery", "sleep", "tuneup", "dock", "windows"]);
+    assert_eq!(ids(&j, "chips"), ["overview", "power", "display", "lighting", "battery", "sleep", "storage", "tuneup", "dock", "windows"]);
     let titles: Vec<String> = list(&j, "chips").iter().map(|c| c.str_at("title").unwrap().to_string()).collect();
-    assert_eq!(titles, ["Overview", "Power", "Screen", "Lighting", "Battery", "Sleep and wake", "Tune-up", "Dock", "Windows"]);
+    assert_eq!(titles, ["Overview", "Power", "Screen", "Lighting", "Battery", "Sleep and wake", "Storage", "Tune-up", "Dock", "Windows"]);
     assert_eq!(list(&j, "chips").iter().filter(|c| c.get("on").and_then(Json::as_bool) == Some(true)).count(), 1);
     // The highlight starts on the first card, and Overview's cards are the sections, in order.
     assert_eq!(j.str_at("focus"), Some("card:power"));
-    assert_eq!(ids(&j, "cards"), ["power", "display", "lighting", "battery", "sleep", "tuneup", "dock", "windows"]);
+    assert_eq!(ids(&j, "cards"), ["power", "display", "lighting", "battery", "sleep", "storage", "tuneup", "dock", "windows"]);
     // A section is the same page with its controls on it, whichever way it was asked for.
     let battery = page(&mut u, "machine", "battery");
     assert_eq!(battery.str_at("section"), Some("battery"));
@@ -90,7 +90,7 @@ fn my_machine_is_one_page_with_a_section_for_each_part() {
     }
     // A TV PC without Windows has no Windows section; a desktop has its own parts.
     let mut tv = ui("sections", Preset::TvPc, Mode::Guided);
-    assert_eq!(ids(&page(&mut tv, "machine", ""), "chips"), ["overview", "gpu", "cpu", "monitors", "drives", "sound", "sleep", "tuneup"]);
+    assert_eq!(ids(&page(&mut tv, "machine", ""), "chips"), ["overview", "gpu", "cpu", "monitors", "drives", "storage", "sound", "sleep", "tuneup"]);
     assert_eq!(by_id(&list(&page(&mut tv, "machine", ""), "chips"), "monitors").str_at("title"), Some("TV"));
     // Help for a section is about that section.
     let help = page(&mut u, "help", "machine@tuneup");
@@ -235,7 +235,7 @@ fn home_has_the_quick_switches_in_both_modes() {
     assert!(act(&mut u, "home-more", "", "").get("refresh").is_some());
     let j = page(&mut u, "home", "");
     assert_eq!(j.str_at("moreSwitches"), Some("Fewer switches"));
-    assert_eq!(ids(&j, "extra"), ["open:module:display", "open:module:sleep", "open:module:tuneup", "open:module:dock", "open:module:windows"]);
+    assert_eq!(ids(&j, "extra"), ["open:module:display", "open:module:sleep", "open:module:storage", "open:module:tuneup", "open:module:dock", "open:module:windows"]);
     // A way to a section says in its Options what the section holds.
     assert!(list(&by_id(&list(&j, "extra"), "open:module:tuneup"), "offers").iter().any(|o| o.str_at("act") == Some("tuneup")));
     // Each is a row whose press is the one its own page makes.
@@ -247,7 +247,7 @@ fn home_has_the_quick_switches_in_both_modes() {
     // Veteran shows them all at once.
     let mut v = ui("quick-v", HANDHELD, Mode::Veteran);
     let all = ids(&page(&mut v, "home", ""), "switches");
-    assert_eq!(all, ["power-mode", "boost", "light:power", "charge-quick", "open:module:display", "open:module:sleep", "open:module:tuneup", "open:module:dock", "open:module:windows"]);
+    assert_eq!(all, ["power-mode", "boost", "light:power", "charge-quick", "open:module:display", "open:module:sleep", "open:module:storage", "open:module:tuneup", "open:module:dock", "open:module:windows"]);
     done("quick-v");
     // A desktop has no lights and no battery, and FSR 4 for every game where its card runs it.
     let mut d = ui("quick", Preset::Desktop, Mode::Veteran);

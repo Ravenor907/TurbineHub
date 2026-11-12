@@ -28,6 +28,10 @@ pub enum Event {
     Facts(Box<Facts>),
     /// The notes of the running version arrived (What's new).
     Notes,
+    /// The storage saver's look ended: what it found, and what the host said for it.
+    Storage(Box<(turbinehub_engine::storage::Report, turbinehub_engine::storage::Host)>),
+    /// One game's real size was counted (None: the game isn't there any more).
+    GameSize(String, Option<Box<turbinehub_engine::storage::GameSize>>),
 }
 
 /// Facts gathered from the host and the internet.
@@ -62,6 +66,9 @@ pub struct Facts {
     pub screens: Option<Vec<turbinehub_engine::checkup::ScreenNow>>,
     /// What the host says about the lights (Ally Hub's saved choice, who else sets them, the helper's rule).
     pub lights: Option<ui::lighting::HostLights>,
+    /// A drive is nearly full (the checkup's title and line, from how full the drives are; nothing is counted).
+    /// Some(None): every drive has room.
+    pub storage: Option<Option<(String, String)>>,
 }
 
 pub fn in_flatpak() -> bool {
@@ -432,6 +439,26 @@ pub fn start(job: Job, tx: Sender<Event>) {
     });
 }
 
+/// The storage saver's look, on a new thread: it reads only, and can take seconds on a full card. Steam, the
+/// running games and Flatpak's own list of what is unused are asked on the host first.
+pub fn storage_look(home: PathBuf, folder: PathBuf, data: PathBuf, tx: Sender<Event>) {
+    std::thread::spawn(move || {
+        let began = Instant::now();
+        let mut ask = |line: &[String], typed: Option<&str>| run(line, typed).ok().map(|o| (o.code, o.stdout));
+        let (report, host) = turbinehub_engine::storage::look_here(&home, &folder, &data, &mut ask);
+        crate::log::line("storage", &format!("Looked in {} ms: {} drives, {} games, {} leftovers, Steam {:?}", began.elapsed().as_millis(), report.drives.len(), report.games.len(), report.findings.len(), host.steam));
+        let _ = tx.send(Event::Storage(Box::new((report, host))));
+    });
+}
+
+/// One game's real size (its files, its shader cache, its Windows files), counted on a new thread.
+pub fn game_size(home: PathBuf, folder: PathBuf, data: PathBuf, id: String, tx: Sender<Event>) {
+    std::thread::spawn(move || {
+        let size = turbinehub_engine::storage::game_size_here(&home, &folder, &data, &id).map(Box::new);
+        let _ = tx.send(Event::GameSize(id, size));
+    });
+}
+
 /// One harmless host command the engine asks for without a dialog (the sound output).
 pub fn quick(line: Vec<String>) {
     std::thread::spawn(move || {
@@ -550,6 +577,9 @@ pub struct Gather {
     /// After an update: this version's notes aren't kept yet, so they are fetched (What's new).
     pub want_notes: bool,
     pub helper_there: bool,
+    /// Turbine Hub's own folder and its data folder, for a look at how full the drives are.
+    pub folder: PathBuf,
+    pub data: PathBuf,
     /// The player pressed Check now: Turbine Hub's own update is asked for even within six hours of the last time.
     pub check_now: bool,
 }
@@ -559,7 +589,9 @@ pub struct Gather {
 /// for the internet and never loses what it showed.
 pub fn gather(g: Gather, tx: Sender<Event>) {
     std::thread::spawn(move || {
-        let _ = tx.send(Event::Facts(Box::new(local_facts(&g.home, &g.cache, g.helper_there))));
+        let mut local = local_facts(&g.home, &g.cache, g.helper_there);
+        local.storage = Some(turbinehub_engine::storage::nearly_full_here(&g.home, &g.folder, &g.data));
+        let _ = tx.send(Event::Facts(Box::new(local)));
         let client = Client::new(&g.version, &g.cache);
         let now = turbinehub_engine::now();
         // The newest version and the sizes of the Store's apps. No answer keeps what was found last.

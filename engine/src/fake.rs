@@ -228,3 +228,135 @@ pub fn windows_drive(mount: &Path) {
     w(mount, "Program Files (x86)/Battle.net/Battle.net.exe", "MZ");
     w(mount, "Windows/System32/ntoskrnl.exe", "MZ");
 }
+
+/// A PNG of one flat color (not compressed), so the made-up pictures really are pictures.
+pub fn png(width: u32, height: u32, rgb: [u8; 3]) -> Vec<u8> {
+    // Each row: a zero (no filter), then its pixels.
+    let row: Vec<u8> = std::iter::once(0).chain(std::iter::repeat_n(rgb, width as usize).flatten()).collect();
+    let raw = row.repeat(height as usize);
+    // zlib with stored blocks of at most 65535 bytes, then the Adler-32 of the data.
+    let mut z = vec![0x78, 0x01];
+    let blocks: Vec<&[u8]> = raw.chunks(65_535).collect();
+    for (i, b) in blocks.iter().enumerate() {
+        z.push(u8::from(i + 1 == blocks.len()));
+        z.extend((b.len() as u16).to_le_bytes());
+        z.extend((!(b.len() as u16)).to_le_bytes());
+        z.extend(*b);
+    }
+    let (mut a, mut s) = (1u32, 0u32);
+    for &byte in &raw {
+        a = (a + byte as u32) % 65_521;
+        s = (s + a) % 65_521;
+    }
+    z.extend(((s << 16) | a).to_be_bytes());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8; 4], data: &[u8]| {
+        out.extend((data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend(data);
+        out.extend(&body);
+        out.extend(crate::zip::crc32(&body).to_be_bytes());
+    };
+    let mut head = Vec::new();
+    head.extend(width.to_be_bytes());
+    head.extend(height.to_be_bytes());
+    head.extend([8, 2, 0, 0, 0]);
+    chunk(b"IHDR", &head);
+    chunk(b"IDAT", &z);
+    chunk(b"IEND", &[]);
+    out
+}
+
+fn bytes(base: &Path, rel: &str, data: &[u8]) {
+    let f = base.join(rel.trim_start_matches('/'));
+    if let Some(d) = f.parent() {
+        let _ = fs::create_dir_all(d);
+    }
+    let _ = fs::write(f, data);
+}
+
+/// The made-up SD card (or second drive), as the machine's own path.
+pub const FILES_DRIVE: &str = "/run/media/deck/sdcard";
+/// The made-up home folder, as the machine's own path.
+pub const FILES_HOME: &str = "/home/deck";
+/// The Flatpak apps of the made-up machine: (id, name, installed for everyone).
+pub const FILES_APPS: &[(&str, &str, bool)] = &[
+    ("com.discordapp.Discord", "Discord", true),
+    ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", true),
+    ("org.mozilla.firefox", "Firefox", true),
+    ("com.vysp3r.ProtonPlus", "ProtonPlus", false),
+];
+
+/// What the file explorer needs to show a believable machine, the same on the handheld, the desktop and the TV PC:
+/// the player's folders with a few files in them, two games with their pretend Windows drives, a game that runs
+/// without Windows with its saves, a few Flatpak apps, a card with a Steam library on it and things in both Recycle
+/// Bins. `root` is the folder `machine` wrote (it stands for "/") and `home` the folder that stands for /home/deck.
+/// The Steam library list is written new, with the card's library in it.
+pub fn files(root: &Path, home: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let _ = fs::create_dir_all(home);
+    let uid = fs::metadata(home).map(|m| m.uid()).unwrap_or(1000);
+    w(home, ".config/user-dirs.dirs", "XDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\nXDG_DOCUMENTS_DIR=\"$HOME/Documents\"\nXDG_MUSIC_DIR=\"$HOME/Music\"\nXDG_PICTURES_DIR=\"$HOME/Pictures\"\nXDG_VIDEOS_DIR=\"$HOME/Videos\"\n");
+    w(home, "Desktop/Return to Gaming Mode.desktop", "[Desktop Entry]\nType=Application\nName=Return to Gaming Mode\nExec=steamos-session-select gamescope\n");
+    w(home, "Desktop/Turbine Hub.desktop", "[Desktop Entry]\nType=Application\nName=Turbine Hub\nExec=flatpak run io.github.ravenor907.TurbineHub\n");
+    w(home, "Documents/My setup.json", "{\"mode\":\"guided\",\"picks\":[\"heroic\",\"discord\"]}\n");
+    w(home, "Documents/Controller layout notes.txt", "Back paddles: L4 jump, R4 dodge.\nGyro only while aiming.\n");
+    bytes(home, "Downloads/TurbineHub.flatpak", &[b"flatpak\0".as_slice(), &[7u8; 3000]].concat());
+    w(home, "Downloads/NonSteamLaunchers-install.log", &"Installing Battle.net... done\n".repeat(40));
+    bytes(home, "Downloads/bg3-mod-fixer.zip", &[b"PK\x03\x04".as_slice(), &[0u8; 5000]].concat());
+    bytes(home, "Downloads/wallpaper-jade.png", &png(96, 60, [0x1f, 0x9d, 0x7a]));
+    bytes(home, "Pictures/wallpaper-jade.png", &png(96, 60, [0x1f, 0x9d, 0x7a]));
+    bytes(home, "Pictures/Screenshots/Baldurs Gate 3 camp.png", &png(64, 40, [0x4a, 0x35, 0x2a]));
+    bytes(home, "Pictures/Screenshots/Night City.png", &png(64, 40, [0xe8, 0xd2, 0x1d]));
+    let _ = fs::create_dir_all(home.join("Music"));
+    let _ = fs::create_dir_all(home.join("Videos/Steam recordings"));
+
+    // Steam: two games that run through Proton on the internal drive, each with its pretend Windows.
+    let steam = home.join(".local/share/Steam");
+    let card = root.join(FILES_DRIVE.trim_start_matches('/'));
+    let acf = |lib: &Path, id: &str, name: &str, dir: &str| w(lib, &format!("steamapps/appmanifest_{id}.acf"), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"{dir}\"\n\t\"buildid\"\t\t\"1\"\n}}\n"));
+    w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{}\"\n}}\n}}\n", steam.display(), card.display()));
+    let _ = fs::create_dir_all(steam.join("userdata/1001/config"));
+    for (id, name, dir, exe, save) in [
+        ("1086940", "Baldur's Gate 3", "Baldurs Gate 3", "bin/bg3.exe", "users/steamuser/AppData/Local/Larian Studios/Baldur's Gate 3/PlayerProfiles/Public/Savegames/Story/Tav-1/Tav-1.lsv"),
+        ("1091500", "Cyberpunk 2077", "Cyberpunk 2077", "bin/x64/Cyberpunk2077.exe", "users/steamuser/Saved Games/CD Projekt Red/Cyberpunk 2077/ManualSave-3/sav.dat"),
+    ] {
+        acf(&steam, id, name, dir);
+        w(&steam, &format!("steamapps/common/{dir}/{exe}"), "MZ");
+        w(&steam, &format!("steamapps/common/{dir}/game.exe"), "MZ");
+        let c = format!("steamapps/compatdata/{id}/pfx/drive_c");
+        w(&steam, &format!("{c}/{save}"), "save");
+        w(&steam, &format!("{c}/windows/system32/kernel32.dll"), "MZ");
+        let _ = fs::create_dir_all(steam.join(format!("{c}/Program Files")));
+    }
+    // The card: a Steam library with a game that runs without Windows, and the player's own folders.
+    acf(&card, "892970", "Valheim", "Valheim");
+    w(&card, "steamapps/common/Valheim/valheim.x86_64", "\x7fELF");
+    w(&card, "steamapps/common/Valheim/valheim_Data/boot.config", "gfx-enable-native-gfx-jobs=\n");
+    w(home, ".config/unity3d/IronGate/Valheim/worlds_local/Midgard.fwl", "world");
+    w(&card, "Movies/Holiday 2025.mp4", "\0\0\0\x18ftypmp42");
+    w(&card, "ROMs/readme.txt", "Put your own game backups here.\n");
+
+    // Flatpak apps, laid out the way Flatpak lays them out.
+    for (id, name, system) in FILES_APPS {
+        let base = if *system { root.join("var/lib/flatpak/app") } else { home.join(".local/share/flatpak/app") };
+        let build = "x86_64/stable/5c1e0a7d9b3f4e6a8c2d0f1b3a5c7e9d1f2a4b6c8d0e2f4a6b8c0d2e4f6a8b0c";
+        let short = id.rsplit('.').next().unwrap_or(id).to_lowercase();
+        w(&base, &format!("{id}/{build}/files/bin/{short}"), "\x7fELF");
+        w(&base, &format!("{id}/{build}/export/share/applications/{id}.desktop"), &format!("[Desktop Entry]\nType=Application\nName={name}\nExec={short}\n"));
+        w(&base, &format!("{id}/{build}/metadata"), &format!("[Application]\nname={id}\n"));
+        link(&base, "x86_64/stable", &format!("{id}/current"));
+        link(&base, build.rsplit('/').next().unwrap_or(""), &format!("{id}/x86_64/stable/active"));
+        w(home, &format!(".var/app/{id}/config/settings.json"), "{}\n");
+    }
+
+    // Both Recycle Bins, written the way the Trash specification says.
+    let bin = home.join(".local/share/Trash");
+    bytes(&bin, "files/old-screenshot.png", &png(64, 40, [0x30, 0x30, 0x38]));
+    w(&bin, "info/old-screenshot.png.trashinfo", &format!("[Trash Info]\nPath={FILES_HOME}/Pictures/Screenshots/old-screenshot.png\nDeletionDate=2026-11-12T08:15:00\n"));
+    w(&bin, "files/notes (copy).txt", "An older copy.\n");
+    w(&bin, "info/notes (copy).txt.trashinfo", &format!("[Trash Info]\nPath={FILES_HOME}/Documents/notes%20%28copy%29.txt\nDeletionDate=2026-11-09T19:02:41\n"));
+    let card_bin = card.join(format!(".Trash-{uid}"));
+    w(&card_bin, "files/old-rom.zip", "PK\x03\x04");
+    w(&card_bin, "info/old-rom.zip.trashinfo", "[Trash Info]\nPath=ROMs/old-rom.zip\nDeletionDate=2026-11-01T12:00:00\n");
+}

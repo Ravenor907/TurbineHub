@@ -61,6 +61,49 @@ Capability modules, shown only when the hardware has them:
 ### Settings
 Mode, interface size (50 to 150%, re-flows), the background helper (on or off) and the save time machine, Look (theme and accent from Turbine's design system, color vision: typical, red-weak, green-weak, blue-weak or no color, and animations: full, reduced or off), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
 
+### Files
+A file explorer laid out like the one on Windows, in Turbine Hub's own look, over the folders that are really there. All of it is decided in `engine/src/files` (the pages come with 0.5's interface). Two views of one disk, switched at any time: **Windows-like** (Guided starts here) names and groups places the way Windows does, **True Linux** (Veteran starts here) shows every real name, path, hidden file, link, permission and owner. The real path is never hidden: every entry carries it, and "Copy as path" hands out both forms.
+
+Where each Windows place really goes:
+
+| Windows-like | Real folder | Notes |
+|---|---|---|
+| Home | (made up) | The pinned Quick access folders and the files opened lately through Turbine Hub |
+| This PC | (made up) | The player's six folders, every drive with free and total room, the Recycle Bin |
+| SteamOS (C:) | `/` | Shows Games, Program Files, Users and Windows; the rest of the top of the disk counts as hidden. Its room is the home partition's, where the player's files are |
+| C:\Users, C:\Users\\<user> | the folder the home folder is in, the home folder | Desktop, Documents, Downloads, Music, Pictures and Videos are the folders `~/.config/user-dirs.dirs` names (the standard names where it says nothing), shown under their Windows names |
+| C:\Users\\<user>\AppData | Roaming = `~/.config`, Local = `~/.local/share`, Apps from the Store = `~/.var/app` | A Store app's folder shows under the app's name when its `.desktop` file gives one |
+| C:\Games | every Steam library's `steamapps/common`, merged, and Heroic's games | Each game by name. What else Steam keeps there (Proton, its runtimes) counts as hidden |
+| C:\Games\\<game> | (made up) | Game files (its folder), Its Windows C: drive (`steamapps/compatdata/<id>/pfx/drive_c`, or the Heroic prefix), Saves for a game that runs without Windows when one of the usual places is there (`~/.config/unity3d/<maker>/<game>`, `~/.local/share/<game>`, `~/.config/<game>`), Save snapshots when Turbine Hub kept some |
+| C:\Program Files | `/var/lib/flatpak/app` and `~/.local/share/flatpak/app` | Each app by name, opening on its files (`<id>/current/active/files`) |
+| C:\Windows | `/usr`, with `etc` = `/etc` | Locked |
+| D:, E: ... | folders under `/run/media/<user>/`, then every other real partition that isn't the system's | "SD card" for a card, else the drive's label, else the folder's name. A Windows (NTFS) drive is read only |
+| Recycle Bin | `~/.local/share/Trash` and each other drive's `.Trash-<uid>` (or `.Trash/<uid>`), as one list | |
+
+Paths map both ways (`Places::windows_path`, `Places::resolve`). The most specific place wins when showing a path; a path nothing else claims reads as it is under C: (`/opt/x` is `C:\opt\x`), so every real path has a Windows-style one and comes back from it. The address bar takes either style: upper or lower case, either slash, quotes, `..`, `%AppData%`, `~`, `file://`. A link keeps the name it was reached by. Drive letters go by order (cards and plugged-in drives by name, then other partitions) and may change when a drive comes or goes, as on Windows.
+
+Lists: name, real name, real path, kind, a plain type word (from the ending, or the first bytes for a name without one), size, date, hidden, writable, locked, and in True Linux the permission text, owner and group. Sorted by name (numbers as numbers), date, size or type, folders first; grouped as Explorer groups (by date: Today, Yesterday, Earlier this week, Last week, Earlier this month, Last month, Earlier this year, A long time ago, with weeks starting on Monday; by type, size or name). Hidden files are off in Windows-like and on in True Linux unless asked. Search is "name contains" in the folder, or below it within limits (depth, hits, names looked at), never through a link and never into `/proc`, `/sys` or `/dev`. A folder that can't be read is an empty list with the reason, never an error.
+
+Safety rules, each refused with a plain sentence before anything is touched (`engine/src/files/guard.rs`):
+- No password is ever involved: every file is read and changed as the player, and what the player may not write is refused.
+- SteamOS itself (`/usr`, `/etc` and the system's other folders), Turbine Hub's own folders and Windows drives are shown and never changed.
+- Never renamed, moved or deleted: a drive's top folder or anything above it, the home folder or anything above it, Steam's own folders (each library, its `steamapps`, `common` and `compatdata`, Steam's `userdata` and the account folders in it, `~/.steam`), `~/.config`, `~/.local`, `~/.local/share`, `~/.var` and `~/.var/app`. What is inside them (a game's folder, its Windows C: drive, a screenshot) is the player's to manage.
+- Every check looks at the path as given and at where its folders really lead, so a link into a locked place opens nothing. A link itself is the player's: deleting one removes the link and never what it points to.
+- Nothing is ever written over. A name that is taken asks: skip, replace (the old one goes to the Recycle Bin first) or keep both ("name (2)"). A folder never goes into itself.
+- A copy checks the room first, reports as it goes and can be stopped (what was half written is removed). A move on one drive is a rename; across drives it is a copy, then the removal of the original.
+- Every operation is a plan first (what it does, in plain words) and hands back its undo: the last operation of each kind can be taken back. An undo never erases: what has to go, goes to the Recycle Bin.
+
+Recycle Bin rules (the freedesktop Trash specification 1.0, so Dolphin sees the same bin):
+- Delete moves the item to `files/` and writes `info/<name>.trashinfo` first (`[Trash Info]`, `Path=` escaped byte by byte, `DeletionDate=` on the player's clock), made only if that name is free, which keeps two deletes of the same name apart ("name (2)"). A deleted folder's size goes into `directorysizes`.
+- The home folder's drive uses `~/.local/share/Trash` (never `$XDG_DATA_HOME`, which inside the Flatpak is the app's own folder). A file on another drive goes to the bin at the top of that drive, so deleting never copies between drives: `.Trash/<uid>` when the drive has a real `.Trash` folder with the sticky bit, else `.Trash-<uid>`, with the path written from the top of the drive.
+- A bin, or its `files` or `info`, that is a link is never used, to put in or to empty. A note in a drive's bin that points out of the drive is not believed.
+- Restore puts an item back where it was (its folders are made again), asking when the name is taken. What is in the bin can only be restored or emptied.
+- Emptying the Recycle Bin is the only thing in the explorer that erases for good, and its dialog has Cancel highlighted.
+
+Opening: text (UTF-8, UTF-16 with its mark, old Western files; the first 256 KB) and common pictures preview inside the app; everything else opens with its own app through `xdg-open` on the host in Desktop Mode.
+
+Sandbox: every access goes through one trait (`Fs`) with real paths, and a map says where the app finds each one. Inside the Flatpak the host's `/usr` and `/etc` are under `/run/host`; everything else is at its own path once the Flatpak has `--filesystem=host`. Links are followed in real paths, so a link to `/usr/share` leads to the machine's folder and not the Flatpak runtime's.
+
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.
 
@@ -118,6 +161,7 @@ New:
 - `ledger`: the change record shared with the helper (see 4).
 - `settings`, `glossary`, `mode`.
 - `applog`: Turbine Hub's own log and crash log (see 5): what is hidden in every line, the size caps, how a run that never closed is told from Game Mode ending. `drawing`: software drawing where there is no graphics card to draw with.
+- `files`: the file explorer (see 2, Files): `fs` (the one door to the disk and the sandbox map), `places` (the Windows-like places and the two-way path mapping), `list`, `guard` (what is refused and why), `trash`, `ops` (plans, progress, undo), `preview`, `quick` (pinned folders and recent files, in `files.json` in Turbine Hub's folder). `fake::files` gives the made-up machines a home folder, games, apps, a card and a Recycle Bin for it.
 - `cli`: `--json` verbs for the Decky backend and scripts.
 - `ui`: what every screen shows and what every press does. Each page is one JSON object; each press answers with a note, a page to open, or the one dialog with its exact steps (`Plan`, `Step`). It also holds the per-game switches file, the lighting file, the Store's list, the setup file and the made-up machine used for pictures and tests.
 

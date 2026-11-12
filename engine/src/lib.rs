@@ -9,6 +9,7 @@ pub mod cli;
 pub mod compat_tool;
 pub mod drawing;
 pub mod fake;
+pub mod files;
 pub mod games;
 pub mod glossary;
 pub mod hardware;

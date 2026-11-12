@@ -6,7 +6,7 @@ use crate::checkup::{self, Facts, Level};
 use crate::hardware::Machine;
 use crate::json::quote;
 use crate::switches::{GameSwitches, Switch};
-use crate::{glossary, helper, library, modules, sensors, settings::Settings, shortcuts, tuneup};
+use crate::{glossary, helper, library, modules, sensors, settings::Settings, shortcuts, storage, tuneup};
 use std::path::{Path, PathBuf};
 
 /// Where to read from: "/" and the player's folders for real, fake ones for tests and screenshots.
@@ -85,6 +85,14 @@ fn game_json(arg: &str, ctx: &Ctx) -> Option<String> {
     Some(format!("\"found\":true,\"game\":{{\"id\":{},\"name\":{},\"store\":{}}},\"locked\":{locked},\"switches\":{switches}", quote(&id), quote(&g.name), quote(g.store.label())))
 }
 
+/// Turbine Hub's data folder (play sessions, save snapshots) for a job that only knows the settings folder: beside
+/// it as the Flatpak lays them out (config and data in one app folder) or as a plain system does (~/.config and
+/// ~/.local/share), else the one a made-up machine keeps inside its settings folder.
+fn data_dir(config_home: &Path) -> PathBuf {
+    let beside = [config_home.with_file_name("data").join("turbinehub"), config_home.with_file_name(".local").join("share/turbinehub")];
+    beside.into_iter().find(|p| p.is_dir()).unwrap_or_else(|| config_home.join("turbinehub/data"))
+}
+
 /// The pages the quick panel can send the player to.
 pub const PAGES: &[&str] = &["home", "games", "saves", "boost", "lighting", "battery"];
 /// A page asked for longer ago than this is forgotten.
@@ -106,7 +114,7 @@ pub fn take_open_request(config_home: &Path, now: u64) -> Option<String> {
     (at <= now && now - at <= OPEN_REQUEST_SECS).then(|| page.to_string())
 }
 
-pub const JOBS: &[&str] = &["version", "machine", "readings", "checkup", "cards", "tuneup", "changes", "glossary", "panel", "game", "open"];
+pub const JOBS: &[&str] = &["version", "machine", "readings", "checkup", "cards", "tuneup", "changes", "glossary", "panel", "game", "open", "storage"];
 
 /// Does this job's answer depend on the firmware's boot entries (is Windows there to restart into)? The caller
 /// asks the host for them (`efibootmgr`) for these jobs only and puts them in `Ctx::efibootmgr`: without them the
@@ -183,6 +191,14 @@ pub fn run(job: &str, ctx: &Ctx) -> (String, i32) {
             let hub = shortcuts::find_self(&ctx.home).map(|(id, _)| shortcuts::rungameid_url(id)).unwrap_or_default();
             let noted = crate::write_atomic(&open_request_file(&ctx.config_home), format!("{{\"page\":{},\"at\":{}}}\n", quote(arg), crate::now()).as_bytes()).is_ok();
             format!("\"page\":{},\"noted\":{noted},\"hubUrl\":{}", quote(arg), quote(&hub))
+        }
+        // What is using space and what could go. Only a look: freeing happens in the app, where the plan is shown.
+        // The host isn't asked anything here, so Flatpak's unused parts are left out.
+        "storage" => {
+            let folder = ctx.config_home.join("turbinehub");
+            let here = storage::Here::read(&ctx.root, &ctx.home, &folder, &data_dir(&ctx.config_home));
+            let report = storage::scan(&here.site(crate::files::When::utc(crate::now())), &storage::Host::default(), &storage::Limits::default());
+            format!("\"storage\":{}", report.to_json(&report.default_ticks()).to_text())
         }
         _ => return refuse(&format!("Unknown job. Jobs: {}", JOBS.join(", "))),
     };

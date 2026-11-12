@@ -59,6 +59,9 @@ pub enum Step {
     /// Fetches NonSteamLaunchers' script (or its Decky plugin's installer) at this release tag and starts it on the
     /// host, where it shows its own windows. Not waited for: the player works in its window.
     Nsl { tag: String, plugin: bool },
+    /// The storage saver's work: frees the ticked leftovers (each one looked at again first), or puts back what the
+    /// last cleaning moved to the Recycle Bin.
+    Storage(crate::storage::Job),
 }
 
 /// Which password the dialog asks for.

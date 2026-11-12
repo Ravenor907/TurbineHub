@@ -35,6 +35,7 @@ pub mod snapshots;
 pub mod sources;
 pub mod steam;
 pub mod steam_art;
+pub mod storage;
 pub mod switches;
 pub mod tuneup;
 pub mod ui;

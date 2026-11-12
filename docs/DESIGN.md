@@ -115,6 +115,35 @@ Explorer's layout, top to bottom: the tabs (Explorer's own strip in a Desktop Mo
 - **Sizes.** Full screen (a handheld, a TV at 125%) Files grows with the screen like every page, with lines a thumb can hit. In a Desktop Mode window it is drawn at one size whatever the window's (a bigger monitor shows more files, not bigger words; the display's own scaling and the interface size still apply), with lines for a mouse (28 pixels in place of 44), and the footer's hints show only once a controller is used. Under 900 units wide the navigation pane folds to icons, under 760 the list keeps Name and Size, under 1150 the command bar keeps its icons. This one-size rule is Files' alone for now: applied to every page it would change every Desktop Mode picture, and is better decided on its own.
 - **Turbine Files.** A second desktop entry (`turbinehub --page=files`) with its own icon, the jade hex with a folder in it, opens Turbine Hub straight on Files; with Turbine Hub open already, the open window comes forward on Files. Settings adds it to the Steam library as its own entry with its own art (`ui/selftile.rs`, the same way and under the same rules as Turbine Hub's own entry; the two are never taken for each other).
 
+### Storage saver
+One place that shows what is using space and frees it safely. All of it is decided in `engine/src/storage` (the page comes later; `turbinehub --json storage` gives the quick panel and scripts the same look). A look only reads: every drive with its free and total room, every Steam library on it, every installed game's real size (its folder, its shader cache `steamapps/shadercache/<id>`, its Proton files `steamapps/compatdata/<id>` or the Heroic prefix), and the leftovers. Sizes are counted with a bound on entries (200,000 for one thing) and on time (10 seconds for the whole look, leftovers first), and say "at least" when the count was cut short; a game cut short falls back to Steam's own figure as the floor.
+
+Every leftover is sorted into one of three groups, and the group decides everything else:
+
+| Group | What is in it | Ticked | How it goes |
+|---|---|---|---|
+| Safe | Shader caches and unfinished downloads of games that are no longer installed, Steam's old logs (the copy from the run before, or untouched for two weeks) and crash dumps older than a day, the runtimes Flatpak itself calls unused | Yes | Erased for good (Steam builds or downloads it again), or by Flatpak's own `flatpak uninstall --unused` as a step of the plan |
+| Check first | Windows files (`compatdata`) of games that are gone, what "Reset Windows files" set aside (`pfx.turbinehub-backup-*`, `pfx.turbinehub-fresh-*`), an unfinished update of an installed game, Protons no game is set to use, what a removed Store app left in `~/.var/app`, Turbine Hub's own save snapshots beyond the kept count, each drive's Recycle Bin, big files in Downloads older than 30 days | Never, until the player ticks it | To the Recycle Bin of its drive, where Undo puts it back. Erased for good only where a bin makes no sense, and the plan says so: an unfinished update, old snapshots, emptying a bin |
+| In use | A Proton something uses | Not offered | Stays. Shown with who uses it |
+
+What counts as safe, and why:
+- Safe means one of two things: Steam makes it again by itself with nothing lost but time (a shader cache, a download), or nothing ever reads it again (old logs, dumps). Nothing that could hold a save, a setting or anything the player made is in this group, whatever its size.
+- "No longer installed" asks more than a missing game folder: no `appmanifest` in any library, not named in Steam's library list (which also names the games of a library that isn't connected right now, so a card that is out doesn't turn its games into leftovers), and not a non-Steam game in Steam's list (their Windows files live under their own big ids).
+- A game's Windows files are Check first even when the game is gone: games without Steam Cloud keep their saves there. They go to the Recycle Bin, never straight to nothing.
+- A Proton is in use when anything could start a game with it: Steam's choice for one game or for all games (`config.vdf`), a pick or the automatic choice of Turbine Hub's launch tool, or Heroic's settings naming it. Turbine Hub's own tool is not a Proton and is never listed. Steam's own Protons are Check first even when nothing names them, because Steam may pick one for a game by itself; removing one takes its manifest along, so Steam doesn't download it straight back.
+- Leftover app data is only told while the list of installed apps could be read, and never Turbine Hub's own.
+- Of a game's save snapshots the newest always stays, also for a game that is gone.
+- Files in Downloads are only listed (big and old), never ticked: only the player knows.
+- Names come from Steam's manifests, the non-Steam games and Turbine Hub's own records (play sessions, snapshots); a game nothing remembers is named by its app id.
+
+Freeing is a plan first: every thing by name with its size and what happens to it, what is left alone and why, and each drive's room now and after. Room that moves to the Recycle Bin comes back when the bin is emptied, and the plan says that. Then, right before each thing goes, it is looked at again (`storage/clean.rs`), because the look may be minutes old:
+- Steam is asked on the host, with three answers as for Steam's list of non-Steam games: running, or not known, and nothing inside a library's `steamapps` is touched. A game that runs keeps its own things.
+- The thing has to be exactly what it was offered as: still a leftover (the game not back in Steam), still unused, still directly in its own folder (`shadercache`, `compatdata`, `downloading`, `compatibilitytools.d`, ...) by its real path. A link, or anything behind a folder that is a link to another place, is never offered and never touched: a shader cache folder moved to the card and linked back is left alone.
+- What fails a check is skipped and named with its reason; the rest still goes. Everything else the explorer's guard refuses is refused here too, since the Recycle Bin is the explorer's.
+The note at the end says what each drive really had free before and has now, how many things wait in the Recycle Bin, and what was left alone. Undo puts back everything the last cleaning moved to the bin (asked about Steam the same way); what was erased for good was only ever what builds itself again, or what the plan marked.
+
+A drive that is 90% full or more gets a line in the checkup ("Your SD card is nearly full: 12 GB can be freed"), counting only the Safe group, or saying "up to" when all there is needs a look first.
+
 ### Deferred
 Phone remote and Wake-on-LAN web page: after the core is solid.
 
@@ -208,6 +237,7 @@ New:
 - `settings`, `glossary`, `mode`.
 - `applog`: Turbine Hub's own log and crash log (see 5): what is hidden in every line, the size caps, how a run that never closed is told from Game Mode ending. `drawing`: software drawing where there is no graphics card to draw with.
 - `files`: the file explorer (see 2, Files): `fs` (the one door to the disk and the sandbox map), `places` (the Windows-like places and the two-way path mapping), `list`, `guard` (what is refused and why), `trash`, `ops` (plans, progress, undo), `preview`, `quick` (pinned folders and recent files, in `files.json` in Turbine Hub's folder). `fake::files` gives the made-up machines a home folder, games, apps, a card and a Recycle Bin for it.
+- `storage`: the storage saver (see 2, Storage saver): the look (`scan`: drives, libraries, each game's size, the leftovers in three groups), the plan for what is ticked, the step that frees it after looking at each thing again (`clean`), its Undo and the checkup's line for a nearly full drive.
 - `cli`: `--json` verbs for the Decky backend and scripts.
 - `ui`: what every screen shows and what every press does. Each page is one JSON object; each press answers with a note, a page to open, or the one dialog with its exact steps (`Plan`, `Step`). `ui/controls.rs` gives every page its Options menu and its footer hints from what the page offers. It also holds the per-game switches file, the lighting file, the Store's list, the setup file and the made-up machine used for pictures and tests.
 

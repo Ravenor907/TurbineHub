@@ -790,7 +790,9 @@ impl qobject::Hub {
                     self.as_mut().set_busy(false);
                     self.as_mut().refresh_state();
                     self.rust().gather(false);
-                    let (done, open) = plan.map(|p| (p.done, p.then_open)).unwrap_or_default();
+                    // A cleaning says what each drive really had free before and has now.
+                    let folder = self.rust().ui.folder();
+                    let (done, open) = plan.map(|p| (turbinehub_engine::storage::done_words(&p.steps, &folder, &turbinehub_engine::files::Disk::here()).unwrap_or(p.done), p.then_open)).unwrap_or_default();
                     out.push(("done", match result {
                         Ok(()) => format!("{{\"ok\":true,\"toast\":{},\"open\":{}}}", quote(&done), quote(&open)),
                         Err(why) => format!("{{\"ok\":false,\"toast\":{},\"open\":\"\"}}", quote(&why)),

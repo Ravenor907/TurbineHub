@@ -215,6 +215,8 @@ fn step_name(st: &Step) -> String {
         Step::ProtonPick { app_id, .. } => format!("ProtonPick {app_id}"),
         Step::ProtonUndo { app_id } => format!("ProtonUndo {app_id}"),
         Step::Saves(_) => "Saves".into(),
+        Step::Storage(turbinehub_engine::storage::Job::Clean(items)) => format!("Storage clean ({} things)", items.len()),
+        Step::Storage(turbinehub_engine::storage::Job::Undo) => "Storage undo".into(),
         other => format!("{other:?}"),
     }
 }
@@ -277,6 +279,13 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
             let mut runner = |line: &[String]| run(line, None).map(|o| turbinehub_engine::saves::Ran { code: o.code, stdout: o.stdout, stderr: o.stderr });
             let places = turbinehub_engine::saves::Places { folder: &job.folder, data: &job.data, home: &job.home };
             turbinehub_engine::saves::run(work, &places, turbinehub_engine::now(), say, &mut runner).map(|_| ())
+        }
+        Step::Storage(work) => {
+            // Steam and the running games are asked on the host right before anything is touched.
+            let mut ask = |line: &[String]| run(line, None).ok().map(|o| (o.code, o.stdout));
+            let done = turbinehub_engine::storage::run_here(work, &job.home, &job.folder, &job.data, say, &mut ask)?;
+            crate::log::line("storage", &done);
+            Ok(())
         }
         Step::SelfTile { .. } | Step::SelfArt | Step::FilesTile { .. } => {
             // Only the entry itself is in Steam's list; the pictures go beside it and need no answer.

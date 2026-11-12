@@ -45,6 +45,8 @@ pub struct Facts {
     /// What Desktop Mode's display settings say each screen is set to now (empty in Game Mode, where they can't
     /// be asked).
     pub screens: Vec<ScreenNow>,
+    /// A drive is nearly full: the title and the line the storage saver's look gives (`storage::Report::checkup`).
+    pub storage_full: Option<(String, String)>,
 }
 
 /// One screen as Desktop Mode has it set now.
@@ -155,6 +157,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     for d in m.drives.iter().filter(|d| d.role == DriveRole::Empty && !d.removable) {
         out.push(item("drive", Level::Look, "drive", "A drive isn't used for games".into(), format!("{}, empty. Add it to Steam as a game library?", if d.model.is_empty() { gb(d.bytes) } else { d.model.clone() }), ("Set up", "drives")));
+    }
+    if let Some((title, line)) = &f.storage_full {
+        out.push(item("storage", Level::Look, "drive", title.clone(), line.clone(), ("Free space", "storage")));
     }
     if let Some(first) = f.unseen_libraries.first() {
         let n = f.unseen_libraries.len();

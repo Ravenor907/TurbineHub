@@ -360,3 +360,61 @@ pub fn files(root: &Path, home: &Path) {
     w(&card_bin, "files/old-rom.zip", "PK\x03\x04");
     w(&card_bin, "info/old-rom.zip.trashinfo", "[Trash Info]\nPath=ROMs/old-rom.zip\nDeletionDate=2026-11-01T12:00:00\n");
 }
+
+/// The moment the storage saver's made-up leftovers are dated from (the same Thursday the explorer's tests use).
+pub const STORAGE_NOW: u64 = 1_794_475_865;
+
+/// Leftovers for the storage saver, on top of `files`: shader caches, Windows files and downloads of games that
+/// are gone (Hades II, app 1145360, and an app nothing remembers, 570), a shader cache and an unfinished update
+/// of Baldur's Gate 3, a reset backup of Cyberpunk 2077, four Protons (Steam's choice for all games, one a game
+/// is set to, and one of Steam's and one added by hand that nothing uses), Steam's old logs and dumps, what a
+/// removed app left in ~/.var/app, and a big old file in Downloads.
+pub fn storage(root: &Path, home: &Path) {
+    let old = |base: &Path, rel: &str, data: &[u8], days: u64| {
+        bytes(base, rel, data);
+        if let Ok(f) = fs::File::options().write(true).open(base.join(rel.trim_start_matches('/'))) {
+            let _ = f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(STORAGE_NOW - days * 86_400));
+        }
+    };
+    let steam = home.join(".local/share/Steam");
+    let card = root.join(FILES_DRIVE.trim_start_matches('/'));
+    let apps = "steamapps";
+    // Games that are gone.
+    bytes(&steam, &format!("{apps}/shadercache/1145360/fozpipelinesv6/steam_pipeline_cache.foz"), &[1u8; 6000]);
+    bytes(&steam, &format!("{apps}/shadercache/570/fozmediav1/video.foz"), &[1u8; 2500]);
+    bytes(&steam, &format!("{apps}/compatdata/1145360/pfx/drive_c/users/steamuser/Saved Games/Hades II/Profile1.sav"), &[2u8; 1200]);
+    bytes(&steam, &format!("{apps}/compatdata/1145360/version"), b"11.0-100\n");
+    bytes(&steam, &format!("{apps}/downloading/1145360/Content/Game.pkg"), &[3u8; 9000]);
+    bytes(&card, &format!("{apps}/shadercache/632470/fozpipelinesv6/steam_pipeline_cache.foz"), &[1u8; 4000]);
+    // Games that are here.
+    bytes(&steam, &format!("{apps}/shadercache/1086940/fozpipelinesv6/steam_pipeline_cache.foz"), &[1u8; 7000]);
+    bytes(&steam, &format!("{apps}/downloading/1086940/patch.pkg"), &[3u8; 5000]);
+    bytes(&steam, &format!("{apps}/temp/1086940/chunk.tmp"), &[3u8; 300]);
+    bytes(&steam, &format!("{apps}/compatdata/1091500/pfx.turbinehub-backup-1794000000/drive_c/users/steamuser/Saved Games/CD Projekt Red/Cyberpunk 2077/ManualSave-1/sav.dat"), &[2u8; 800]);
+    // Protons: Steam's own with their manifests, and two added by hand.
+    let proton = |base: &Path, dir: &str| {
+        w(base, &format!("{dir}/proton"), "#!/usr/bin/env python3\n");
+        w(base, &format!("{dir}/toolmanifest.vdf"), "\"manifest\"\n{\n\t\"version\"\t\t\"2\"\n\t\"commandline\"\t\t\"/proton %verb%\"\n}\n");
+        bytes(base, &format!("{dir}/files/bin/wine64"), &[4u8; 3000]);
+    };
+    for (id, name) in [("3658110", "Proton 11.0"), ("2805730", "Proton 9.0")] {
+        proton(&steam, &format!("{apps}/common/{name}"));
+        w(&steam, &format!("{apps}/appmanifest_{id}.acf"), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"4\"\n\t\"installdir\"\t\t\"{name}\"\n}}\n"));
+    }
+    for name in ["GE-Proton10-4", "GE-Proton10-12"] {
+        proton(&steam, &format!("compatibilitytools.d/{name}"));
+        w(&steam, &format!("compatibilitytools.d/{name}/compatibilitytool.vdf"), &format!("\"compatibilitytools\"\n{{\n\t\"compat_tools\"\n\t{{\n\t\t\"{name}\"\n\t\t{{\n\t\t\t\"install_path\"\t\t\".\"\n\t\t\t\"display_name\"\t\t\"{name}\"\n\t\t}}\n\t}}\n}}\n"));
+    }
+    w(&steam, "config/config.vdf", "\"InstallConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"CompatToolMapping\"\n\t\t\t\t{\n\t\t\t\t\t\"0\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_11\"\n\t\t\t\t\t}\n\t\t\t\t\t\"1091500\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"GE-Proton10-12\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n");
+    // Steam's own notes.
+    old(&steam, "logs/console_log.previous.txt", &[5u8; 1500], 3);
+    old(&steam, "logs/shader_log.txt", &[5u8; 700], 40);
+    old(&steam, "logs/console_log.txt", &[5u8; 900], 0);
+    old(&steam, "dumps/crash_20260901.dmp", &[6u8; 2200], 70);
+    old(&steam, "dumps/crash_now.dmp", &[6u8; 100], 0);
+    // An app that is gone, and a big old download.
+    w(home, ".var/app/com.example.OldLauncher/config/settings.json", "{\"library\":\"/home/deck/Games\"}\n");
+    bytes(home, ".var/app/com.example.OldLauncher/data/games/save.dat", &[2u8; 1700]);
+    old(home, "Downloads/Old game installer.iso", &[7u8; 20_000], 200);
+    old(home, "Downloads/Fresh installer.iso", &[7u8; 20_000], 2);
+}

@@ -284,26 +284,40 @@ pub fn empty(fs: &dyn Fs, places: &Places) -> (u64, Vec<String>) {
     let mut gone = 0;
     let mut problems = Vec::new();
     for trash in bins(fs, places) {
-        let files = trash.join("files");
-        for name in fs.names(&files).unwrap_or_default() {
-            match remove_tree(fs, &files.join(&name)) {
-                Ok(()) => {
-                    gone += 1;
-                    let _ = fs.remove_file(&info_file(&trash, &name));
-                }
-                Err(e) => problems.push(format!("{} couldn't be erased ({}).", name.to_string_lossy(), io_words(&e))),
+        let (n, p) = empty_bin(fs, places, &trash);
+        gone += n;
+        problems.extend(p);
+    }
+    (gone, problems)
+}
+
+/// Erases everything in one Recycle Bin for good (the bin of one drive). Only ever one of this machine's bins that
+/// is a plain folder: anything else is left alone and nothing is counted.
+pub fn empty_bin(fs: &dyn Fs, places: &Places, trash: &Path) -> (u64, Vec<String>) {
+    let mut gone = 0;
+    let mut problems = Vec::new();
+    if !bins(fs, places).iter().any(|b| b == trash) {
+        return (gone, problems);
+    }
+    let files = trash.join("files");
+    for name in fs.names(&files).unwrap_or_default() {
+        match remove_tree(fs, &files.join(&name)) {
+            Ok(()) => {
+                gone += 1;
+                let _ = fs.remove_file(&info_file(trash, &name));
             }
+            Err(e) => problems.push(format!("{} couldn't be erased ({}).", name.to_string_lossy(), io_words(&e))),
         }
-        // Notes whose file is gone say nothing any more.
-        for note in fs.names(&trash.join("info")).unwrap_or_default() {
-            let kept = note.as_bytes().strip_suffix(b".trashinfo").map(|b| OsString::from_vec(b.to_vec()));
-            if kept.is_none_or(|k| fs.meta(&files.join(k)).is_err()) {
-                let _ = fs.remove_file(&trash.join("info").join(&note));
-            }
+    }
+    // Notes whose file is gone say nothing any more.
+    for note in fs.names(&trash.join("info")).unwrap_or_default() {
+        let kept = note.as_bytes().strip_suffix(b".trashinfo").map(|b| OsString::from_vec(b.to_vec()));
+        if kept.is_none_or(|k| fs.meta(&files.join(k)).is_err()) {
+            let _ = fs.remove_file(&trash.join("info").join(&note));
         }
-        if fs.names(&files).is_ok_and(|n| n.is_empty()) {
-            let _ = fs.remove_file(&sizes_file(&trash));
-        }
+    }
+    if fs.names(&files).is_ok_and(|n| n.is_empty()) {
+        let _ = fs.remove_file(&sizes_file(trash));
     }
     (gone, problems)
 }

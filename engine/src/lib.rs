@@ -21,6 +21,7 @@ pub mod sensors;
 pub mod settings;
 pub mod sha256;
 pub mod shortcuts;
+pub mod sources;
 pub mod steam;
 pub mod steam_art;
 pub mod tuneup;

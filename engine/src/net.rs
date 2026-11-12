@@ -106,6 +106,8 @@ pub const ALLOWED_HOSTS: &[&str] = &[
     "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
+    // A second host for files kept on GitHub (the anti-cheat list, the fixes file).
+    "cdn.jsdelivr.net",
     // Valve's SteamOS rating for each game.
     "store.steampowered.com",
     // The Decky plugin store and the server its plugin files come from.

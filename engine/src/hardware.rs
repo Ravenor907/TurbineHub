@@ -511,7 +511,7 @@ impl Machine {
             wake_devices,
             windows_boot: windows_boot_entry(efibootmgr, &partition_uuids(&t)),
             steamos,
-            amdgpu_mask: turbinehub_helper::gpu::parse_mask(&t.text(turbinehub_helper::gpu::MASK_FILE)),
+            amdgpu_mask: turbinehub_helper::gpu::parse_mask(&t.text(turbinehub_helper::gpu::MASK_FILE)).or_else(|| if root == Path::new("/") { host_amdgpu_mask() } else { None }),
             kernel: t.text(turbinehub_helper::gpu::OSRELEASE),
         }
     }
@@ -563,4 +563,17 @@ pub fn device_of(path: &Path) -> String {
         let d = m.dev();
         format!("{}:{}", ((d >> 32) & 0xffff_f000) | ((d >> 8) & 0xfff), (d & 0xff) | ((d >> 12) & 0xffff_ff00))
     }).unwrap_or_default()
+}
+
+/// The graphics driver's feature mask as the machine has it. A Flatpak doesn't see /sys/module, so inside one it is
+/// asked of the host once and remembered (it can only change at a restart).
+fn host_amdgpu_mask() -> Option<u32> {
+    static MASK: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *MASK.get_or_init(|| {
+        if !Path::new("/.flatpak-info").exists() {
+            return None;
+        }
+        let out = std::process::Command::new("flatpak-spawn").args(["--host", "cat", turbinehub_helper::gpu::MASK_FILE]).output().ok()?;
+        out.status.success().then(|| turbinehub_helper::gpu::parse_mask(&String::from_utf8_lossy(&out.stdout))).flatten()
+    })
 }

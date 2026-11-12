@@ -176,7 +176,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             refresh()
         }
         "uv-on" => {
-            let Some(setting) = modules::gpu_overdrive(&m) else { return Some(toast("Graphics card tuning is for Radeon RX 7000 and RX 9000 cards only.")) };
+            let Some(setting) = modules::gpu_overdrive(&m) else { return Some(toast(if modules::undervolt_card(&m).is_some() { "The graphics driver's settings couldn't be read, so tuning can't be turned on right now." } else { "Graphics card tuning is for Radeon RX 7000 and RX 9000 cards." })) };
             let mut p = Plan::new(
                 "Turn on graphics card tuning?",
                 "It lets Turbine Hub give the graphics card a lower voltage. Too low makes games crash or the screen go black; nothing is damaged, and Turbine Hub turns it back off by itself if the machine stops.",

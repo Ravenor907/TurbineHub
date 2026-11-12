@@ -467,7 +467,7 @@ impl Agent {
             if !on.is_empty() {
                 self.boost_problem_told = false;
                 self.state.save(&self.paths.data);
-                out.extend(on.iter().map(|(path, value)| Do::Host(helper::set_now(path, value))));
+                out.push(Do::Host(helper::set_now_many(&on)));
                 let name = self.running.as_ref().map(|r| r.name.clone()).filter(|x| !x.is_empty());
                 self.note(now, &match name {
                     Some(name) => format!("Game Boost on for {name}"),
@@ -478,7 +478,7 @@ impl Agent {
             let before = std::mem::take(&mut self.state.boost_before);
             self.state.save(&self.paths.data);
             if helper {
-                out.extend(before.iter().map(|(path, value)| Do::Host(helper::set_now(path, value))));
+                out.push(Do::Host(helper::set_now_many(&before)));
             }
         }
         out
@@ -802,7 +802,7 @@ mod tests {
         let ids = running_games(&processes(&p.root));
         let start = a.games(100, &ids, &st, helper::installed(&p.root));
         assert!(matches!(&start[0], Do::Snapshot { name, .. } if name == "Hades II"));
-        assert_eq!(start.iter().filter(|d| matches!(d, Do::Host(line) if line.iter().any(|x| x == "set-now"))).count(), 2);
+        assert_eq!(start.iter().filter(|d| matches!(d, Do::Host(line) if line.iter().any(|x| x == "set-now"))).count(), 1);
         assert_eq!(a.screens(100, external_screen(&p.root), &l), vec![Do::Sinks]);
         let leds = crate::lights::leds(&p.root, &m.rgb_leds);
         assert!(!leds.is_empty() && leds.iter().all(|led| crate::lights::writable(&p.root, led)));
@@ -813,7 +813,7 @@ mod tests {
         // A desktop gets the game and Game Boost too, and no dock.
         let (p, _) = sample(&dir, Preset::Desktop);
         let mut a = Agent::start(p.clone(), "0.1", &machine(&p));
-        assert_eq!(a.games(100, &running_games(&processes(&p.root)), &st, true).len(), 3);
+        assert_eq!(a.games(100, &running_games(&processes(&p.root)), &st, true).len(), 2);
         assert_eq!(a.screens(100, external_screen(&p.root), &l), vec![]);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -889,9 +889,9 @@ mod tests {
         // A game started while Turbine Hub stays open is found behind it; a non-Steam game gets Game Boost but no
         // snapshot (Ludusavi is asked by Steam's id).
         let both = [hub.clone(), heron.clone()];
-        assert_eq!(a.games(14, &both, &on, true).len(), 2);
+        assert_eq!(a.games(14, &both, &on, true).len(), 1);
         assert_eq!(a.game(), format!("shortcut:{heron}"));
-        assert_eq!(a.games(100, std::slice::from_ref(&hub), &on, true).len(), 2);
+        assert_eq!(a.games(100, std::slice::from_ref(&hub), &on, true).len(), 1);
         assert_eq!(a.game(), "");
         assert_eq!(history::sessions(&a.paths.data)[0].name, "Heron's Flight");
     }
@@ -905,7 +905,8 @@ mod tests {
         // Without the privileged helper nothing can be set, so nothing is tried.
         assert_eq!(a.games(100, &["1145360".into()], &on, false), vec![]);
         let start = a.games(104, &["1145360".into()], &on, true);
-        assert_eq!(start, vec![Do::Host(helper::set_now("/sys/devices/system/cpu/cpufreq/policy0/energy_performance_preference", "performance")), Do::Host(helper::set_now("/sys/devices/system/cpu/cpufreq/policy1/energy_performance_preference", "performance"))]);
+        let epp = |n: u32, v: &str| (format!("/sys/devices/system/cpu/cpufreq/policy{n}/energy_performance_preference"), v.to_string());
+        assert_eq!(start, vec![Do::Host(helper::set_now_many(&[epp(0, "performance"), epp(1, "performance")]))]);
         // Still running: nothing more to do.
         assert_eq!(a.games(108, &["1145360".into()], &on, true), vec![]);
         assert_eq!(Report::load(&a.paths.data).game, Some(("steam:1145360".into(), "Hades II".into(), 100)));
@@ -915,7 +916,7 @@ mod tests {
         let mut again = Agent::start(p.clone(), "0.1", &machine(&p));
         assert_eq!(again.games(4000, &["1145360".into()], &on, true), vec![]);
         let end = again.games(4004, &[], &on, true);
-        assert_eq!(end, vec![Do::Host(helper::set_now("/sys/devices/system/cpu/cpufreq/policy0/energy_performance_preference", "balance_performance")), Do::Host(helper::set_now("/sys/devices/system/cpu/cpufreq/policy1/energy_performance_preference", "balance_power"))]);
+        assert_eq!(end, vec![Do::Host(helper::set_now_many(&[epp(0, "balance_performance"), epp(1, "balance_power")]))]);
         assert_eq!(again.games(4008, &[], &on, true), vec![]);
         assert_eq!(Report::load(&p.data).game, None);
         assert!(activity(&again).iter().any(|l| l == "Game Boost on for Hades II"));
@@ -927,7 +928,7 @@ mod tests {
         assert_eq!(activity(&again).iter().filter(|l| l.starts_with("Game Boost couldn't be set")).count(), 1);
         // Turning the setting off in the middle of a game puts things back right away.
         again.games(5000, &["1145360".into()], &on, true);
-        assert_eq!(again.games(5004, &["1145360".into()], &Settings::default(), true).len(), 2);
+        assert_eq!(again.games(5004, &["1145360".into()], &Settings::default(), true).len(), 1);
         assert_eq!(again.games(5008, &["1145360".into()], &Settings::default(), true), vec![]);
         // Off: a game changes nothing.
         let mut f = fixture("boost-off", Preset::Desktop);

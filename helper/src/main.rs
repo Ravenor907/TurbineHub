@@ -68,8 +68,20 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
         "verify" => sys.verify().map(|d| format!(",\"drift\":{}", list(&d))),
         "reapply" => sys.reapply().map(|f| format!(",\"fixed\":{}", list(&f))),
         "set-now" => {
+            // One value ({"path","value"}) or several at once ({"values":[{"path","value"},...]}), so Game Boost on a
+            // many-core processor is one call.
             let j = arg_json(arg)?;
-            sys.set_now(j.str_at("path").ok_or("path is missing")?, j.str_at("value").ok_or("value is missing")?).map(|_| String::new())
+            let pairs: Vec<(String, String)> = match j.get("values") {
+                Some(list) => list.as_array().iter().map(|v| Some((v.str_at("path")?.to_string(), v.str_at("value")?.to_string()))).collect::<Option<_>>().ok_or("A value is missing its path or value")?,
+                None => vec![(j.str_at("path").ok_or("path is missing")?.to_string(), j.str_at("value").ok_or("value is missing")?.to_string())],
+            };
+            if pairs.is_empty() || pairs.len() > 512 {
+                return Err("Between 1 and 512 values".into());
+            }
+            for (p, v) in &pairs {
+                sys.set_now(p, v)?;
+            }
+            Ok(String::new())
         }
         "decky-install" => {
             let j = arg_json(arg)?;

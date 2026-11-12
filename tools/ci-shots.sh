@@ -1,6 +1,7 @@
 #!/bin/sh
 # Takes Turbine Hub's pictures with the installed Flatpak and runs the checks each picture carries.
 #   tools/ci-shots.sh [1280x800|1920x1080|1600x900|all] [out dir, default shots]
+#   tools/ci-shots.sh <size> <shard> <shards>      one shard of a size, into shots/ (CI)
 # The app lists its pictures (turbinehub --shots: one "<name> <arguments>" line each) and draws them with fake data
 # of its own, so nothing here depends on this PC. Each picture lands in <out>/<size>/<name>.png with its log beside
 # it. 1600x900 is a Desktop Mode window (--window). Fails when a picture is missing or a check fails.
@@ -10,6 +11,14 @@ set -u
 APP=io.github.ravenor907.TurbineHub
 part=${1:-all}
 out=${2:-shots}
+# CI splits each size over shards: tools/ci-shots.sh <size> <shard> <shards> takes every <shards>-th picture
+# starting at <shard>, into shots/.
+shard=0
+shards=1
+case "$out" in
+  ''|*[!0-9]*) ;;
+  *) shard=$out; shards=${3:-1}; out=shots ;;
+esac
 case "$part" in
   1280x800|1920x1080|1600x900) sizes=$part ;;
   all) sizes="1280x800 1920x1080 1600x900" ;;
@@ -45,8 +54,11 @@ for size in $sizes; do
   mkdir -p "$out/$size"
   extra=""
   [ "$size" = 1600x900 ] && extra="--window"
+  index=-1
   while read -r name args; do
     case "$name" in ""|"#"*) continue ;; esac
+    index=$((index + 1))
+    [ $((index % shards)) -eq "$shard" ] || continue
     total=$((total + 1))
     png="$out/$size/$name.png"
     log="$out/$size/$name.log"

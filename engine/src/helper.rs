@@ -25,6 +25,12 @@ pub fn undo(id: u64) -> Vec<String> {
     job("undo", Some(&format!("{{\"id\":{id}}}")))
 }
 
+/// Several /sys values at once, in one helper call.
+pub fn set_now_many(values: &[(String, String)]) -> Vec<String> {
+    let items: Vec<String> = values.iter().map(|(p, v)| format!("{{\"path\":{},\"value\":{}}}", json::quote(p), json::quote(v))).collect();
+    job("set-now", Some(&format!("{{\"values\":[{}]}}", items.join(","))))
+}
+
 pub fn set_now(path: &str, value: &str) -> Vec<String> {
     job("set-now", Some(&format!("{{\"path\":{},\"value\":{}}}", json::quote(path), json::quote(value))))
 }

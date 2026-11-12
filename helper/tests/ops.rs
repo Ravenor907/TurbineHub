@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use turbinehub_helper::gpu;
 use turbinehub_helper::json::parse;
 use turbinehub_helper::ops::{self, Owner, Run, Sys};
 use turbinehub_helper::policy::{self, Setting};
@@ -16,6 +17,9 @@ struct Fake {
     decky_digest: String,
     efi: String,
     fail_modprobe: bool,
+    /// The graphics driver standing in: the lowest offset it takes, and the one waiting for "c".
+    od_min: i32,
+    od_pending: Option<i32>,
 }
 
 impl Run for Fake {
@@ -46,6 +50,31 @@ impl Run for Fake {
             }
             (ops::EFIBOOTMGR, []) => Ok(self.efi.clone()),
             _ => Ok(String::new()),
+        }
+    }
+
+    /// The driver: "vo N" is checked against its range (EINVAL past it) and waits; "c" commits it to the file. Each
+    /// write is recorded with the power limit the card had at that moment.
+    fn od(&mut self, file: &std::path::Path, command: &str) -> std::io::Result<()> {
+        let cap = fs::read_to_string(file.parent().unwrap().join("hwmon/hwmon3/power1_cap")).unwrap_or_default();
+        self.calls.push(format!("od {command} (cap {})", cap.trim()));
+        let einval = || std::io::Error::from_raw_os_error(22);
+        match command.split_whitespace().collect::<Vec<_>>()[..] {
+            ["vo", n] => {
+                let v: i32 = n.parse().map_err(|_| einval())?;
+                if v < self.od_min || v > 0 {
+                    return Err(einval());
+                }
+                self.od_pending = Some(v);
+                Ok(())
+            }
+            ["c"] => {
+                if let Some(v) = self.od_pending.take() {
+                    fs::write(file, gpu::od_rx9000(v))?;
+                }
+                Ok(())
+            }
+            _ => Err(einval()),
         }
     }
 }
@@ -259,9 +288,16 @@ fn install_and_uninstall() {
     assert!(sys.run.calls.iter().any(|c| c == "systemctl enable turbinehub-reapply.service"));
     // SteamOS keeps only the files a keep list names when it updates: every file of Turbine Hub's is on it.
     let keep = read(&sys, ops::KEEP_LIST);
-    for f in policy::FILES.iter().copied().chain([ops::POLKIT_RULE, ops::REAPPLY_UNIT]) {
+    for f in policy::FILES.iter().copied().chain([ops::POLKIT_RULE, ops::REAPPLY_UNIT, gpu::GUARD_UNIT, gpu::SLEEP_UNIT]) {
         assert!(keep.lines().any(|l| l == f), "{f} isn't kept");
     }
+    assert!(keep.lines().any(|l| l == policy::AMDGPU_FILE));
+    // The graphics card voltage guard: it notices a stop while armed at boot, and clears its mark at a clean
+    // shutdown and before a sleep.
+    let guard = read(&sys, gpu::GUARD_UNIT);
+    assert!(guard.contains("ExecStart=/var/lib/turbinehub/bin/turbinehub-helper gpu-guard boot") && guard.contains("ExecStop=/var/lib/turbinehub/bin/turbinehub-helper gpu-guard stop") && guard.contains("RemainAfterExit=yes"));
+    assert!(read(&sys, gpu::SLEEP_UNIT).contains("Before=sleep.target") && read(&sys, gpu::SLEEP_UNIT).contains("WantedBy=sleep.target"));
+    assert!(sys.run.calls.iter().any(|c| c == "systemctl enable --now turbinehub-gpu-guard.service") && sys.run.calls.iter().any(|c| c == "systemctl enable turbinehub-gpu-sleep.service"));
     assert!(keep.lines().all(|l| l.starts_with("##") || l.starts_with("/etc/")));
     sys.apply(set(r#"{"kind":"sysctl","key":"vm.page-cluster","value":0}"#)).unwrap();
     // A SteamOS update from before the keep list: /etc is wiped but for the unit. The next start puts the rule,
@@ -278,6 +314,242 @@ fn install_and_uninstall() {
     sys.uninstall().unwrap();
     assert_eq!(read(&sys, "/proc/sys/vm/page-cluster"), "3\n");
     assert!(!sys.p(ops::STATE_DIR).exists() && !sys.p(ops::POLKIT_RULE).exists() && !sys.p(ops::KEEP_LIST).exists());
+    assert!(!sys.p(gpu::GUARD_UNIT).exists() && !sys.p(gpu::SLEEP_UNIT).exists());
+}
+
+// ---------------------------------------------------------------- graphics card voltage
+
+const SLOT: &str = "0000:03:00.0";
+const OD: &str = "/sys/bus/pci/devices/0000:03:00.0/pp_od_clk_voltage";
+const CAP: &str = "/sys/class/drm/card1/device/hwmon/hwmon3/power1_cap";
+const BOOT: &str = "bc4d8459-eade-421c-9f99-4fa13ff81b4e";
+
+/// The made-up machine with an RX 9070 XT in slot 0000:03:00.0 (the same card as card1), overdrive off, the guard's
+/// units set up.
+fn rx9070(tag: &str) -> Sys<Fake> {
+    let mut sys = machine(tag);
+    let w = |sys: &Sys<Fake>, p: &str, t: &str| {
+        let f = sys.p(p);
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(f, t).unwrap();
+    };
+    let dev = "/sys/devices/card1";
+    for (f, v) in [("vendor", "0x1002"), ("device", "0x7550"), ("subsystem_vendor", "0x1eae"), ("subsystem_device", "0x8811"), ("ip_discovery/die/0/MP1/0/major", "14"), ("ip_discovery/die/0/MP1/0/minor", "0"), ("ip_discovery/die/0/MP1/0/revision", "3")] {
+        w(&sys, &format!("{dev}/{f}"), &format!("{v}\n"));
+    }
+    std::os::unix::fs::symlink("../../../bus/pci/drivers/amdgpu", sys.p(&format!("{dev}/driver"))).unwrap();
+    fs::create_dir_all(sys.p("/sys/bus/pci/devices")).unwrap();
+    std::os::unix::fs::symlink("../../../devices/card1", sys.p("/sys/bus/pci/devices/0000:03:00.0")).unwrap();
+    w(&sys, gpu::MASK_FILE, "0xfff7bfff\n");
+    w(&sys, gpu::OSRELEASE, "7.2.7-valve2-2-neptune-72\n");
+    w(&sys, gpu::BOOT_ID, &format!("{BOOT}\n"));
+    w(&sys, gpu::GUARD_UNIT, "unit");
+    w(&sys, gpu::SLEEP_UNIT, "unit");
+    sys.run.od_min = -200;
+    sys
+}
+
+/// The same machine after the restart that turned overdrive on: the voltage file is there, at `offset`.
+fn overdrive_on(sys: &Sys<Fake>, offset: i32) {
+    fs::write(sys.p(gpu::MASK_FILE), "0xfff7ffff\n").unwrap();
+    fs::write(sys.p(OD), gpu::od_rx9000(offset)).unwrap();
+}
+
+fn voltage(offset: i32) -> Setting {
+    set(&format!(r#"{{"kind":"gpu-voltage","slot":"{SLOT}","device":"1002:7550","subsystem":"1eae:8811","offset":{offset}}}"#))
+}
+
+fn job(sys: &mut Sys<Fake>, what: &str, offset: Option<i32>) -> Result<i32, String> {
+    let extra = offset.map(|o| format!(r#","offset":{o}"#)).unwrap_or_default();
+    sys.gpu_job(&parse(&format!(r#"{{"do":"{what}","slot":"{SLOT}","device":"1002:7550","subsystem":"1eae:8811"{extra}}}"#)).unwrap())
+}
+
+fn od_calls(sys: &Sys<Fake>) -> Vec<String> {
+    sys.run.calls.iter().filter(|c| c.starts_with("od ")).cloned().collect()
+}
+
+#[test]
+fn overdrive_is_written_from_the_live_mask_on_rx_7000_and_9000_only() {
+    let mut sys = rx9070("overdrive");
+    let od = |mask: &str, kernel: &str| set(&format!(r#"{{"kind":"gpu-overdrive","mask":"{mask}","kernel":"{kernel}"}}"#));
+    // Another mask than the driver's own plus the bit, or another kernel, is refused.
+    assert!(sys.apply(od("0xfffeffff", "7.2.7-valve2-2-neptune-72")).unwrap_err().contains("0xfff7bfff"));
+    assert!(sys.apply(od("0xfff7ffff", "6.11.11-valve1")).is_err());
+    let id = sys.apply(od("0xfff7ffff", "7.2.7-valve2-2-neptune-72")).unwrap();
+    let file = read(&sys, policy::AMDGPU_FILE);
+    assert!(file.ends_with("options amdgpu ppfeaturemask=0xfff7ffff\n"), "{file}");
+    // Nothing changes before the restart, and nothing is run for it.
+    assert!(!sys.run.calls.iter().any(|c| c.starts_with("modprobe")));
+    assert!(sys.verify().unwrap().is_empty());
+    // A SteamOS update drops /etc but its keep list: the reapply unit writes it again.
+    fs::remove_file(sys.p(policy::AMDGPU_FILE)).unwrap();
+    sys.reapply().unwrap();
+    assert!(sys.p(policy::AMDGPU_FILE).exists());
+    sys.undo(id).unwrap();
+    assert!(!sys.p(policy::AMDGPU_FILE).exists());
+    // An RX 6000 card (SMU 11.0.7) or a handheld's chip is never offered it.
+    fs::write(sys.p("/sys/devices/card1/ip_discovery/die/0/MP1/0/major"), "11\n").unwrap();
+    fs::write(sys.p("/sys/devices/card1/ip_discovery/die/0/MP1/0/revision"), "7\n").unwrap();
+    assert!(sys.apply(od("0xfff7ffff", "7.2.7-valve2-2-neptune-72")).unwrap_err().contains("RX 7000 and RX 9000"));
+}
+
+#[test]
+fn an_offset_needs_tuning_on_a_range_and_an_up_to_date_helper() {
+    let mut sys = rx9070("needs");
+    assert!(job(&mut sys, "try", Some(-30)).unwrap_err().contains("restart"));
+    // RX 6000: an offset without a range.
+    fs::write(sys.p(OD), gpu::OD_RX6000).unwrap();
+    assert_eq!(job(&mut sys, "try", Some(-30)).unwrap_err(), gpu::NO_RANGE);
+    overdrive_on(&sys, 0);
+    // Out of Turbine Hub's own range, off the 5 mV steps, another card in the slot.
+    assert!(job(&mut sys, "try", Some(-155)).is_err() && job(&mut sys, "try", Some(-33)).is_err() && job(&mut sys, "try", Some(5)).is_err());
+    let other = sys.gpu_job(&parse(&format!(r#"{{"do":"try","slot":"{SLOT}","device":"1002:744c","subsystem":"1eae:8811","offset":-30}}"#)).unwrap());
+    assert!(other.unwrap_err().contains("isn't in this machine"));
+    fs::remove_file(sys.p(gpu::GUARD_UNIT)).unwrap();
+    assert!(job(&mut sys, "try", Some(-30)).unwrap_err().contains("needs an update"));
+    assert!(od_calls(&sys).is_empty());
+}
+
+#[test]
+fn a_try_arms_the_guard_writes_vo_then_c_and_records_nothing() {
+    let mut sys = rx9070("try");
+    overdrive_on(&sys, 0);
+    assert_eq!(job(&mut sys, "try", Some(-30)), Ok(-30));
+    assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 220000000)", "od c (cap 220000000)"]);
+    assert_eq!(gpu::parse_od(&read(&sys, OD)).offset, Some(-30));
+    assert_eq!(gpu::parse_armed(&read(&sys, gpu::ARMED)), Some((BOOT.to_string(), 1000, -30)));
+    assert!(sys.ledger().unwrap().entries.is_empty());
+    // Nobody kept it: back to the card's own voltage. The mark says 0 now, which trips nothing.
+    assert_eq!(job(&mut sys, "back", None), Ok(0));
+    assert_eq!(gpu::parse_od(&read(&sys, OD)).offset, Some(0));
+    assert_eq!(gpu::parse_armed(&read(&sys, gpu::ARMED)).map(|a| a.2), Some(0));
+    fs::write(sys.p(gpu::BOOT_ID), "another-boot\n").unwrap();
+    assert_eq!(sys.gpu_guard("boot"), Ok(false));
+    assert!(!sys.p(gpu::TRIPPED).exists());
+    fs::write(sys.p(gpu::BOOT_ID), format!("{BOOT}\n")).unwrap();
+    // The driver refuses what its own range doesn't take (EINVAL), and says so plainly.
+    sys.run.od_min = -50;
+    let e = job(&mut sys, "try", Some(-60)).unwrap_err();
+    assert!(e.starts_with("The graphics card refused -60 mV"), "{e}");
+}
+
+#[test]
+fn kept_the_power_limit_goes_first_and_every_limit_change_commits_the_offset_again() {
+    let mut sys = rx9070("keep");
+    overdrive_on(&sys, 0);
+    let cap = |w: u64| set(&format!(r#"{{"kind":"sysfs","path":"{CAP}","value":"{}"}}"#, w * 1_000_000));
+    sys.apply(cap(250)).unwrap();
+    // Something else set the limit since (Steam, a reset): the recorded one goes in before the offset.
+    fs::write(sys.p(CAP), "304000000\n").unwrap();
+    let id = sys.apply(voltage(-30)).unwrap();
+    assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 250000000)", "od c (cap 250000000)"]);
+    assert_eq!(sys.ledger().unwrap().find_key("gpu-voltage:0000:03:00.0").unwrap().id, id);
+    // Kernel 7.2 drops the offset when the limit changes after it: the slider's next limit commits it again.
+    sys.run.calls.clear();
+    sys.apply(cap(280)).unwrap();
+    assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 280000000)", "od c (cap 280000000)"]);
+    // So does a power limit put back by Undo, and one set for the session.
+    sys.run.calls.clear();
+    let cap_id = sys.ledger().unwrap().find_key(&format!("sysfs:{CAP}")).unwrap().id;
+    sys.undo(cap_id).unwrap();
+    assert_eq!(od_calls(&sys).len(), 2);
+    sys.run.calls.clear();
+    sys.set_now(CAP, "260000000").unwrap();
+    assert_eq!(od_calls(&sys).len(), 2);
+    // Undo takes the card back to its own voltage.
+    sys.run.calls.clear();
+    sys.undo(id).unwrap();
+    assert_eq!(od_calls(&sys), vec!["od vo 0 (cap 260000000)", "od c (cap 260000000)"]);
+    assert!(!sys.p(gpu::ARMED).exists());
+}
+
+#[test]
+fn the_boot_never_puts_an_offset_back_and_a_wake_commits_it_again() {
+    let mut sys = rx9070("boot");
+    overdrive_on(&sys, 0);
+    sys.apply(set(&format!(r#"{{"kind":"sysfs","path":"{CAP}","value":"250000000"}}"#))).unwrap();
+    sys.apply(voltage(-30)).unwrap();
+    // A restart: the card starts at 0. The boot unit puts the power limit back, never the offset.
+    fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
+    sys.run.calls.clear();
+    sys.reapply().unwrap();
+    assert!(od_calls(&sys).is_empty());
+    assert!(!sys.verify().unwrap().iter().any(|d| d.contains("voltage")));
+    // The background helper puts it back once the session is up.
+    assert_eq!(job(&mut sys, "start", None), Ok(-30));
+    assert_eq!(od_calls(&sys).len(), 2);
+    // Already there: nothing is written.
+    sys.run.calls.clear();
+    assert_eq!(job(&mut sys, "start", None), Ok(-30));
+    assert!(od_calls(&sys).is_empty());
+    // After a wake the same unit writes the power limit again: the offset goes in again after it.
+    sys.reapply().unwrap();
+    assert_eq!(od_calls(&sys), vec!["od vo -30 (cap 250000000)", "od c (cap 250000000)"]);
+}
+
+#[test]
+fn a_stop_while_armed_trips_the_offset_and_nothing_puts_it_back() {
+    let mut sys = rx9070("guard");
+    overdrive_on(&sys, 0);
+    sys.apply(voltage(-60)).unwrap();
+    assert!(sys.p(gpu::ARMED).exists());
+    // The guard's start in the same boot (the unit started again) changes nothing.
+    assert_eq!(sys.gpu_guard("boot"), Ok(false));
+    assert!(sys.p(gpu::ARMED).exists());
+    // The machine went down: the next start has another boot id.
+    fs::write(sys.p(gpu::BOOT_ID), "another-boot\n").unwrap();
+    fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
+    assert_eq!(sys.gpu_guard("boot"), Ok(true));
+    assert_eq!(gpu::parse_tripped(&read(&sys, gpu::TRIPPED)).map(|t| t.0), Some(-60));
+    assert!(!sys.p(gpu::ARMED).exists());
+    // The background helper's start is refused, and a try nobody keeps goes back to 0, not to the tripped value.
+    assert!(job(&mut sys, "start", None).unwrap_err().contains("stopped unexpectedly"));
+    assert_eq!(job(&mut sys, "try", Some(-40)), Ok(-40));
+    assert_eq!(job(&mut sys, "back", None), Ok(0));
+    // Keeping a smaller step clears the trip.
+    sys.apply(voltage(-40)).unwrap();
+    assert!(!sys.p(gpu::TRIPPED).exists());
+    // A clean shutdown and a sleep clear the mark: the next start trips nothing.
+    sys.gpu_guard("stop").unwrap();
+    assert!(!sys.p(gpu::ARMED).exists());
+    job(&mut sys, "start", None).unwrap();
+    sys.run.od_pending = None;
+    fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
+    job(&mut sys, "start", None).unwrap();
+    sys.gpu_guard("sleep").unwrap();
+    fs::write(sys.p(gpu::BOOT_ID), "third-boot\n").unwrap();
+    assert_eq!(sys.gpu_guard("boot"), Ok(false));
+    assert!(!sys.p(gpu::TRIPPED).exists());
+    // Safe reset: 0, the record and the trip gone.
+    assert_eq!(job(&mut sys, "reset", None), Ok(0));
+    assert!(sys.ledger().unwrap().entries.is_empty());
+}
+
+#[test]
+fn the_mark_clears_after_ten_minutes_and_a_reset_card_trips() {
+    let mut sys = rx9070("reset");
+    overdrive_on(&sys, 0);
+    sys.apply(voltage(-30)).unwrap();
+    // Too early: the mark stays.
+    sys.now = 1000 + 300;
+    job(&mut sys, "disarm", None).unwrap();
+    assert!(sys.p(gpu::ARMED).exists());
+    sys.now = 1000 + gpu::ARMED_SECS;
+    job(&mut sys, "disarm", None).unwrap();
+    assert!(!sys.p(gpu::ARMED).exists());
+    // While it reads -30 there is nothing to trip.
+    job(&mut sys, "trip", None).unwrap();
+    assert!(!sys.p(gpu::TRIPPED).exists());
+    // A player's try of 0 is no reset either.
+    job(&mut sys, "try", Some(0)).unwrap();
+    job(&mut sys, "trip", None).unwrap();
+    assert!(!sys.p(gpu::TRIPPED).exists());
+    job(&mut sys, "back", None).unwrap();
+    let _ = fs::remove_file(sys.p(gpu::ARMED));
+    // The driver reset the card (a ring timeout): it reads 0 without anyone asking.
+    fs::write(sys.p(OD), gpu::od_rx9000(0)).unwrap();
+    job(&mut sys, "trip", None).unwrap();
+    assert_eq!(gpu::parse_tripped(&read(&sys, gpu::TRIPPED)).map(|t| t.0), Some(-30));
 }
 
 #[test]

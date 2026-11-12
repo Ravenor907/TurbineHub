@@ -53,7 +53,11 @@ fn knows_a_desktop_its_screens_and_drives() {
     assert_eq!(m.memory_gb, 62);
     let g = m.main_gpu().unwrap();
     assert_eq!((g.vendor, g.pci_id.as_str(), g.driver.as_str(), g.drives_screen), (GpuVendor::Amd, "1002:7550", "amdgpu", true));
-    assert_eq!(g.power_cap.as_ref().unwrap().2, 304_000_000);
+    assert_eq!(g.power_cap.as_ref().unwrap().2, 340_000_000);
+    // Above the card's own 304 W the driver refuses while overdrive is off.
+    assert_eq!((g.power_cap_default, g.power_max(false), g.power_max(true)), (Some(304_000_000), Some(304_000_000), Some(340_000_000)));
+    assert_eq!((g.slot.as_str(), g.subsystem.as_str(), g.mp1), ("0000:03:00.0", "1eae:8811", Some((14, 0, 3))));
+    assert!(g.undervolt_family() && g.od.is_none() && !m.overdrive_on() && m.kernel.starts_with("7.2.7"));
     assert!(g.power_cap.as_ref().unwrap().0.ends_with("/hwmon/hwmon6/power1_cap"));
     let screens: Vec<_> = m.connected_displays().collect();
     assert_eq!(screens.len(), 1);

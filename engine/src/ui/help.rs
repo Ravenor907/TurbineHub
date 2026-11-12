@@ -186,7 +186,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             &[("1", "Press the Steam button and open Settings, then Display."), ("2", "Under the external display's settings, pick the highest refresh rate it offers. Some screens show it only with Advanced settings on."), ("Desktop Mode", "There, My machine, Monitors sets it with one press.")],
         ),
         "help:screens" => guide("Which screen Game Mode uses", "Game Mode shows one screen at a time. Steam picks it; Desktop Mode uses all of them.", &[("1", "Press the Steam button and open Settings, then Display."), ("2", "Pick the screen there when it offers a choice. With only one screen plugged in, Game Mode always uses that one.")]),
-        "sleep" | "monitors" | "drives" | "battery" => open(&format!("module:{arg}")),
+        "sleep" | "monitors" | "drives" | "battery" | "gpu" => open(&format!("module:{arg}")),
         _ => return None,
     })
 }

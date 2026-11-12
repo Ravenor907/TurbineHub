@@ -19,7 +19,7 @@ import TurbineHub
 // app (required): Main.qml's window. show(d): opens it with the engine's dialog. close(): closes it. Two dialogs
 // are answered here instead of by the engine: `local: "quit"` closes Turbine Hub on confirm, and `keep` (a change
 // that could leave the screen unreadable) counts down `keep.seconds` in its words ("{n}") and then goes back by
-// sending `keep.act`, as Cancel does.
+// sending `keep.act`, as Cancel does; Keep sends `keep.keepAct` with `keep.keepValue` when it has one.
 Item {
     id: dlg
     required property var app
@@ -76,7 +76,8 @@ Item {
     }
     function confirm() {
         if (d && d.local === "quit") { app.quit(); return }
-        if (d && d.keep) { close(); return }
+        // Kept: what was tried may need recording too (`keepAct`, a graphics card voltage).
+        if (d && d.keep) { const k = d.keep; close(); if (k.keepAct) app.doAct(k.keepAct, k.keepArg || "", k.keepValue || ""); return }
         // A press of the window's own making (Files): the dialog closes, then the press is made with what was typed.
         if (d && d.then) { const t = d.then, text = d.input ? typedBox.text : (t.value || ""); close(); app.doAct(t.act, t.arg || "", text); return }
         if (!typed) { error = ask === "new" ? "Type the new password in both boxes first." : "Type the password first."; return }

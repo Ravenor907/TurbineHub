@@ -15,7 +15,9 @@ import QtQuick.Layouts
 // newest value and its line say in words what the picture shows), meter (how full something is: a bar filled to
 // `part`, 0 to 1, in the warning color when the row's `tone` is "warn"; its words say the same, so the bar is
 // only a picture of them). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up
-// and Down move between the lines of cards.
+// and Down move between the lines of cards. A slider with `showFrom` shows where it starts and where it goes while
+// it moves, and its `notes` ({below, text}) each show a warning line while the value is below the mark. A row with
+// `alert` (a warning to read first) has a border in the stop color.
 //
 // app (required): Main.qml's window. m (required): the row.
 Focusable {
@@ -86,12 +88,13 @@ Focusable {
         return false
     }
 
+    // A warning that must be read first (`alert`) has a border in the stop color around it.
     Rectangle {
         anchors.fill: parent
         radius: r.app.px(10)
         color: r.app.colors.panel
-        border.width: Math.max(1, r.app.px(1))
-        border.color: r.app.colors.line
+        border.width: r.m.alert === true ? Math.max(2, r.app.px(2)) : Math.max(1, r.app.px(1))
+        border.color: r.m.alert === true ? r.app.colors.stop : r.app.colors.line
     }
     ColumnLayout {
         id: body
@@ -121,7 +124,8 @@ Focusable {
             Label {
                 app: r.app
                 visible: text !== ""
-                text: r.kind === "slider" ? r.val + (r.m.unit || "") : (r.m.value !== undefined && r.kind !== "input" ? r.m.value : "")
+                // A slider that shows where it starts (`showFrom`) says both while it is moved: "0 mV → -30 mV".
+                text: r.kind === "slider" ? (r.m.showFrom === true && r.val !== r.m.value ? r.m.value + (r.m.unit || "") + " → " + r.val + (r.m.unit || "") : r.val + (r.m.unit || "")) : (r.m.value !== undefined && r.kind !== "input" ? r.m.value : "")
                 color: r.app.colors.accentText
                 font.pixelSize: r.app.fpx(17)
                 font.weight: Font.DemiBold
@@ -190,6 +194,17 @@ Focusable {
                 }
             }
             Label { app: r.app; visible: text !== ""; text: r.m.high || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }
+        }
+        // A slider's warnings (`notes`: {below, text}): each shows while the value is below its mark.
+        Repeater {
+            model: r.kind === "slider" ? (r.m.notes || []).filter(x => r.val < x.below) : []
+            delegate: RowLayout {
+                required property var modelData
+                Layout.fillWidth: true
+                spacing: r.app.px(8)
+                Icon { app: r.app; d: r.app.icons.warn; size: 18; tint: r.app.colors.warn }
+                Label { app: r.app; Layout.fillWidth: true; text: modelData.text; font.pixelSize: r.app.fpx(15); color: r.app.colors.warn }
+            }
         }
         // A small chart: one line over time, the area under it tinted, a gap where nothing was read. The scale's two
         // ends are named at the left and the time's two ends underneath, so no value has to be guessed.

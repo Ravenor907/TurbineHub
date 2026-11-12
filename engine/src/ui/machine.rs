@@ -108,7 +108,14 @@ pub(crate) fn about(id: &str) -> (&'static str, Vec<(&'static str, &'static str)
         ),
         "gpu" => (
             "The graphics card and how much power it may draw.",
-            vec![("Power limit", "Lower is cooler and quieter and costs a little speed. The card's own range is the slider's."), ("Safe reset", "Puts the limit back to what it was before Turbine Hub changed it."), ("Nvidia", "Nvidia support on SteamOS is experimental, so its controls are few.")],
+            vec![
+                ("Power limit", "Lower is cooler and quieter and costs a little speed. The card's own range is the slider's, up to its own limit (above it the driver refuses unless tuning is on)."),
+                ("Safe reset", "Puts the limit back to what it was before Turbine Hub changed it."),
+                ("Undervolting (Veteran mode)", "A lower voltage for Radeon RX 7000 and RX 9000 cards, under Advanced. Too low makes games crash or the screen go black; nothing is damaged. It needs graphics card tuning on (a restart, and the system log marked as tuned)."),
+                ("Try and Keep", "A new value runs for 15 seconds and goes back by itself unless you press Keep. A kept value comes back a minute into each start, never at boot."),
+                ("If the machine stops", "A value that was new when the machine stopped is turned off at the next start and never put back by itself. Safe reset always goes back to the card's own voltage at once."),
+                ("Nvidia", "Nvidia support on SteamOS is experimental, so its controls are few."),
+            ],
         ),
         "drives" => (
             "Every drive in this machine and what it is used for.",
@@ -514,7 +521,8 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                 if g.vendor == GpuVendor::Nvidia {
                     rows.push(row("none", "", "info", "Nvidia on SteamOS is experimental", "Games run through Valve's and Nvidia's shared work. Game Mode, HDR and VRR can misbehave."));
                 }
-                if let Some((_, min, max, now)) = &g.power_cap {
+                if let (Some((_, min, _, now)), Some(max)) = (&g.power_cap, g.power_max(m.overdrive_on())) {
+                    // Above the card's own limit the driver refuses unless overdrive is on: the slider stops there.
                     let mut r = row("gpu-power", "", "slider", "Power limit", "Lower is cooler and quieter. A applies it.");
                     for (k, v) in [("min", min.div_ceil(1_000_000)), ("max", max / 1_000_000), ("value", (now + 500_000) / 1_000_000), ("step", 5)] {
                         r = with(r, k, n(v as f64));
@@ -523,7 +531,9 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
                     rows.push(with(with(row("gpu-reset", "", "button", "Safe reset", "Back to the card's own limit"), "button", s("Reset")), "icon", s("restore")));
                 }
             }
-            ("Graphics card".into(), String::new(), vec![section("", rows)])
+            let mut sections = vec![section("", rows)];
+            sections.extend(super::undervolt::section_rows(ui, &m));
+            ("Graphics card".into(), String::new(), sections)
         }
         "monitors" => {
             let mut out = Vec::new();
@@ -799,6 +809,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
             })
         }
         "light" | "light-test" | "light-report" | "light-answer" | "light-rival" => super::lighting::act(ui, action, arg, value),
+        a if a.starts_with("uv-") => super::undervolt::act(ui, action, arg, value),
         "monitor" => {
             let (what, name) = arg.split_once('|')?;
             let d = m.connected_displays().find(|d| output_name(&d.connector) == name)?;

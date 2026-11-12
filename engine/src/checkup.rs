@@ -56,6 +56,9 @@ pub struct Facts {
     pub tiles_without_art: usize,
     /// Pictures Turbine Hub drew for such entries that are still there (`tile_art::drawn`): Undo takes them back.
     pub tiles_drawn: usize,
+    /// Graphics card undervolting (Veteran mode): a value that tripped (true: to look at), one on probation or a
+    /// restart that is due, as (look, title, line).
+    pub undervolt: Option<(bool, String, String)>,
 }
 
 /// One screen as Desktop Mode has it set now.
@@ -194,6 +197,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     if f.decky_stopped {
         out.push(item("decky", Level::Look, "restore", "Decky Loader is missing after a SteamOS update".into(), "Your plugins are still here, but the loader that runs them is gone. Repair installs it again.", ("Repair", "decky-repair")));
+    }
+    if let Some((look, title, line)) = &f.undervolt {
+        out.push(item("undervolt", if *look { Level::Look } else { Level::Tip }, "gauge", title.clone(), line.clone(), ("Open", "gpu")));
     }
     if !f.updates.is_empty() {
         let n = f.updates.len();

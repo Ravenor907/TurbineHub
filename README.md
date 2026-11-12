@@ -169,6 +169,13 @@ sees of the lights into one text file to send with a problem.
 </details>
 
 <details>
+<summary><b>Advanced</b></summary>
+
+**GPU undervolt** (Veteran mode, Radeon RX 7000 and RX 9000 only): a lower graphics card voltage, tried for 15 seconds before it is kept, put back a minute into each start and turned off by itself if the machine stops; it needs graphics card tuning on (a restart, and the system log marked as tuned).
+
+</details>
+
+<details>
 <summary><b>Background helper</b></summary>
 
 Optional, off until you turn it on, no password needed. While you play it runs Game Boost, takes save snapshots,

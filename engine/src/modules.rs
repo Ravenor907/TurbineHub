@@ -1,7 +1,7 @@
 //! My machine: one card per thing this machine has, in a fixed order per kind of machine, and the helper settings
 //! each control turns into. Nothing here touches the system; the app sends the settings to the helper.
 
-use crate::hardware::{DriveRole, GpuVendor, Kind, Machine};
+use crate::hardware::{DriveRole, Gpu, GpuVendor, Kind, Machine};
 use crate::helper::{Access, Ledger, Setting};
 use crate::tuneup::{self, State};
 use std::path::Path;
@@ -113,10 +113,59 @@ pub fn tdp(m: &Machine, watts: u64) -> Vec<Setting> {
     m.power_limits.iter().map(|p| Setting::Sysfs { path: p.path.clone(), value: watts.clamp(p.min, p.max).to_string() }).collect()
 }
 
-/// The main graphics card's power limit in watts, within the driver's range. None without one.
+/// The main graphics card's power limit in watts, within the driver's range. Above the card's own default the
+/// driver refuses unless overdrive is on, so the top is the default then. None without one.
 pub fn gpu_power(m: &Machine, watts: u64) -> Option<Setting> {
-    let (path, min, max, _) = m.main_gpu()?.power_cap.clone()?;
+    let g = m.main_gpu()?;
+    let (path, min, _, _) = g.power_cap.clone()?;
+    let max = g.power_max(m.overdrive_on())?;
     Some(Setting::Sysfs { path, value: (watts * 1_000_000).clamp(min, max).to_string() })
+}
+
+/// The graphics card undervolting is offered on: the main card of a desktop, a Radeon RX 7000 or RX 9000 on
+/// amdgpu, in a slot the helper can name. Handhelds and laptops never: their chips' limits are the maker's.
+pub fn undervolt_card(m: &Machine) -> Option<&Gpu> {
+    let g = m.main_gpu()?;
+    (m.kind == Kind::Desktop && g.undervolt_family() && !g.slot.is_empty()).then_some(g)
+}
+
+/// The main card is an AMD card on a desktop, but not one undervolting is offered on (RX 6000 and older): the
+/// section says so.
+pub fn undervolt_unsupported(m: &Machine) -> bool {
+    m.kind == Kind::Desktop && m.main_gpu().is_some_and(|g| g.vendor == GpuVendor::Amd && g.power_cap.is_some()) && undervolt_card(m).is_none()
+}
+
+/// Overdrive on for the card undervolting is offered on: the driver's live mask with the overdrive bit added,
+/// recorded with this kernel. Takes effect at the next start.
+pub fn gpu_overdrive(m: &Machine) -> Option<Setting> {
+    undervolt_card(m)?;
+    let mask = m.amdgpu_mask?;
+    Some(Setting::GpuOverdrive { mask: mask | turbinehub_helper::gpu::OVERDRIVE_BIT, kernel: m.kernel.clone() })
+}
+
+/// A voltage offset (mV) for the card undervolting is offered on.
+pub fn gpu_voltage(m: &Machine, offset: i32) -> Option<Setting> {
+    let g = undervolt_card(m)?;
+    Some(Setting::GpuVoltage { slot: g.slot.clone(), device: g.pci_id.clone(), subsystem: g.subsystem.clone(), offset })
+}
+
+/// The helper's command line for one of its unrecorded graphics card voltage jobs (try, back, reset, start,
+/// disarm, trip) on the card undervolting is offered on.
+pub fn gpu_job(m: &Machine, what: &str, offset: Option<i32>) -> Option<Vec<String>> {
+    let g = undervolt_card(m)?;
+    let q = crate::json::quote;
+    let extra = offset.map(|o| format!(",\"offset\":{o}")).unwrap_or_default();
+    Some(crate::helper::job("gpu", Some(&format!("{{\"do\":{},\"slot\":{},\"device\":{},\"subsystem\":{}{extra}}}", q(what), q(&g.slot), q(&g.pci_id), q(&g.subsystem)))))
+}
+
+/// The recorded offset of the card undervolting is offered on, and whether overdrive is recorded.
+pub fn undervolt_recorded(m: &Machine, ledger: &Ledger) -> (Option<i32>, bool) {
+    let slot = undervolt_card(m).map(|g| g.slot.clone()).unwrap_or_default();
+    let kept = ledger.settings().iter().find_map(|s| match s {
+        Setting::GpuVoltage { slot: x, offset, .. } if *x == slot => Some(*offset),
+        _ => None,
+    });
+    (kept, ledger.settings().iter().any(|s| matches!(s, Setting::GpuOverdrive { .. })))
 }
 
 /// Lets (or stops) one USB device wake the machine, from the next time it's plugged in or the machine starts.

@@ -453,6 +453,15 @@ Window {
         if (r.rename && view.item && view.item.startRename) view.item.startRename(r.rename)
         // A change that could leave the screen unreadable asks to be kept, and goes back by itself.
         if (r.keep) dialog.show({ title: r.keep.title, text: r.keep.text, items: [], confirm: r.keep.confirm, cancel: r.keep.cancel, ask: "", danger: true, keep: r.keep })
+        // A plan that runs with no question (going back from a try, Safe reset), and the press that follows a
+        // plan's steps (keep what was tried, restart now).
+        if (r.go) go()
+        if (r.next) doAct(r.next.act, r.next.arg || "", r.next.value || "")
+    }
+    function go() {
+        const r = JSON.parse(Hub.confirm("", ""))
+        if (r.error) { toast.show(r.error); return }
+        handle(r)
     }
     function confirmDialog(password, again) {
         const r = JSON.parse(Hub.confirm(password, again))
@@ -1040,6 +1049,7 @@ Window {
             if (r.done) {
                 if (r.done.ok && r.done.open) app.open(r.done.open); else app.reloadPage()
                 if (r.done.toast) toast.show(r.done.toast)
+                if (r.done.ok && r.done.next) app.doAct(r.done.next.act, r.done.next.arg || "", r.done.next.value || "")
             } else if (r.tick && !dialog.open && !(view.item && view.item.busyTyping === true)) app.reloadPage()
         }
     }

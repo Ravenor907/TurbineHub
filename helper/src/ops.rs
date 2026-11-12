@@ -1,6 +1,7 @@
 //! The helper's jobs. Every path is under `Sys::root` ("/" for real, a scratch folder in tests) and every program
 //! runs through `Run`, so the tests exercise the real code without touching the machine.
 
+use crate::gpu;
 use crate::hid;
 use crate::json::{self, Json, quote};
 use crate::ledger::{Change, Entry, Ledger};
@@ -137,6 +138,11 @@ pub fn run_limited(prog: &str, args: &[&str], limit: Duration) -> Result<String,
 /// Runs one program with fixed arguments and returns what it printed. Never a shell.
 pub trait Run {
     fn run(&mut self, prog: &str, args: &[&str]) -> Result<String, String>;
+    /// Writes one command into a graphics card's pp_od_clk_voltage, in one write as the driver wants ("vo -30",
+    /// then "c"). The tests stand in for the driver here.
+    fn od(&mut self, file: &Path, command: &str) -> io::Result<()> {
+        fs::write(file, command)
+    }
 }
 
 /// The real machine.
@@ -308,6 +314,15 @@ impl<R: Run> Sys<R> {
     }
 
     fn check_live(&self, s: &Setting) -> Result<(), String> {
+        match s {
+            Setting::GpuOverdrive { mask, kernel } => return self.overdrive_check(*mask, kernel),
+            Setting::GpuVoltage { slot, device, subsystem, offset } => {
+                let dir = self.gpu_dir(slot, device, subsystem)?;
+                self.guard_installed()?;
+                return self.od_now(&dir)?.check(*offset);
+            }
+            _ => {}
+        }
         if let Setting::Sysfs { path, value } = s {
             self.sysfs_target(path)?;
             if let Some(Values::IntBetweenSiblings(lo, hi)) = policy::sysfs_rule(path) {
@@ -333,6 +348,7 @@ impl<R: Run> Sys<R> {
             Setting::Service { unit, .. } => Some(self.service_enabled(unit).to_string()),
             // Whether the device may wake the machine now, so Undo can say so again. Not plugged in: nothing to keep.
             Setting::Wake { vendor, product, .. } => self.wake_files(vendor, product).first().and_then(|f| self.read(f)).map(|t| t.trim().to_string()).filter(|v| WAKE_WORDS.contains(&v.as_str())),
+            Setting::GpuVoltage { slot, .. } => self.read(&format!("/sys/bus/pci/devices/{slot}/pp_od_clk_voltage")).and_then(|t| gpu::parse_od(&t).offset).map(|v| v.to_string()),
             _ => None,
         };
         let mut out: Vec<(String, String)> = v.map(|v| vec![(if matches!(s, Setting::Service { .. }) { "enabled" } else { "value" }.to_string(), v)]).unwrap_or_default();
@@ -383,7 +399,12 @@ impl<R: Run> Sys<R> {
                 self.set_wake_now(vendor, product, if *wake { "enabled" } else { "disabled" });
                 Ok(())
             }
-            Setting::Access { .. } | Setting::Zram { .. } => Ok(()),
+            // The driver reads its options line at the next start; nothing changes now.
+            Setting::Access { .. } | Setting::Zram { .. } | Setting::GpuOverdrive { .. } => Ok(()),
+            Setting::GpuVoltage { slot, device, subsystem, offset } => {
+                let dir = self.gpu_dir(slot, device, subsystem)?;
+                self.gpu_write(&dir, *offset)
+            }
         }
     }
 
@@ -411,7 +432,22 @@ impl<R: Run> Sys<R> {
                 }
                 Ok(())
             }
-            Change::Set(Setting::Module { .. } | Setting::Access { .. } | Setting::Zram { .. }) => Ok(()),
+            Change::Set(Setting::Module { .. } | Setting::Access { .. } | Setting::Zram { .. } | Setting::GpuOverdrive { .. }) => Ok(()),
+            // Back to the card's own voltage. A card that is gone, or tuning that is off, has nothing to put back.
+            Change::Set(Setting::GpuVoltage { slot, device, subsystem, .. }) => {
+                let _ = fs::remove_file(self.p(gpu::TRIPPED));
+                match self.gpu_dir(slot, device, subsystem).and_then(|dir| self.od_now(&dir).map(|od| (dir, od))) {
+                    Ok((dir, od)) if od.offset.is_some_and(|v| v != 0) => {
+                        let done = self.gpu_write(&dir, 0);
+                        self.disarm();
+                        done
+                    }
+                    _ => {
+                        self.disarm();
+                        Ok(())
+                    }
+                }
+            }
             Change::Decky { .. } => self.undo_decky(e),
         }
     }
@@ -492,6 +528,13 @@ impl<R: Run> Sys<R> {
         if matches!(s, Setting::Access { what: policy::Access::Lighting }) {
             self.open_lights();
         }
+        if matches!(s, Setting::GpuVoltage { .. }) {
+            // A value kept anew: the background helper may put it back again.
+            let _ = fs::remove_file(self.p(gpu::TRIPPED));
+        }
+        if is_power_cap(&s) {
+            self.recommit();
+        }
         Ok(id)
     }
 
@@ -502,6 +545,9 @@ impl<R: Run> Sys<R> {
         self.render_files(&l)?;
         self.restore_live(&e)?;
         self.save(&l)?;
+        if matches!(&e.change, Change::Set(s) if is_power_cap(s)) {
+            self.recommit();
+        }
         Ok(e.change.words())
     }
 
@@ -563,6 +609,10 @@ impl<R: Run> Sys<R> {
         // udev may have met the lights before the helper's folder was there at start, or the controller service may
         // have closed them again: open them now.
         self.open_lights();
+        // After a wake the power limit was just written again, which drops the card's voltage offset on kernel 7.2
+        // while its file still reads it: the offset goes in again. At boot the file reads 0 and nothing is written,
+        // so the boot never puts an offset back.
+        self.recommit();
         if errors.is_empty() { Ok(fixed) } else { Err(errors.join("; ")) }
     }
 
@@ -640,7 +690,281 @@ impl<R: Run> Sys<R> {
         let s = Setting::Sysfs { path: path.into(), value: value.into() };
         s.check()?;
         self.check_live(&s)?;
-        self.apply_live(&s)
+        self.apply_live(&s)?;
+        if is_power_cap(&s) {
+            self.recommit();
+        }
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- graphics card voltage
+
+    fn boot_id(&self) -> String {
+        self.read(gpu::BOOT_ID).unwrap_or_default().trim().to_string()
+    }
+
+    /// The overdrive line may only be written on a Radeon RX 7000 or RX 9000 card driven by amdgpu (named by its
+    /// power firmware's version, from the driver's own IP list), from the driver's live mask, on this kernel.
+    fn overdrive_check(&self, mask: u32, kernel: &str) -> Result<(), String> {
+        let card = fs::read_dir(self.p("/sys/class/drm")).into_iter().flatten().flatten().any(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            let dev = format!("/sys/class/drm/{n}/device");
+            let num = |f: &str| self.read(&format!("{dev}/ip_discovery/die/0/MP1/0/{f}")).and_then(|t| t.trim().parse::<u32>().ok());
+            let mp1 = num("major").zip(num("minor")).zip(num("revision")).map(|((a, b), c)| (a, b, c));
+            n.strip_prefix("card").is_some_and(|c| !c.is_empty() && c.bytes().all(|b| b.is_ascii_digit()))
+                && self.read(&format!("{dev}/vendor")).is_some_and(|v| v.trim() == "0x1002")
+                && self.driver_of(&dev) == "amdgpu"
+                && gpu::family_ok(mp1)
+        });
+        if !card {
+            return Err("Graphics card tuning is for Radeon RX 7000 and RX 9000 cards only".into());
+        }
+        let live = self.read(gpu::MASK_FILE).and_then(|t| gpu::parse_mask(&t)).ok_or("The graphics driver's feature mask can't be read")?;
+        if mask != live | gpu::OVERDRIVE_BIT {
+            return Err(format!("The feature mask must be the driver's own ({}) with the overdrive bit added", gpu::mask_text(live)));
+        }
+        if self.read(gpu::OSRELEASE).unwrap_or_default().trim() != kernel {
+            return Err("That isn't the kernel running now".into());
+        }
+        Ok(())
+    }
+
+    fn driver_of(&self, dev: &str) -> String {
+        fs::read_link(self.p(&format!("{dev}/driver"))).ok().and_then(|l| l.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default()
+    }
+
+    /// The card's folder for a recorded slot, after checking it is still the same AMD card on amdgpu.
+    fn gpu_dir(&self, slot: &str, device: &str, subsystem: &str) -> Result<String, String> {
+        if !gpu::slot_ok(slot) {
+            return Err("That isn't a graphics card slot".into());
+        }
+        let dir = format!("/sys/bus/pci/devices/{slot}");
+        let id = |f: &str| self.read(&format!("{dir}/{f}")).map(|t| t.trim().trim_start_matches("0x").to_ascii_lowercase()).unwrap_or_default();
+        if format!("{}:{}", id("vendor"), id("device")) != device || format!("{}:{}", id("subsystem_vendor"), id("subsystem_device")) != subsystem || id("vendor") != "1002" {
+            return Err("That graphics card isn't in this machine any more".into());
+        }
+        if self.driver_of(&dir) != "amdgpu" {
+            return Err("That graphics card isn't driven by amdgpu".into());
+        }
+        Ok(dir)
+    }
+
+    /// The card's voltage file, checked like any /sys value: it must be there and stay inside /sys.
+    fn od_file(&self, dir: &str) -> Result<PathBuf, String> {
+        let path = format!("{dir}/pp_od_clk_voltage");
+        if !self.p(&path).exists() {
+            return Err("Graphics card tuning isn't on yet. It needs a restart after it is turned on.".into());
+        }
+        self.sysfs_target(&path)
+    }
+
+    fn od_now(&self, dir: &str) -> Result<gpu::Od, String> {
+        let f = self.od_file(dir)?;
+        Ok(gpu::parse_od(&fs::read_to_string(f).map_err(|e| io_err("read the graphics card's voltage", e))?))
+    }
+
+    /// The guard's units are set up with the helper; an older helper's install has none, and then no offset is
+    /// written.
+    fn guard_installed(&self) -> Result<(), String> {
+        if self.p(gpu::GUARD_UNIT).is_file() && self.p(gpu::SLEEP_UNIT).is_file() { Ok(()) } else { Err("Turbine Hub's helper needs an update before it can change the graphics card's voltage".into()) }
+    }
+
+    /// The crash mark, flushed to disk before any offset is written: if the machine goes down now, the next start
+    /// knows.
+    fn arm(&self, offset: i32) -> Result<(), String> {
+        use std::io::Write;
+        let path = self.p(gpu::ARMED);
+        let mut f = fs::File::create(&path).map_err(|e| io_err("write the graphics card's crash mark", e))?;
+        f.write_all(gpu::armed_text(&self.boot_id(), self.now, offset).as_bytes()).and_then(|_| f.sync_all()).map_err(|e| io_err("write the graphics card's crash mark", e))?;
+        if let Some(d) = path.parent().and_then(|d| fs::File::open(d).ok()) {
+            let _ = d.sync_all();
+        }
+        Ok(())
+    }
+
+    fn disarm(&self) {
+        let _ = fs::remove_file(self.p(gpu::ARMED));
+    }
+
+    /// Writes an offset the way the driver wants it: the power limit first (kernel 7.2 drops an offset when the
+    /// limit changes after it), the crash mark, then "vo" and "c" in two writes, then reads it back. A mark of 0
+    /// trips nothing at the next start (the card's own voltage can't crash anything); it says the 0 was asked for,
+    /// so it isn't taken for a driver reset.
+    fn gpu_write(&mut self, dir: &str, offset: i32) -> Result<(), String> {
+        let f = self.od_file(dir)?;
+        let od = gpu::parse_od(&fs::read_to_string(&f).map_err(|e| io_err("read the graphics card's voltage", e))?);
+        if offset != 0 {
+            od.check(offset)?;
+        }
+        self.power_cap_first(dir);
+        self.arm(offset)?;
+        let refused = |e: io::Error| format!("The graphics card refused {} ({e})", policy::mv_words(offset));
+        self.run.od(&f, &format!("vo {offset}")).map_err(refused)?;
+        self.run.od(&f, "c").map_err(|e| format!("The graphics card refused to take the new voltage ({e})"))?;
+        let back = gpu::parse_od(&fs::read_to_string(&f).unwrap_or_default()).offset;
+        if back != Some(offset) {
+            return Err(format!("The graphics card reads {} after the change", back.map(policy::mv_words).unwrap_or_else(|| "nothing".into())));
+        }
+        Ok(())
+    }
+
+    /// The recorded power limit of this card, written before its offset.
+    fn power_cap_first(&mut self, dir: &str) {
+        let Ok(card) = fs::canonicalize(self.p(dir)) else { return };
+        let caps: Vec<Setting> = self.ledger().map(|l| l.settings().into_iter().filter(|s| is_power_cap(s)).cloned().collect()).unwrap_or_default();
+        for s in caps {
+            let Setting::Sysfs { path, .. } = &s else { continue };
+            let now = self.sysfs_now(path);
+            let Some((device, _)) = now.split_once("/hwmon/") else { continue };
+            if fs::canonicalize(self.p(device)).ok().as_deref() == Some(card.as_path()) {
+                let _ = self.apply_live(&s);
+            }
+        }
+    }
+
+    /// The offset each recorded card holds now goes in again (after a power limit was written). A card at 0 (a
+    /// fresh start, a reset, an offset never put back) gets nothing.
+    fn recommit(&mut self) {
+        let Ok(l) = self.ledger() else { return };
+        for s in l.settings() {
+            let Setting::GpuVoltage { slot, device, subsystem, .. } = s else { continue };
+            let Ok(dir) = self.gpu_dir(slot, device, subsystem) else { continue };
+            let Ok(Some(v)) = self.od_now(&dir).map(|od| od.offset) else { continue };
+            if v != 0
+                && let Err(e) = self.gpu_write(&dir, v)
+            {
+                self.log(&format!("re-commit of the graphics card's voltage after a power limit change failed: {e}"));
+            }
+        }
+    }
+
+    /// The recorded offset of the card in this slot, with its setting.
+    fn gpu_entry(&self, slot: &str) -> Option<Setting> {
+        self.ledger().ok()?.settings().into_iter().find(|s| matches!(s, Setting::GpuVoltage { slot: x, .. } if x == slot)).cloned()
+    }
+
+    fn tripped(&self) -> Option<(i32, u64)> {
+        self.read(gpu::TRIPPED).and_then(|t| gpu::parse_tripped(&t))
+    }
+
+    /// The graphics card voltage jobs (`gpu` with {"do": ...}), none of them recorded:
+    /// - try: an offset for this session only, to be kept or taken back within seconds;
+    /// - back: the recorded offset again (0 when none, or when it tripped): the end of a try nobody kept;
+    /// - reset: 0, and the recorded offset and its trip forgotten (Safe reset);
+    /// - start: the recorded offset put back by the background helper once the session is up, unless it tripped;
+    /// - disarm: the crash mark cleared once the offset ran ten minutes;
+    /// - trip: the card reads 0 while an offset is recorded and none was asked for: the driver reset the card.
+    ///
+    /// Answers what the card holds afterwards.
+    pub fn gpu_job(&mut self, j: &Json) -> Result<i32, String> {
+        let what = j.str_at("do").unwrap_or("");
+        let slot = j.str_at("slot").unwrap_or("").to_string();
+        if !gpu::slot_ok(&slot) {
+            return Err("That isn't a graphics card slot".into());
+        }
+        let ids = |j: &Json| (j.str_at("device").unwrap_or("").to_string(), j.str_at("subsystem").unwrap_or("").to_string());
+        let entry = self.gpu_entry(&slot);
+        let (device, subsystem) = match &entry {
+            Some(Setting::GpuVoltage { device, subsystem, .. }) => (device.clone(), subsystem.clone()),
+            _ => ids(j),
+        };
+        let kept = match &entry {
+            Some(Setting::GpuVoltage { offset, .. }) => Some(*offset),
+            _ => None,
+        };
+        match what {
+            "try" => {
+                let s = Setting::from_json(&Json::Obj(vec![("kind".into(), Json::Str("gpu-voltage".into())), ("slot".into(), Json::Str(slot.clone())), ("device".into(), Json::Str(device.clone())), ("subsystem".into(), Json::Str(subsystem.clone())), ("offset".into(), j.get("offset").cloned().unwrap_or(Json::Null))]))?;
+                self.check_live(&s)?;
+                let Setting::GpuVoltage { offset, .. } = s else { return Err("Not an offset".into()) };
+                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
+                self.gpu_write(&dir, offset)?;
+                Ok(offset)
+            }
+            "back" => {
+                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
+                let to = if self.tripped().is_some() { 0 } else { kept.unwrap_or(0) };
+                self.gpu_write(&dir, to)?;
+                Ok(to)
+            }
+            "reset" => {
+                let mut l = self.ledger()?;
+                if let Some(id) = l.find_key(&format!("gpu-voltage:{slot}")).map(|e| e.id) {
+                    l.remove(id);
+                    self.save(&l)?;
+                }
+                let _ = fs::remove_file(self.p(gpu::TRIPPED));
+                let result = self.gpu_dir(&slot, &device, &subsystem).and_then(|dir| self.gpu_write(&dir, 0));
+                self.disarm();
+                result.map(|_| 0)
+            }
+            "start" => {
+                let Some(offset) = kept else { return Err("No graphics card voltage is kept".into()) };
+                if let Some((v, _)) = self.tripped() {
+                    return Err(format!("{} was turned off because the machine stopped unexpectedly, so it isn't put back", policy::mv_words(v)));
+                }
+                self.guard_installed()?;
+                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
+                if self.od_now(&dir)?.offset == Some(offset) {
+                    return Ok(offset);
+                }
+                self.gpu_write(&dir, offset)?;
+                Ok(offset)
+            }
+            "disarm" => {
+                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
+                let now = self.od_now(&dir)?.offset.unwrap_or(0);
+                if let Some((boot, at, _)) = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t))
+                    && boot == self.boot_id()
+                    && self.now >= at + gpu::ARMED_SECS
+                {
+                    self.disarm();
+                }
+                Ok(now)
+            }
+            "trip" => {
+                let dir = self.gpu_dir(&slot, &device, &subsystem)?;
+                let now = self.od_now(&dir)?.offset.unwrap_or(0);
+                let asked = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t)).filter(|(boot, ..)| *boot == self.boot_id()).map(|(_, _, v)| v);
+                if let Some(k) = kept.filter(|k| *k != 0)
+                    && now == 0
+                    && asked != Some(0)
+                    && self.tripped().is_none()
+                {
+                    self.write_file(gpu::TRIPPED, &gpu::tripped_text(k, self.now), 0o644)?;
+                    self.disarm();
+                }
+                Ok(now)
+            }
+            _ => Err("Unknown graphics card job".into()),
+        }
+    }
+
+    /// The guard's own starts, by its units: "boot" (a crash mark from another boot means the machine went down
+    /// while an offset was new: it trips, and nothing is put back), "stop" (a clean shutdown) and "sleep" (a sleep is
+    /// not a crash) clear the mark. Answers whether it tripped.
+    pub fn gpu_guard(&mut self, when: &str) -> Result<bool, String> {
+        match when {
+            "boot" => {
+                let Some((boot, _, offset)) = self.read(gpu::ARMED).and_then(|t| gpu::parse_armed(&t)) else {
+                    self.disarm();
+                    return Ok(false);
+                };
+                if boot == self.boot_id() {
+                    return Ok(false);
+                }
+                if offset != 0 {
+                    self.write_file(gpu::TRIPPED, &gpu::tripped_text(offset, self.now), 0o644)?;
+                }
+                self.disarm();
+                Ok(offset != 0)
+            }
+            "stop" | "sleep" => {
+                self.disarm();
+                Ok(false)
+            }
+            _ => Err("Unknown guard step".into()),
+        }
     }
 
     pub fn status(&self) -> Result<String, String> {
@@ -783,9 +1107,15 @@ impl<R: Run> Sys<R> {
         self.write_file(OWNER, &format!("{}\n", owner.uid), 0o644)?;
         self.write_file(POLKIT_RULE, &polkit_rule(&owner.name), 0o644)?;
         self.write_file(REAPPLY_UNIT, REAPPLY_UNIT_TEXT, 0o644)?;
+        self.write_file(gpu::GUARD_UNIT, &gpu::guard_unit_text(BIN), 0o644)?;
+        self.write_file(gpu::SLEEP_UNIT, &gpu::sleep_unit_text(BIN), 0o644)?;
         self.write_file(KEEP_LIST, &keep_list(), 0o644)?;
         self.run.run(SYSTEMCTL, &["daemon-reload"])?;
         self.run.run(SYSTEMCTL, &["enable", "turbinehub-reapply.service"])?;
+        // The graphics card voltage guard: started now too, so a clean shutdown of this very session clears its
+        // mark.
+        self.run.run(SYSTEMCTL, &["enable", "--now", "turbinehub-gpu-guard.service"])?;
+        self.run.run(SYSTEMCTL, &["enable", "turbinehub-gpu-sleep.service"])?;
         Ok(())
     }
 
@@ -793,7 +1123,8 @@ impl<R: Run> Sys<R> {
     pub fn uninstall(&mut self) -> Result<(), String> {
         self.undo_all()?;
         let _ = self.run.run(SYSTEMCTL, &["disable", "turbinehub-reapply.service"]);
-        for f in [POLKIT_RULE, REAPPLY_UNIT, KEEP_LIST] {
+        let _ = self.run.run(SYSTEMCTL, &["disable", "turbinehub-gpu-guard.service", "turbinehub-gpu-sleep.service"]);
+        for f in [POLKIT_RULE, REAPPLY_UNIT, gpu::GUARD_UNIT, gpu::SLEEP_UNIT, KEEP_LIST] {
             let _ = fs::remove_file(self.p(f));
         }
         let _ = self.run.run(SYSTEMCTL, &["daemon-reload"]);
@@ -815,6 +1146,11 @@ const WAKE_WORDS: [&str; 2] = ["enabled", "disabled"];
 /// nothing in it that could pass for a line of its own, and never longer than a line should be.
 pub fn log_text(line: &str) -> String {
     line.chars().take(400).map(|c| if c.is_control() { ' ' } else { c }).collect()
+}
+
+/// A graphics card's power limit: writing it drops a voltage offset on kernel 7.2, so the offset goes in again.
+fn is_power_cap(s: &Setting) -> bool {
+    matches!(s, Setting::Sysfs { path, .. } if path.ends_with("/power1_cap"))
 }
 
 /// The share-of-memory setting that stands in for a byte limit while that limit is off (reads 0), and the kernel's
@@ -849,7 +1185,7 @@ pub fn windows_entries(efibootmgr: &str) -> Vec<(String, String)> {
 /// The keep list's text: every file Turbine Hub writes under /etc, one per line, and nothing else.
 pub fn keep_list() -> String {
     let mut t = String::from("## Turbine Hub: its own settings files, kept when SteamOS updates. Removed with Turbine Hub's helper.\n");
-    for f in policy::FILES.iter().copied().chain([POLKIT_RULE, REAPPLY_UNIT]) {
+    for f in policy::FILES.iter().copied().chain([POLKIT_RULE, REAPPLY_UNIT, gpu::GUARD_UNIT, gpu::SLEEP_UNIT]) {
         t.push_str(f);
         t.push('\n');
     }

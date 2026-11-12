@@ -488,6 +488,7 @@ pub fn main() -> i32 {
     let started = Instant::now();
     let (mut last_wall, mut last_steady) = (now(), 0u64);
     let (mut every_battery, mut every_games, mut every_screens, mut every_minute, mut every_machine, mut every_second) = (Every(15, 0), Every(4, 0), Every(3, 0), Every(60, 0), Every(600, 0), Every(1, 0));
+    let mut every_voltage = Every(15, 0);
     let mut lighting = Lighting::load(&mode.paths.folder);
     let mut lights_on = false;
     let mut passes = 0;
@@ -540,6 +541,10 @@ pub fn main() -> i32 {
             }
             if every_screens.due(wall) {
                 todo.extend(core.screens(wall, agent::external_screen(&mode.paths.root), &lighting));
+            }
+            // A kept graphics card voltage: put back a minute into the session, looked at after a wake, watched.
+            if every_voltage.due(wall) || slept {
+                todo.extend(core.undervolt(wall, steady, slept, &m, &mode.paths.root));
             }
             if every_minute.due(wall) {
                 todo.extend(core.steamos(wall, &agent::steamos(&mode.paths.root), helper_there));

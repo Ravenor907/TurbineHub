@@ -108,3 +108,45 @@ On a handheld also:
 ## 9. Undo everything
 - Settings, Review changes, **Undo all**.
   - The list empties and the machine is as it was before Turbine Hub changed anything.
+
+## 10. GPU undervolt (this PC, with you at the machine)
+Only with you in front of it: a value too low can freeze the screen until a hard restart. Nothing is damaged. Have
+a game you know with a frame cap (Steam's quick menu, Performance, or the game's own limit) and a terminal in
+Desktop Mode for the readings. `card1` and `hwmon` below are this PC's; `ls /sys/class/drm/card1/device/hwmon/`
+gives the hwmon number.
+1. Veteran mode, My machine, Graphics card, **Undervolting**, Show. Read the two warning rows.
+   - Guided mode shows nothing of it; the power slider stops at 304 W.
+2. **Turn on graphics card tuning**: the dialog lists `/etc/modprobe.d/turbinehub-amdgpu.conf` with
+   `options amdgpu ppfeaturemask=0xfff7ffff`, the restart and the system log note, with Cancel highlighted. Turn on,
+   then **Restart now**.
+3. After the restart, in the terminal:
+   - `cat /sys/module/amdgpu/parameters/ppfeaturemask` reads `0xfff7ffff`.
+   - `cat /proc/sys/kernel/tainted` has bit 5 (32) set, and `journalctl -k | grep -i overdrive` shows "Overdrive is
+     enabled".
+   - `cat /sys/class/drm/card1/device/pp_od_clk_voltage` exists. Save its whole text as a fixture:
+     `cat /sys/class/drm/card1/device/pp_od_clk_voltage > ~/rx9070xt-od-7.2.txt` and send it along (the tests use a
+     text written from the kernel's source; the real one replaces it).
+   - The page now has the slider (-150 to 0 mV) and the power slider goes to 340 W.
+4. **Try 0 mV** is "already set"; move to -5 mV and back to 0 to see the before and after. Then Try **-10 mV**: the
+   dialog, then "Keep -10 mV? Going back to 0 mV in 15 s". Let it run out: it goes back by itself
+   (`pp_od_clk_voltage` reads `0mV` under OD_VDDGFX_OFFSET).
+5. Start the frame-capped game. In the terminal:
+   `watch -n1 'cat /sys/class/drm/card1/device/hwmon/hwmon*/in0_input /sys/class/drm/card1/device/hwmon/hwmon*/power1_average'`
+   (in0_input is the graphics voltage in mV, power1_average the draw in microwatts). Note both at 0 mV.
+6. Try -10, then -20, then -30 mV, each for a few minutes of play, keeping each one: in0_input should drop and
+   power1_average fall a little at the same frame rate. Stop at the first crash, stutter or artifact and note the value.
+7. **Keep** -30 mV (or the last good one). The fold's badge says on probation; Home's checkup has the probation item.
+8. Sleep the PC and wake it. `pp_od_clk_voltage` still reads the kept value; Settings, Review changes lists
+   "Graphics card voltage set to -30 mV".
+9. Change the power limit (Graphics card, Power limit, 280 W). `tail /var/lib/turbinehub/helper.log` shows no
+   re-commit failure, `pp_od_clk_voltage` still reads -30 mV, and in0_input under the same game load is still the
+   lower one (kernel 7.2 drops the offset when the limit changes; Turbine Hub commits it again). Then the power
+   limit's **Safe reset**: the same.
+10. Restart: right after the start `pp_od_clk_voltage` reads 0 mV (the boot never puts it back); about a minute
+    after the session is up it reads -30 mV again (the background helper must be on).
+11. Undervolting's **Safe reset**: one press, no question, 0 mV at once, the probation item gone.
+12. **Turn tuning off**: the dialog lists the reset and the driver option going, then Restart now. After the restart
+    `ppfeaturemask` reads `0xfff7bfff` again, `pp_od_clk_voltage` is gone, `/etc/modprobe.d/turbinehub-amdgpu.conf`
+    is gone, and the power slider stops at 304 W.
+- Not to try on purpose, but if a value freezes the machine: hold the power button. At the next start the page and
+  Home say the lower voltage was turned off because the machine stopped, and nothing puts it back by itself.

@@ -51,6 +51,11 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
         safe_install()?;
         return sys.reapply().map(|f| format!(",\"fixed\":{}", list(&f)));
     }
+    if verb == "gpu-guard" && std::env::var_os("PKEXEC_UID").is_none() && std::env::var_os("SUDO_UID").is_none() {
+        // Started by the graphics card voltage guard's units: at boot, at a clean shutdown and before a sleep.
+        safe_install()?;
+        return sys.gpu_guard(arg.map(String::as_str).unwrap_or("")).map(|t| format!(",\"tripped\":{t}"));
+    }
     if verb == "hid-access" {
         // Started by the lighting access rule's udev line, as root. Only ever adds the write bit to an ASUS
         // lighting interface, and only once the player asked for the rule (see `Sys::hid_access`).
@@ -92,6 +97,8 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
             sys.decky_install(j.str_at("tag").ok_or("tag is missing")?, &owner).map(|id| format!(",\"id\":{id}"))
         }
         "boot-next" => sys.boot_next(arg_json(arg)?.str_at("entry").ok_or("entry is missing")?).map(|_| String::new()),
+        // The graphics card's voltage for this session, never recorded (try, back, reset, start, disarm, trip).
+        "gpu" => sys.gpu_job(&arg_json(arg)?).map(|mv| format!(",\"offset\":{mv}")),
         "uninstall" => sys.uninstall().map(|_| String::new()),
         _ => Err("Unknown job".into()),
     }
@@ -114,9 +121,14 @@ fn main() {
     // One job at a time. The lighting rule's own start (hid-access, run by udev while another job may be telling
     // udev to look again) never waits: it only reads the record and opens one device. No job waits for ever: when
     // the lock stays taken, it says the helper is busy and ends.
-    let lock = if verb != "hid-access" && euid() == 0 && Path::new(ops::STATE_DIR).is_dir() { ops::take_lock(Path::new(ops::STATE_DIR), ops::LOCK_WAIT) } else { Ok(None) };
+    // The voltage guard runs before a sleep and at shutdown: it waits a few seconds at most, never the whole minute.
+    let wait = if verb == "gpu-guard" { std::time::Duration::from_secs(5) } else { ops::LOCK_WAIT };
+    let lock = if verb != "hid-access" && euid() == 0 && Path::new(ops::STATE_DIR).is_dir() { ops::take_lock(Path::new(ops::STATE_DIR), wait) } else { Ok(None) };
     let result = match &lock {
         Ok(_) => run(verb, args.get(2), &mut sys),
+        // The guard only reads and clears its own small files: a job holding the lock never keeps a sleep or a
+        // shutdown from clearing the crash mark.
+        Err(_) if verb == "gpu-guard" => run(verb, args.get(2), &mut sys),
         Err(busy) => Err(busy.clone()),
     };
     let caller = std::env::var("PKEXEC_UID").or_else(|_| std::env::var("SUDO_UID")).unwrap_or_else(|_| "boot".into());

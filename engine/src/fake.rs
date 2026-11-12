@@ -90,6 +90,8 @@ fn common(root: &Path) {
     w(root, "/proc/sys/vm/page-cluster", "0\n");
     w(root, "/proc/sys/vm/max_map_count", "2147483642\n");
     w(root, "/proc/sys/kernel/split_lock_mitigate", "1\n");
+    w(root, turbinehub_helper::gpu::OSRELEASE, "7.2.7-valve2-2-neptune-72\n");
+    w(root, turbinehub_helper::gpu::BOOT_ID, "5e0c1d2a-0000-4000-8000-0000000000b1\n");
 }
 
 fn drive(root: &Path, name: &str, model: &str, bytes: u64, removable: bool, dev: &str, parts: &[(&str, &str, &str, &str, &str)]) {
@@ -113,19 +115,47 @@ fn mounts(root: &Path, list: &[(&str, &str)]) {
     w(root, "/proc/mounts", &text);
 }
 
-fn amd_gpu(root: &Path, card: &str, device: &str, cap: Option<(u64, u64, u64)>) {
-    let dev = format!("/sys/devices/pci0000:00/{card}");
+/// An AMD graphics card in PCI slot `slot` on amdgpu: its ids, the version of its power firmware (which names the
+/// family), the power limit (min, max, now, the card's own default) and the driver's feature mask with overdrive
+/// off, as this RX 9070 XT's real machine has them.
+fn amd_gpu(root: &Path, card: &str, slot: &str, ids: (&str, &str), mp1: (u32, u32, u32), cap: Option<(u64, u64, u64, u64)>) {
+    let dev = format!("/sys/devices/pci0000:00/{slot}");
     w(root, &format!("{dev}/vendor"), "0x1002\n");
-    w(root, &format!("{dev}/device"), &format!("0x{device}\n"));
+    w(root, &format!("{dev}/device"), &format!("0x{}\n", ids.0));
+    let (sv, sd) = ids.1.split_once(':').unwrap_or(("", ""));
+    w(root, &format!("{dev}/subsystem_vendor"), &format!("0x{sv}\n"));
+    w(root, &format!("{dev}/subsystem_device"), &format!("0x{sd}\n"));
+    for (f, v) in [("major", mp1.0), ("minor", mp1.1), ("revision", mp1.2)] {
+        w(root, &format!("{dev}/ip_discovery/die/0/MP1/0/{f}"), &format!("{v}\n"));
+    }
     w(root, "/sys/bus/pci/drivers/amdgpu/.keep", "");
     link(root, "../../../bus/pci/drivers/amdgpu", &format!("{dev}/driver"));
-    if let Some((min, max, now)) = cap {
+    link(root, &format!("../../../devices/pci0000:00/{slot}"), &format!("/sys/bus/pci/devices/{slot}"));
+    if let Some((min, max, now, default)) = cap {
         w(root, &format!("{dev}/hwmon/hwmon6/power1_cap_min"), &format!("{min}\n"));
         w(root, &format!("{dev}/hwmon/hwmon6/power1_cap_max"), &format!("{max}\n"));
         w(root, &format!("{dev}/hwmon/hwmon6/power1_cap"), &format!("{now}\n"));
+        w(root, &format!("{dev}/hwmon/hwmon6/power1_cap_default"), &format!("{default}\n"));
     }
     fs::create_dir_all(root.join(format!("sys/class/drm/{card}"))).ok();
-    link(root, &format!("../../../devices/pci0000:00/{card}"), &format!("/sys/class/drm/{card}/device"));
+    link(root, &format!("../../../devices/pci0000:00/{slot}"), &format!("/sys/class/drm/{card}/device"));
+    w(root, turbinehub_helper::gpu::MASK_FILE, "0xfff7bfff\n");
+}
+
+/// The made-up desktop's graphics card slot.
+pub const GPU_SLOT: &str = "0000:03:00.0";
+
+/// The made-up desktop's RX 9070 XT in one of undervolting's states (see `ui::sample`): "on" (overdrive on after the
+/// restart, the card at 0 mV), "kept" (on, at `offset`), "tripped" (on, back at 0 after a stop). Anything else
+/// leaves overdrive off.
+pub fn undervolt(root: &Path, state: &str, offset: i32) {
+    let live = match state {
+        "on" | "tripped" => 0,
+        "kept" => offset,
+        _ => return,
+    };
+    w(root, turbinehub_helper::gpu::MASK_FILE, "0xfff7ffff\n");
+    w(root, &format!("/sys/devices/pci0000:00/{GPU_SLOT}/pp_od_clk_voltage"), &turbinehub_helper::gpu::od_rx9000(live));
 }
 
 fn connector(root: &Path, name: &str, connected: bool, edid: Option<&[u8]>) {
@@ -157,7 +187,8 @@ pub fn machine(root: &Path, preset: Preset) {
             w(root, "/sys/class/dmi/id/chassis_type", "31\n");
             w(root, "/proc/cpuinfo", "model name\t: AMD Ryzen Z2 Extreme\n");
             w(root, "/proc/meminfo", "MemTotal:       24300000 kB\n");
-            amd_gpu(root, "card1", "150e", None);
+            // A handheld chip (APU): its power firmware is none of the cards undervolting is offered on.
+            amd_gpu(root, "card1", "0000:c4:00.0", ("150e", "1043:1f63"), (14, 0, 0), None);
             connector(root, "card1-eDP-1", true, Some(&panel_edid()));
             connector(root, "card1-DP-1", false, None);
             let bat = "/sys/class/power_supply/BAT0";
@@ -191,7 +222,7 @@ pub fn machine(root: &Path, preset: Preset) {
             w(root, "/proc/cpuinfo", "model name\t: 13th Gen Intel(R) Core(TM) i9-13900K\n");
             w(root, "/proc/meminfo", "MemTotal:       65500792 kB\n");
             w(root, "/sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences", "default performance balance_performance balance_power power\n");
-            amd_gpu(root, "card1", "7550", Some((150_000_000, 304_000_000, 304_000_000)));
+            amd_gpu(root, "card1", GPU_SLOT, ("7550", "1eae:8811"), (14, 0, 3), Some((150_000_000, 340_000_000, 304_000_000, 304_000_000)));
             if preset == Preset::Desktop {
                 connector(root, "card1-DP-4", true, Some(MONITOR_EDID));
                 connector(root, "card1-HDMI-A-5", false, None);

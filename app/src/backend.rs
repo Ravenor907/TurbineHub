@@ -326,6 +326,10 @@ fn make_ui() -> Ui {
     if let Some(mode) = option("power-mode") {
         ui.sample_power_mode(&mode);
     }
+    // The desktop's graphics card in one of undervolting's states ("--undervolt=probation"), its fold open.
+    if let Some(state) = option("undervolt") {
+        ui.sample_undervolt(&state);
+    }
     // NonSteamLaunchers set up, with two launchers ticked.
     if option("nsl").is_some() {
         ui.sample_with_nsl();
@@ -808,7 +812,7 @@ impl qobject::Hub {
             let result = self.as_mut().rust_mut().ui.play_sample(&plan);
             self.as_mut().refresh_state();
             return match result {
-                Ok(()) => answer(&[("toast", quote(&plan.done)), ("open", quote(&plan.then_open)), ("refresh", "true".into())]),
+                Ok(()) => answer(&[("toast", quote(&plan.done)), ("open", quote(&plan.then_open)), ("refresh", "true".into()), ("next", plan.next_json().to_text())]),
                 Err(why) => answer(&[("toast", quote(&why)), ("refresh", "true".into())]),
             };
         }
@@ -971,9 +975,11 @@ impl qobject::Hub {
                     self.rust().gather(false);
                     // A cleaning says what each drive really had free before and has now.
                     let folder = self.rust().ui.folder();
+                    // The question that follows a plan's steps (keep what was tried, restart now).
+                    let next = plan.as_ref().map(|p| p.next_json().to_text()).unwrap_or_else(|| "null".into());
                     let (done, open) = plan.map(|p| (turbinehub_engine::storage::done_words(&p.steps, &folder, &turbinehub_engine::files::Disk::here()).unwrap_or(p.done), p.then_open)).unwrap_or_default();
                     out.push(("done", match result {
-                        Ok(()) => format!("{{\"ok\":true,\"toast\":{},\"open\":{}}}", quote(&done), quote(&open)),
+                        Ok(()) => format!("{{\"ok\":true,\"toast\":{},\"open\":{},\"next\":{next}}}", quote(&done), quote(&open)),
                         Err(why) => format!("{{\"ok\":false,\"toast\":{},\"open\":\"\"}}", quote(&why)),
                     }));
                 }

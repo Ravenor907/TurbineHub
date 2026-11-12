@@ -50,8 +50,34 @@ pub struct Gpu {
     pub driver: String,
     /// The driver's power cap file and its limits in microwatts (AMD), when there is one.
     pub power_cap: Option<(String, u64, u64, u64)>,
+    /// The card's own power cap (power1_cap_default), when the driver says it.
+    pub power_cap_default: Option<u64>,
     /// Drives a connected screen.
     pub drives_screen: bool,
+    /// The PCI slot ("0000:03:00.0") and the board maker's ids ("1eae:8811").
+    pub slot: String,
+    pub subsystem: String,
+    /// The version of the card's power firmware (SMU), from the driver's list of the chip's parts. It names the card
+    /// family: 13.0.x is RX 7000, 14.0.x RX 9000.
+    pub mp1: Option<(u32, u32, u32)>,
+    /// The voltage offset and its range from pp_od_clk_voltage, which only exists while overdrive is on.
+    pub od: Option<turbinehub_helper::gpu::Od>,
+}
+
+impl Gpu {
+    /// The highest power cap the driver takes now: above the card's own default it refuses unless overdrive is on.
+    pub fn power_max(&self, overdrive: bool) -> Option<u64> {
+        let (_, _, max, _) = self.power_cap.as_ref()?;
+        Some(match self.power_cap_default {
+            Some(d) if !overdrive && d <= *max => d,
+            _ => *max,
+        })
+    }
+
+    /// A Radeon RX 7000 or RX 9000 card on amdgpu: the cards undervolting is offered on.
+    pub fn undervolt_family(&self) -> bool {
+        self.vendor == GpuVendor::Amd && self.driver == "amdgpu" && turbinehub_helper::gpu::family_ok(self.mp1)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -174,6 +200,10 @@ pub struct Machine {
     /// efibootmgr's number for Windows Boot Manager, when Windows is installed.
     pub windows_boot: Option<String>,
     pub steamos: String,
+    /// The amdgpu driver's feature mask, when it is loaded.
+    pub amdgpu_mask: Option<u32>,
+    /// The running kernel's release.
+    pub kernel: String,
 }
 
 struct Tree<'a>(&'a Path);
@@ -363,7 +393,24 @@ impl Machine {
                     let hw = format!("{dev}/hwmon/{h}");
                     Some((format!("/sys/class/drm/card{card}/device/hwmon/{h}/power1_cap"), t.num(&format!("{hw}/power1_cap_min"))?, t.num(&format!("{hw}/power1_cap_max"))?, t.num(&format!("{hw}/power1_cap"))?))
                 });
-                gpus.push(Gpu { card: format!("card{card}"), vendor, pci_id: format!("{}:{}", vendor_id.trim_start_matches("0x"), t.text(&format!("{dev}/device")).trim_start_matches("0x")), driver: t.link_name(&format!("{dev}/driver")), power_cap, drives_screen: false });
+                let power_cap_default = t.names(&format!("{dev}/hwmon")).into_iter().find_map(|h| t.num(&format!("{dev}/hwmon/{h}/power1_cap_default")));
+                let hex = |f: &str| t.text(&format!("{dev}/{f}")).trim_start_matches("0x").to_ascii_lowercase();
+                let ip = |f: &str| t.num(&format!("{dev}/ip_discovery/die/0/MP1/0/{f}")).map(|v| v as u32);
+                let mp1 = ip("major").zip(ip("minor")).zip(ip("revision")).map(|((a, b), c)| (a, b, c));
+                let od = fs::read_to_string(t.p(&format!("{dev}/pp_od_clk_voltage"))).ok().map(|text| turbinehub_helper::gpu::parse_od(&text));
+                gpus.push(Gpu {
+                    card: format!("card{card}"),
+                    vendor,
+                    pci_id: format!("{}:{}", vendor_id.trim_start_matches("0x"), t.text(&format!("{dev}/device")).trim_start_matches("0x")),
+                    driver: t.link_name(&format!("{dev}/driver")),
+                    power_cap,
+                    power_cap_default,
+                    drives_screen: false,
+                    slot: fs::canonicalize(t.p(&dev)).ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).filter(|s| turbinehub_helper::gpu::slot_ok(s)).unwrap_or_default(),
+                    subsystem: format!("{}:{}", hex("subsystem_vendor"), hex("subsystem_device")),
+                    mp1,
+                    od,
+                });
             } else if name.starts_with("card") && name.contains('-') && !name.contains("Writeback") {
                 let base = format!("/sys/class/drm/{name}");
                 let kind = name.split_once('-').map(|(_, k)| k).unwrap_or("");
@@ -464,7 +511,14 @@ impl Machine {
             wake_devices,
             windows_boot: windows_boot_entry(efibootmgr, &partition_uuids(&t)),
             steamos,
+            amdgpu_mask: turbinehub_helper::gpu::parse_mask(&t.text(turbinehub_helper::gpu::MASK_FILE)),
+            kernel: t.text(turbinehub_helper::gpu::OSRELEASE),
         }
+    }
+
+    /// The driver's overdrive is on now (the restart after turning it on happened).
+    pub fn overdrive_on(&self) -> bool {
+        self.amdgpu_mask.is_some_and(|m| m & turbinehub_helper::gpu::OVERDRIVE_BIT != 0)
     }
 
     /// The name to show: the firmware's name for handhelds and laptops (desktop boards only carry codes), else a

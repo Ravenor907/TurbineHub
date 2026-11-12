@@ -3,6 +3,7 @@
 //! itself from these settings (see `render`), because a hand-written sysctl, udev, modprobe or systemd file can run
 //! any command as root.
 
+use crate::gpu;
 use crate::json::{Json, quote};
 
 /// One change the helper can make.
@@ -22,6 +23,13 @@ pub enum Setting {
     Module { name: String },
     /// A system service from `SERVICES` turned on or off.
     Service { unit: String, enabled: bool },
+    /// The graphics driver's overdrive (tuning) turned on: an options line for amdgpu with the live feature mask
+    /// plus the overdrive bit, recorded with the kernel it was made on. Takes effect at the next start. Only on
+    /// Radeon RX 7000 and RX 9000 cards.
+    GpuOverdrive { mask: u32, kernel: String },
+    /// A voltage offset (mV, 0 or below) for one graphics card, named by its PCI slot and checked against its ids
+    /// every time. Never put back at boot: the background helper puts it back once the session is up (see `gpu`).
+    GpuVoltage { slot: String, device: String, subsystem: String, offset: i32 },
 }
 
 /// The fixed device-access rules.
@@ -163,6 +171,8 @@ impl Setting {
             Setting::Zram { .. } => "zram".into(),
             Setting::Module { name } => format!("module:{name}"),
             Setting::Service { unit, .. } => format!("service:{unit}"),
+            Setting::GpuOverdrive { .. } => "gpu-overdrive".into(),
+            Setting::GpuVoltage { slot, .. } => format!("gpu-voltage:{slot}"),
         }
     }
 
@@ -202,6 +212,24 @@ impl Setting {
             Setting::Module { name } => Err(format!("{name} isn't a module Turbine Hub loads")),
             Setting::Service { unit, .. } if SERVICES.contains(&unit.as_str()) => Ok(()),
             Setting::Service { unit, .. } => Err(format!("{unit} isn't a service Turbine Hub changes")),
+            Setting::GpuOverdrive { mask, kernel } => {
+                if mask & gpu::OVERDRIVE_BIT == 0 || *mask == u32::MAX {
+                    Err("That feature mask isn't one Turbine Hub writes".into())
+                } else if !gpu::release_ok(kernel) {
+                    Err("That isn't a kernel release".into())
+                } else {
+                    Ok(())
+                }
+            }
+            Setting::GpuVoltage { slot, device, subsystem, offset } => {
+                if !gpu::slot_ok(slot) || !gpu::ids_ok(device) || !gpu::ids_ok(subsystem) || !device.starts_with("1002:") {
+                    Err("That isn't an AMD graphics card".into())
+                } else if *offset > 0 || *offset < gpu::FLOOR_MV || offset % gpu::STEP_MV != 0 {
+                    Err(format!("The offset is 0 to {} mV in steps of {} mV", gpu::FLOOR_MV, gpu::STEP_MV))
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -218,6 +246,11 @@ impl Setting {
             "zram" => Setting::Zram { percent: u32::try_from(n("percent")?).map_err(|_| "percent is too big")?, algorithm: s("algorithm")? },
             "module" => Setting::Module { name: s("name")? },
             "service" => Setting::Service { unit: s("unit")?, enabled: b("enabled")? },
+            "gpu-overdrive" => Setting::GpuOverdrive { mask: gpu::parse_mask(&s("mask")?).ok_or("mask must be a hex number")?, kernel: s("kernel")? },
+            "gpu-voltage" => {
+                let offset = j.get("offset").and_then(Json::as_f64).filter(|v| v.fract() == 0.0 && v.abs() <= 1000.0).ok_or("offset must be a whole number")? as i32;
+                Setting::GpuVoltage { slot: s("slot")?, device: s("device")?, subsystem: s("subsystem")?, offset }
+            }
             other => return Err(format!("Unknown setting kind {:?}", other.chars().take(32).collect::<String>())),
         };
         if let Setting::Sysfs { value, .. } | Setting::Zram { algorithm: value, .. } = &setting
@@ -238,6 +271,8 @@ impl Setting {
             Setting::Zram { percent, algorithm } => format!("{{\"kind\":\"zram\",\"percent\":{percent},\"algorithm\":{}}}", quote(algorithm)),
             Setting::Module { name } => format!("{{\"kind\":\"module\",\"name\":{}}}", quote(name)),
             Setting::Service { unit, enabled } => format!("{{\"kind\":\"service\",\"unit\":{},\"enabled\":{enabled}}}", quote(unit)),
+            Setting::GpuOverdrive { mask, kernel } => format!("{{\"kind\":\"gpu-overdrive\",\"mask\":{},\"kernel\":{}}}", quote(&gpu::mask_text(*mask)), quote(kernel)),
+            Setting::GpuVoltage { slot, device, subsystem, offset } => format!("{{\"kind\":\"gpu-voltage\",\"slot\":{},\"device\":{},\"subsystem\":{},\"offset\":{offset}}}", quote(slot), quote(device), quote(subsystem)),
         }
     }
 
@@ -249,7 +284,8 @@ impl Setting {
             Setting::Access { .. } => Some(ACCESS_FILE),
             Setting::Zram { .. } => Some(ZRAM_FILE),
             Setting::Module { .. } => Some(MODULES_FILE),
-            Setting::Sysfs { .. } | Setting::Service { .. } => None,
+            Setting::GpuOverdrive { .. } => Some(AMDGPU_FILE),
+            Setting::Sysfs { .. } | Setting::Service { .. } | Setting::GpuVoltage { .. } => None,
         }
     }
 
@@ -304,6 +340,8 @@ impl Setting {
                 _ => "A system service",
             }
             .into(),
+            Setting::GpuOverdrive { .. } => "Graphics card tuning (overdrive)".into(),
+            Setting::GpuVoltage { .. } => "Graphics card voltage".into(),
         }
     }
 
@@ -353,6 +391,8 @@ impl Setting {
             Setting::Access { .. } | Setting::Module { .. } => "on".into(),
             Setting::Zram { percent, .. } => format!("{percent}% of memory"),
             Setting::Service { enabled, .. } => if *enabled { "on" } else { "off" }.into(),
+            Setting::GpuOverdrive { .. } => "on from the next start".into(),
+            Setting::GpuVoltage { offset, .. } => mv_words(*offset),
         }
     }
 
@@ -366,6 +406,8 @@ impl Setting {
             Setting::Zram { percent, algorithm } => format!("{ZRAM_FILE}: zram-size = ram * {percent} / 100, compression-algorithm = {algorithm}"),
             Setting::Module { name } => format!("{MODULES_FILE}: {name}"),
             Setting::Service { unit, enabled } => format!("systemctl {} --now {unit}", if *enabled { "enable" } else { "disable" }),
+            Setting::GpuOverdrive { mask, kernel } => format!("{AMDGPU_FILE}: options amdgpu ppfeaturemask={} (kernel {kernel})", gpu::mask_text(*mask)),
+            Setting::GpuVoltage { slot, offset, .. } => format!("/sys/bus/pci/devices/{slot}/pp_od_clk_voltage: vo {offset}, then c"),
         }
     }
 
@@ -375,9 +417,15 @@ impl Setting {
             Setting::Access { .. } | Setting::Module { .. } => self.name(),
             Setting::Wake { vendor, product, wake } => format!("USB device {vendor}:{product} {} wake the machine", if *wake { "can" } else { "can't" }),
             Setting::Service { .. } => format!("{} turned {}", self.name(), self.value_shown()),
+            Setting::GpuOverdrive { .. } => "Graphics card tuning (overdrive) turned on".into(),
             _ => format!("{} set to {}", self.name(), self.value_shown()),
         }
     }
+}
+
+/// A voltage offset in a player's words: "-30 mV", and "0 mV (as made)".
+pub fn mv_words(offset: i32) -> String {
+    if offset == 0 { "0 mV (as made)".into() } else { format!("{offset} mV") }
 }
 
 /// A whole number with commas between thousands.
@@ -398,7 +446,9 @@ pub const WAKE_FILE: &str = "/etc/udev/rules.d/71-turbinehub-wake.rules";
 pub const ACCESS_FILE: &str = "/etc/udev/rules.d/70-turbinehub-access.rules";
 pub const ZRAM_FILE: &str = "/etc/systemd/zram-generator.conf.d/turbinehub.conf";
 pub const MODULES_FILE: &str = "/etc/modules-load.d/turbinehub.conf";
-pub const FILES: &[&str] = &[SYSCTL_FILE, WAKE_FILE, ACCESS_FILE, ZRAM_FILE, MODULES_FILE];
+/// The graphics driver's options: overdrive on. Read when the driver loads, from the next start.
+pub const AMDGPU_FILE: &str = "/etc/modprobe.d/turbinehub-amdgpu.conf";
+pub const FILES: &[&str] = &[SYSCTL_FILE, WAKE_FILE, ACCESS_FILE, ZRAM_FILE, MODULES_FILE, AMDGPU_FILE];
 
 const HEADER: &str = "# Written by Turbine Hub. Undo from Turbine Hub: Settings, Review changes.\n";
 
@@ -415,7 +465,11 @@ pub fn render(file: &str, settings: &[&Setting]) -> Option<String> {
             Setting::Access { what } => body.push_str(what.rule()),
             Setting::Zram { percent, algorithm } => body.push_str(&format!("[zram0]\nzram-size = ram * {percent} / 100\ncompression-algorithm = {algorithm}\n")),
             Setting::Module { name } => body.push_str(&format!("{name}\n")),
-            Setting::Sysfs { .. } | Setting::Service { .. } => {}
+            Setting::GpuOverdrive { mask, kernel } => body.push_str(&format!(
+                "# Graphics card tuning (overdrive), made on kernel {kernel}: the driver's own mask with the overdrive bit added.\n# It marks the kernel as tuned (taint S). Turn it off before reporting graphics problems.\noptions amdgpu ppfeaturemask={}\n",
+                gpu::mask_text(*mask)
+            )),
+            Setting::Sysfs { .. } | Setting::Service { .. } | Setting::GpuVoltage { .. } => {}
         }
     }
     (!body.is_empty()).then(|| format!("{HEADER}{body}"))
@@ -492,6 +546,8 @@ mod tests {
             r#"{"kind":"zram","percent":100,"algorithm":"zstd"}"#,
             r#"{"kind":"module","name":"ntsync"}"#,
             r#"{"kind":"service","unit":"sshd.service","enabled":true}"#,
+            r#"{"kind":"gpu-overdrive","mask":"0xfff7ffff","kernel":"7.2.7-valve2-2-neptune-72"}"#,
+            r#"{"kind":"gpu-voltage","slot":"0000:03:00.0","device":"1002:7550","subsystem":"1eae:8811","offset":-30}"#,
         ] {
             assert_eq!(from(text).unwrap().to_json(), text);
         }
@@ -525,5 +581,31 @@ mod tests {
         assert!(t.ends_with("vm.swappiness = 100\nvm.page-cluster = 0\n"));
         assert!(render(WAKE_FILE, &[&a]).is_none());
         assert!(render(WAKE_FILE, &[&w]).unwrap().contains("ATTRS{idVendor}==\"046d\", ATTRS{idProduct}==\"c548\", ATTR{power/wakeup}=\"disabled\""));
+    }
+
+    #[test]
+    fn the_graphics_card_settings_are_checked_and_written_by_the_helper_alone() {
+        let od = from(r#"{"kind":"gpu-overdrive","mask":"0xfff7ffff","kernel":"7.2.7-valve2"}"#).unwrap();
+        // Without the overdrive bit, everything on, a made-up kernel name.
+        assert!(from(r#"{"kind":"gpu-overdrive","mask":"0xfff7bfff","kernel":"7.2.7"}"#).is_err());
+        assert!(from(r#"{"kind":"gpu-overdrive","mask":"0xffffffff","kernel":"7.2.7"}"#).is_err());
+        assert!(from(r#"{"kind":"gpu-overdrive","mask":"0xfff7ffff","kernel":"7.2\noptions x"}"#).is_err());
+        let file = render(AMDGPU_FILE, &[&od]).unwrap();
+        assert!(file.ends_with("options amdgpu ppfeaturemask=0xfff7ffff\n") && file.contains("kernel 7.2.7-valve2"));
+        assert_eq!(file.lines().filter(|l| !l.starts_with('#')).count(), 1);
+        assert_eq!(od.file(), Some(AMDGPU_FILE));
+        assert!(FILES.contains(&AMDGPU_FILE));
+        let v = |o: i32| from(&format!(r#"{{"kind":"gpu-voltage","slot":"0000:03:00.0","device":"1002:7550","subsystem":"1eae:8811","offset":{o}}}"#));
+        assert!(v(0).is_ok() && v(-150).is_ok() && v(-30).is_ok());
+        for bad in [5, -155, -33, -1000] {
+            assert!(v(bad).is_err(), "{bad}");
+        }
+        assert!(from(r#"{"kind":"gpu-voltage","slot":"../../x","device":"1002:7550","subsystem":"1eae:8811","offset":0}"#).is_err());
+        assert!(from(r#"{"kind":"gpu-voltage","slot":"0000:03:00.0","device":"10de:2684","subsystem":"1eae:8811","offset":0}"#).is_err());
+        let s = v(-30).unwrap();
+        assert_eq!(s.words(), "Graphics card voltage set to -30 mV");
+        assert_eq!(s.key(), "gpu-voltage:0000:03:00.0");
+        assert!(s.file().is_none() && render(AMDGPU_FILE, &[&s]).is_none());
+        assert_eq!(od.words(), "Graphics card tuning (overdrive) turned on");
     }
 }

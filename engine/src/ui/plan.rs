@@ -101,11 +101,20 @@ pub struct Plan {
     pub then_open: String,
     /// The name of the thing it is about ("Discord"), for the line of work in the top bar. "" takes the title.
     pub what: String,
+    /// The cancel button's words.
+    pub cancel: String,
+    /// A press the window makes once every step worked: (action, arg, value). It asks the next question (keep
+    /// what was tried, restart now) with the state the steps left.
+    pub next: Option<(String, String, String)>,
 }
 
 impl Plan {
     pub fn new(title: &str, text: &str, confirm: &str) -> Plan {
-        Plan { title: title.into(), text: text.into(), items: Vec::new(), confirm: confirm.into(), ask: Ask::None, danger: false, steps: Vec::new(), done: String::new(), then_open: String::new(), what: String::new() }
+        Plan { title: title.into(), text: text.into(), items: Vec::new(), confirm: confirm.into(), ask: Ask::None, danger: false, steps: Vec::new(), done: String::new(), then_open: String::new(), what: String::new(), cancel: "Cancel".into(), next: None }
+    }
+    /// The press after the steps, as the window takes it: {"act","arg","value"}, or null.
+    pub fn next_json(&self) -> Json {
+        self.next.as_ref().map(|(a, g, v)| obj! {"act": s(a), "arg": s(g), "value": s(v)}).unwrap_or(Json::Null)
     }
     pub fn to_json(&self) -> Json {
         obj! {
@@ -113,7 +122,7 @@ impl Plan {
             "text": s(&self.text),
             "items": arr(self.items.iter().map(|(t, l)| obj! {"title": s(t), "line": s(l)})),
             "confirm": s(&self.confirm),
-            "cancel": s("Cancel"),
+            "cancel": s(&self.cancel),
             "ask": s(match self.ask { Ask::None => "", Ask::Current => "current", Ask::New => "new" }),
             "danger": b(self.danger),
         }
@@ -151,6 +160,13 @@ pub(crate) fn state() -> Json {
 }
 
 /// Shows the dialog and keeps the plan until the player answers.
+/// Runs a plan at once, with no dialog: the window confirms it right away (`go`). For what must never wait on a
+/// question: going back from a try, Safe reset, keeping what was tried while it counts down.
+pub(crate) fn go(ui: &mut Ui, plan: Plan) -> Json {
+    ui.pending = Some(plan);
+    obj! {"go": b(true)}
+}
+
 pub(crate) fn dialog(ui: &mut Ui, plan: Plan) -> Json {
     // Downloads can't work offline: say so before anything is asked or changed.
     if ui.offline && plan.needs_internet() {
@@ -304,6 +320,8 @@ pub(crate) fn change_item(ui: &Ui, st: &Setting) -> (String, String) {
         Setting::Wake { vendor, product, .. } => ui.machine().wake_devices.iter().find(|d| d.vendor == *vendor && d.product == *product).map(|d| if d.enabled { "yes" } else { "no" }.to_string()),
         Setting::Zram { .. } => Some(format!("{}% of memory", crate::tuneup::zram_percent(&ui.ctx.root))),
         Setting::Module { .. } | Setting::Access { .. } => None,
+        Setting::GpuOverdrive { .. } => Some(if ui.machine().overdrive_on() { "on" } else { "off" }.to_string()),
+        Setting::GpuVoltage { .. } => crate::modules::undervolt_card(&ui.machine()).and_then(|g| g.od.and_then(|o| o.offset)).map(turbinehub_helper::policy::mv_words),
     };
     let title = match before {
         Some(before) if before != after => format!("{}: {before} \u{2192} {after}", name_of(ui, st)),

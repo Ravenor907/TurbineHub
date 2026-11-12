@@ -3,7 +3,8 @@
 the hero (1920x620), the logo (see-through) and the icon. Everything is drawn here from the emblem
 (packaging/emblem.png: its shape is what counts) and the jade palette on true black, so the pictures can be made
 again exactly. Turbine Hub's mark is the turbine in jade inside a hex nut (the hub); Turbine Mod Manager's is the same
-turbine in brass, so the two are told apart at a glance:
+turbine in brass, so the two are told apart at a glance. Turbine Files (the explorer's own icon) is the same hex
+with a folder in it; its icons and its own art set (packaging/steam-art-files) are drawn here too:
 
     python3 tools/steam-art.py          needs Pillow and fonts/Cinzel.ttf (tools/get-fonts.sh)
 
@@ -92,6 +93,41 @@ def tile(size):
     return im.resize((size, size), Image.LANCZOS)
 
 
+def folder(size):
+    """A folder in brushed jade on a see-through ground: a tab at the top left, the body under it."""
+    big = size * 2
+    mask = Image.new("L", (big, big), 0)
+    d = ImageDraw.Draw(mask)
+    r = big * 0.06
+    d.rounded_rectangle([big * 0.06, big * 0.20, big * 0.50, big * 0.50], radius=r, fill=255)
+    d.polygon([(big * 0.40, big * 0.20), (big * 0.50, big * 0.20), (big * 0.60, big * 0.32), (big * 0.40, big * 0.32)], fill=255)
+    d.rounded_rectangle([big * 0.06, big * 0.31, big * 0.94, big * 0.82], radius=r, fill=255)
+    # A dark line under the tab, so the folder reads as one at 32 pixels too.
+    d.line([big * 0.13, big * 0.44, big * 0.87, big * 0.44], fill=0, width=max(2, round(big * 0.035)))
+    out = metal(size).convert("RGBA")
+    out.putalpha(mask.resize((size, size), Image.LANCZOS))
+    return out
+
+
+def files_tile(size):
+    """Turbine Files' icon: the same jade hex nut with a folder inside where Turbine Hub has the turbine."""
+    big = size * SS
+    rim = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(rim).polygon(hexagon(big / 2, big * 0.49), fill=255)
+    im = metal(big).convert("RGBA")
+    im.putalpha(rim)
+    face = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(face).polygon(hexagon(big / 2, big * 0.425), fill=255)
+    im.paste(Image.new("RGBA", (big, big), (4, 6, 5, 255)), (0, 0), face)
+    mark = folder(round(big * 0.52))
+    im.alpha_composite(mark, ((big - mark.width) // 2, (big - mark.height) // 2))
+    return im.resize((size, size), Image.LANCZOS)
+
+
+# Which hex the pictures carry: Turbine Hub's, or Turbine Files' while its set is drawn.
+MARK = tile
+
+
 def turbine_mask(size):
     """The emblem as a mask (white where it is), filling a square of this many pixels."""
     return emblem(size).getchannel("A")
@@ -116,7 +152,7 @@ def put_turbine(im, middle, size, faint=0):
         mask = turbine_mask(size).point(lambda v: v * faint // 255)
         im.paste(Image.new("RGB", (size, size), BRASS), box, mask)
     else:
-        mark = tile(size)
+        mark = MARK(size)
         im.paste(mark.convert("RGB"), box, mark.getchannel("A"))
 
 
@@ -139,31 +175,31 @@ def rule(im, middle, width, color=BRASS_LO):
     d.line([middle[0] - width / 2, middle[1], middle[0] + width / 2, middle[1]], fill=color, width=max(1, im.height // 300))
 
 
-def save(im, name):
-    os.makedirs(OUT, exist_ok=True)
+def save(im, name, out=OUT):
+    os.makedirs(out, exist_ok=True)
     # A fresh image holds the pixels and nothing else.
     clean = Image.frombytes(im.mode, im.size, im.tobytes())
-    clean.save(os.path.join(OUT, name), "PNG", optimize=True)
+    clean.save(os.path.join(out, name), "PNG", optimize=True)
     print(name, im.size, im.mode)
 
 
-def cover():
+def cover(second="HUB", spacing=0.5):
     w, h = 600, 900
     im = ground(w, h, (w // 2, 350), 330)
     put_turbine(im, (w // 2, 350), 380)
     words(im, "TURBINE", (w // 2, 640), 74)
     rule(im, (w // 2, 698), 300)
-    words(im, "HUB", (w // 2, 752), 74, spacing=0.5)
+    words(im, second, (w // 2, 752), 74, spacing=spacing)
     return im
 
 
-def wide():
+def wide(second="HUB", spacing=0.5):
     w, h = 920, 430
     im = ground(w, h, (215, h // 2), 240)
     put_turbine(im, (215, h // 2), 290)
     words(im, "TURBINE", (630, 172), 80)
     rule(im, (630, 228), 330)
-    words(im, "HUB", (630, 282), 80, spacing=0.5)
+    words(im, second, (630, 282), 80, spacing=spacing)
     return im
 
 
@@ -175,17 +211,17 @@ def hero():
     return im
 
 
-def logo():
+def logo(second="HUB", spacing=0.5):
     w, h = 1000, 400
     layer = Image.new("RGB", (w, h), BRASS)
     alpha = Image.new("L", (w, h), 0)
-    alpha.paste(tile(300).getchannel("A"), (40, 50))
+    alpha.paste(MARK(300).getchannel("A"), (40, 50))
     text = Image.new("L", (w, h), 0)
     words(text, "TURBINE", (680, 150), 96, fill=255)
     rule(text, (680, 216), 400, color=200)
-    words(text, "HUB", (680, 280), 96, spacing=0.5, fill=255)
+    words(text, second, (680, 280), 96, spacing=spacing, fill=255)
     alpha = ImageChops.lighter(alpha, text)
-    layer.paste(tile(300).convert("RGB"), (40, 50))
+    layer.paste(MARK(300).convert("RGB"), (40, 50))
     out = layer.convert("RGBA")
     out.putalpha(alpha)
     return out
@@ -206,6 +242,26 @@ def app_icons():
     Image.frombytes(mark.mode, mark.size, mark.tobytes()).save(EMBLEM, optimize=True)
 
 
+def files_art():
+    """Turbine Files: the explorer opened from its own icon. Its app icons and its own set of library art, the same
+    pictures with the folder hex and the word FILES."""
+    global MARK
+    for n in (32, 48, 64, 128, 256, 512):
+        out = os.path.join(ROOT, "packaging", f"io.github.ravenor907.TurbineHub.Files-{n}.png")
+        clean = files_tile(n)
+        Image.frombytes(clean.mode, clean.size, clean.tobytes()).save(out, optimize=True)
+    out = os.path.join(ROOT, "packaging", "steam-art-files")
+    MARK = files_tile
+    try:
+        save(cover("FILES", 0.3), "capsule.png", out)
+        save(wide("FILES", 0.3), "wide.png", out)
+        save(hero(), "hero.png", out)
+        save(logo("FILES", 0.3), "logo.png", out)
+        save(files_tile(256), "icon.png", out)
+    finally:
+        MARK = tile
+
+
 def main():
     if not os.path.isfile(FONT):
         sys.exit("fonts/Cinzel.ttf is missing: run sh tools/get-fonts.sh first")
@@ -214,6 +270,7 @@ def main():
     save(hero(), "hero.png")
     save(logo(), "logo.png")
     save(icon(), "icon.png")
+    files_art()
     app_icons()
 
 

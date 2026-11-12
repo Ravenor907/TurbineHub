@@ -831,6 +831,12 @@ const NEVER: &[&str] = &["/proc", "/sys", "/dev"];
 /// Looks for names that hold `needle` in a place and the folders below it, nearest first. Never follows a link out
 /// of the folder, never walks into /proc, /sys or /dev, and stops at the limits.
 pub fn search(fs: &dyn Fs, places: &Places, place: &Place, view: View, needle: &str, limits: Limits) -> Found {
+    search_with(fs, places, place, view, needle, limits, &mut |_| true)
+}
+
+/// The same search, told about as it goes: `step` hears what was found so far after every folder, and stops the
+/// search by answering false (what was found until then comes back, with `more` set).
+pub fn search_with(fs: &dyn Fs, places: &Places, place: &Place, view: View, needle: &str, limits: Limits, step: &mut dyn FnMut(&Found) -> bool) -> Found {
     let needle = needle.trim().to_lowercase();
     let mut found = Found { entries: Vec::new(), more: false };
     if needle.is_empty() {
@@ -842,6 +848,10 @@ pub fn search(fs: &dyn Fs, places: &Places, place: &Place, view: View, needle: &
     while let Some((dir, depth)) = queue.pop_front() {
         if NEVER.iter().any(|n| dir.starts_with(n)) {
             continue;
+        }
+        if !step(&found) {
+            found.more = true;
+            return found;
         }
         let mut names = fs.names(&dir).unwrap_or_default();
         names.sort();

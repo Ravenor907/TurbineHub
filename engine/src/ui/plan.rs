@@ -53,6 +53,9 @@ pub enum Step {
     SelfTile { add: bool },
     /// Writes Turbine Hub's own library art for its entry, never over the player's pictures.
     SelfArt,
+    /// Adds Turbine Files (Turbine Hub opened straight on Files) to the Steam library with its art, or takes that
+    /// entry out again.
+    FilesTile { add: bool },
     /// Fetches NonSteamLaunchers' script (or its Decky plugin's installer) at this release tag and starts it on the
     /// host, where it shows its own windows. Not waited for: the player works in its window.
     Nsl { tag: String, plugin: bool },
@@ -355,7 +358,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
     if action == "open" {
         return open(arg);
     }
-    let found = super::settings::act(ui, action, arg, value)
+    let found = super::files::act(ui, action, arg, value)
+        .or_else(|| super::settings::act(ui, action, arg, value))
         .or_else(|| super::games::act(ui, action, arg, value))
         .or_else(|| super::launch::act(ui, action, arg, value))
         .or_else(|| super::saves::act(ui, action, arg, value))

@@ -33,6 +33,7 @@ Made for people coming from Windows, with a mode for people who already know the
 | 🩺 **Home at a glance** | Battery, temperatures, power and fan, and a checkup that shows only what needs you, each with its fix |
 | 🎮 **Games** | Will my games run? for your whole library, per-game switches instead of typing launch options (FSR 4 on Radeon RX 9000, frame generation, Proton log), Try another Proton with Undo, and help when a game won't start. Games with online anti-cheat are never touched |
 | 🕰️ **Save time machine** | A snapshot of a game's saves every time it starts, restore in one press, and Undo. Saves from your Windows drive come along too |
+| 📁 **Files** | A file explorer laid out like the one on Windows, in Game Mode too: This PC, C:, Users, Games, Program Files and the Recycle Bin over the real SteamOS folders, each game's own Windows C: drive one press away, and a True Linux view of the same disk. No password, ever |
 | 🧩 **Store** | Hand-picked apps from Flathub, launchers through [NonSteamLaunchers](https://github.com/moraroy/NonSteamLaunchers-On-Steam-Deck), Decky Loader from its official release, TV and streaming tiles, emulation |
 | 🪟 **Bring it over** | Copy Steam games from your Windows drive instead of downloading them again, and find the SteamOS version of the Windows apps you use. The Windows drive is only ever read |
 | 🖥️ **My machine** | Power limit, Game Boost, screen and refresh range, battery charge limit, sleep and wake, graphics card power, drives, sound, dock and a system tune-up, shown only when your machine has them |
@@ -88,6 +89,7 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
 | **Home** | Readings, the checkup with a fix for each item, Finish setting up, updates. Veteran adds quick switches and recent activity |
 | **Games** | Every Steam and Heroic game with how well it runs here, Play, switches, Proton choice, saves and "Won't start?" help, plus a library check |
 | **Store** | Essentials, Apps, Decky plugins, Launchers, TV and streaming, Emulation, Installed. Each item has its own page with Install, Open, Update and Remove |
+| **Files** | The file explorer: tabs, back, forward and up, an address that takes Windows-style and real paths, search, New, Cut, Copy, Paste, Rename, Delete, sorting and grouping, a details pane, the Recycle Bin with Undo. Also opens from its own icon, Turbine Files |
 | **My machine** | Cards for what this machine has: Power, Display or Monitors, Lighting, Battery, Sleep and wake, Graphics card, Drives, Sound, Dock, Tune-up, Restart to Windows (only when Windows is really there) |
 | **Settings** | Mode, interface size (50 to 150%), themes and accents, colors for red-weak, green-weak and blue-weak eyes (or no color), animations (Full, Reduced, Off), the background helper, the save time machine, updates, My setup (save and apply), Help, Review changes, remove completely |
 
@@ -115,6 +117,29 @@ Turbine Hub tells you on Home when a newer version is out (Settings, Updates).
   saves first.
 - **Saves**: a snapshot each time a game starts (with [Ludusavi](https://github.com/mtkennerly/ludusavi)), Back up
   now, and Restore that keeps your current saves first.
+
+</details>
+
+<details>
+<summary><b>Files</b></summary>
+
+Laid out like Windows Explorer, in Turbine Hub's look. **Windows-like** (where Guided starts) names places the way
+Windows does: Home, This PC with every drive and its free room, SteamOS (C:), Users, AppData, Games (every installed
+game, each with its files and **Its Windows C: drive**, where saves and mods live), Program Files and the Recycle
+Bin. **True Linux** (where Veteran starts) shows every real name, hidden file and permission. The switch is always
+on the command bar, the real path is always in the status bar, and the address takes either kind of path.
+
+Everything a file manager does: new folder, text file and shortcut, cut, copy, paste, rename in place, delete to
+the Recycle Bin (the same one Desktop Mode's file manager uses), restore, Undo for the last thing done, several tabs,
+pinned folders, search in a folder and below it, text and pictures shown inside the app. A name that is taken asks
+(skip, replace, keep both), and a long copy runs in the background with its progress in the status bar. SteamOS's
+own files are shown locked and never changed, and no file action ever asks for a password.
+
+At a keyboard it has Explorer's keys (F2, Del, Ctrl+C / X / V / A / Z, Ctrl+T / W, Ctrl+L, Alt+Up, a letter jumps
+to a name) and with a mouse its ways (double click, Ctrl and Shift click, right-click menu, middle click for a new
+tab, drag and drop). On a controller A opens, B goes back, Start ticks a line and X is the menu. Full screen it
+grows with the screen; in a Desktop Mode window it keeps one size, so a bigger monitor shows more files.
+**Turbine Files** is the same explorer as its own app icon, and Settings can add it to your Steam library.
 
 </details>
 
@@ -177,7 +202,12 @@ Mode. Nothing opens a separate window. The controls are the same as in
 
 **Options** is a menu for whatever the highlight is on: what **A** does there first, then everything else that thing
 and the page can do, each with its own button where it has one. **Find** jumps to the search box of Games, the
-Store and Where's my...?; in Game Mode Steam's keyboard opens for it.
+Store, Files and Where's my...?; in Game Mode Steam's keyboard opens for it.
+
+In **Files**, Start ticks the highlighted line and B goes back a folder. At a keyboard a letter jumps to the name
+that starts with it, as on Windows, so there Options is Shift+F10 (or a right-click), Find is Ctrl+F and the tabs
+are Page Up and Page Down; F2, Del, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Z, Ctrl+A, Ctrl+T, Ctrl+W, Ctrl+L, Alt+Up, Alt+Left
+and Alt+Enter do what they do in Explorer.
 
 The right stick moves a pointer that Turbine Hub draws itself, so it works in Game Mode too. It hides after a few
 seconds and as soon as the D-pad is used.

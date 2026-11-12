@@ -23,7 +23,7 @@ pub mod quick;
 pub mod trash;
 
 pub use fs::{Disk, Fs, Map, Meta, NodeKind, Space, clean};
-pub use list::{Entry, Found, Group, Kind, Limits, Listing, Options, Sort, list, search};
+pub use list::{Entry, Found, Group, Kind, Limits, Listing, Options, Sort, list, search, search_with};
 pub use ops::{Answers, Choice, Done, History, Op, OpKind, Plan, Progress, Undo, plan, run, undo};
 pub use places::{AppAt, DriveAt, GameAt, NavItem, Places, UserDir, Who};
 pub use preview::{Preview, Properties, open_line, preview, properties};

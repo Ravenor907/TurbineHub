@@ -64,25 +64,25 @@ fn a_search_matches_words_whatever_their_case_and_marks() {
 fn the_games_search_narrows_the_list_and_says_when_nothing_matches() {
     let mut u = ui("search", HANDHELD);
     let j = parse(&u.page("games", "")).unwrap();
-    assert_eq!(side(&j).len(), 8);
+    assert_eq!(side(&j).len(), 9);
     assert_eq!(j.get("search").unwrap().str_at("hint"), Some("Search games"));
     assert!(hints(&j).contains(&"Find"));
     assert_eq!(parse(&u.act("search", "games", "el")).unwrap().get("refresh").and_then(Json::as_bool), Some(true));
     // The game that was picked isn't among the matches any more: the first match shows.
     let j = parse(&u.page("games", BG3)).unwrap();
     assert_eq!(side(&j), vec!["Elden Ring", "Helldivers 2"]);
-    assert_eq!((j.str_at("sideTitle"), j.get("search").unwrap().str_at("value")), (Some("2 of 8 games"), Some("el")));
+    assert_eq!((j.str_at("sideTitle"), j.get("search").unwrap().str_at("value")), (Some("2 of 9 games"), Some("el")));
     assert_eq!(j.get("header").unwrap().str_at("title"), Some("Elden Ring"));
     assert_eq!(parse(&u.page("games", "steam:553850")).unwrap().get("header").unwrap().str_at("title"), Some("Helldivers 2"));
     // Nothing matches: the box stays, with a plain sentence beside it.
     u.act("search", "games", "zelda\n");
     let j = parse(&u.page("games", "")).unwrap();
     assert!(side(&j).is_empty() && rows(&j).is_empty());
-    assert_eq!((j.str_at("empty"), j.str_at("sideTitle")), (Some("No game matches \"zelda\"."), Some("0 of 8 games")));
+    assert_eq!((j.str_at("empty"), j.str_at("sideTitle")), (Some("No game matches \"zelda\"."), Some("0 of 9 games")));
     assert_eq!(j.get("search").unwrap().str_at("value"), Some("zelda"));
     // Emptied, everything is back. Long text is cut, and only Games and the Store have a search.
     u.act("search", "games", "");
-    assert_eq!(parse(&u.page("games", "")).unwrap().str_at("sideTitle"), Some("Installed \u{b7} 8 games"));
+    assert_eq!(parse(&u.page("games", "")).unwrap().str_at("sideTitle"), Some("Installed \u{b7} 9 games"));
     u.act("search", "games", &"x".repeat(200));
     assert_eq!(parse(&u.page("games", "")).unwrap().get("search").unwrap().str_at("value").unwrap().len(), 60);
     assert!(parse(&u.act("search", "settings", "x")).unwrap().entries().is_empty());
@@ -311,7 +311,7 @@ fn snapshots_are_listed_and_a_restore_keeps_the_current_saves_first() {
     // Without a game the page lists every game with its count.
     let j = parse(&u.page("saves", "")).unwrap();
     let list = rows(&j);
-    assert_eq!(list.len(), 8);
+    assert_eq!(list.len(), 9);
     let bg3 = list.iter().find(|r| r.str_at("title") == Some("Baldur's Gate 3")).unwrap();
     assert_eq!((bg3.str_at("line"), bg3.str_at("arg")), (Some("3 snapshots"), Some("saves|steam:1086940")));
     assert!(sections(&parse(&u.page("games", BG3)).unwrap()).iter().any(|(t, r)| t == "Saves" && r[0].str_at("line").unwrap().starts_with("3 snapshots")));
@@ -385,7 +385,7 @@ fn the_store_search_looks_everywhere_and_names_come_first() {
     assert!(rows(&j).is_empty());
     assert_eq!(j.get("sections").unwrap().as_array()[0].str_at("empty"), Some("Nothing in the Store matches \"qqq\"."));
     // The games search is its own.
-    assert_eq!(side(&parse(&u.page("games", "")).unwrap()).len(), 8);
+    assert_eq!(side(&parse(&u.page("games", "")).unwrap()).len(), 9);
     u.act("search", "store", "");
     let j = parse(&u.page("store", "tv")).unwrap();
     assert_eq!((j.get("header").unwrap().str_at("title"), side(&j).len()), (Some("TV and streaming"), 7));

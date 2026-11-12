@@ -170,6 +170,15 @@ pub fn is_self(s: &Shortcut) -> bool {
 
 /// Turbine Hub's own entry among the player's non-Steam games, if it was added to Steam: after signing in with the
 /// player's own browser in Game Mode, steam://rungameid/<its id> brings Turbine Hub back to the front. Read only.
+/// What marks the entry that opens Turbine Hub straight on Files ("Turbine Files"): it is Turbine Hub's program,
+/// and never taken for Turbine Hub's own entry.
+pub const FILES_MARK: &str = "--page=files";
+
+/// Is this Turbine Hub's own entry: the app itself, not its co-op tile and not Turbine Files?
+fn is_main(s: &Shortcut) -> bool {
+    is_self(s) && !s.launch_options.contains("--play-coop") && !s.launch_options.contains(FILES_MARK)
+}
+
 pub fn find_self(home: &Path) -> Option<(u32, String)> {
     for f in shortcut_files(home) {
         let Ok(bytes) = std::fs::read(&f) else { continue };
@@ -177,7 +186,7 @@ pub fn find_self(home: &Path) -> Option<(u32, String)> {
             continue;
         }
         let Ok(list) = parse(&bytes) else { continue };
-        if let Some(s) = list.iter().find(|s| is_self(s) && !s.launch_options.contains("--play-coop")) {
+        if let Some(s) = list.iter().find(|s| is_main(s)) {
             return Some((s.appid, s.name.clone()));
         }
     }
@@ -511,7 +520,7 @@ pub fn find_self_file(home: &Path) -> Option<(PathBuf, u32)> {
             continue;
         }
         let Ok(list) = parse(&bytes) else { continue };
-        if let Some(s) = list.iter().find(|s| is_self(s) && !s.launch_options.contains("--play-coop")) {
+        if let Some(s) = list.iter().find(|s| is_main(s)) {
             return Some((f, s.appid));
         }
     }

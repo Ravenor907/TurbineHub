@@ -3,7 +3,8 @@ import TurbineHub
 
 // The build's checks on one page, loaded only in screenshot runs (Main.qml, --screenshot). After the page settles
 // it walks everything on screen and fails the run when:
-//   words are cut off (elided, or wider or taller than the box that clips them);
+//   words are cut off (elided, or wider or taller than the box that clips them), other than a file's name in
+//   Files, which is cut on purpose where it doesn't fit (`mayCut`);
 //   words or a control stick out of the window, or sideways out of the list they scroll in;
 //   words are smaller than 12 pixels (the text floor, app.fpx), or taller or wider than the box drawn around them;
 //   words don't read on what they are drawn on (under 4.5 to 1, measured from the colors really drawn);
@@ -56,6 +57,7 @@ import TurbineHub
 //           last, and R closes it again; a right-click opens them for the row under the mouse and for the page
 //           beside every row; F and a typed letter start Find; Tab opens the menu and moves through it; F1 is
 //           Help; RT jumps further than Down; Space is A and Space held plays; Ctrl+Enter is Start
+//   files-mouse, files-keys, files-pad   Files worked the way Explorer is: see them in `script`
 // Each prints "INPUTCHECK ok: <name>" when nothing failed.
 //
 // app (required): Main.qml's window. target (required): where the picture goes.
@@ -673,9 +675,145 @@ Item {
                 }],
                 // Ctrl+Enter is Start: with no main button on the page, Settings.
                 [ready, () => { key(Qt.Key_Return, Qt.ControlModifier) }],
-                [ready, () => { if (app.tab !== 4) fail("options: Ctrl+Enter (Start) on a page with no main button didn't open Settings"); app.goTab(1) }],
+                [ready, () => { if (app.tab !== app.tabIndex("settings")) fail("options: Ctrl+Enter (Start) on a page with no main button didn't open Settings"); app.goTab(app.tabIndex("games")) }],
                 [ready, () => {}],
             ]
+        }
+        // ---------------------------------------------------------------- Files
+        // files-mouse  a click picks a line and Ctrl with a click picks another; a double click opens; a right-click
+        //              opens the line's menu with its row of icons; a drag onto a place moves the file there and
+        //              Ctrl+Z brings it back; the middle button opens a folder in a new tab
+        // files-keys   F2 renames in place; a letter jumps to a name; Ctrl+C, Alt+Up, Ctrl+L with a typed path and
+        //              Ctrl+V copy a file to another folder; Del sends it to the Recycle Bin and Ctrl+Z brings it
+        //              back; Ctrl+A ticks everything; Ctrl+T and Ctrl+W open and close a tab
+        // files-pad    A opens a folder and B goes back; Start ticks and B unticks; X is the menu; Y is Find; the
+        //              pointer's click opens what is under it and R3 held is its menu
+        if (name.startsWith("files-")) {
+            const page = () => app.parts.view.item
+            const cell = (n) => every(page()).find(x => x.row !== undefined && x.idx !== undefined && x.row.name === n) || null
+            const navOf = (label) => every(page()).find(x => x.dropPath !== undefined && x.row !== undefined && x.idx === undefined && x.row.label === label) || null
+            const names = () => (app.model.rows || []).filter(r => r.name !== undefined).map(r => r.name)
+            const has = (n) => names().indexOf(n) >= 0
+            const at = (what, place) => { if (app.model.place !== place) fail(name + ": " + what + " didn't lead to " + place + " (it is " + app.model.place + ")") }
+            const lit = (n) => { const i = page().flat.findIndex(r => r.name === n); if (i < 0 || !page().focusFlat(i)) fail(name + ": no line is named " + n) }
+            const ctrl = Qt.ControlModifier
+            if (name === "files-mouse") return [
+                [ready, () => { v.place = app.model.place; const c = cell("heroic-save-backup.zip"); if (!c) { fail("files-mouse: the list isn't there"); return } click(middle(c)) }],
+                [quiet, () => {
+                    if (page().tickedCount !== 1 || !page().ticked["/home/deck/Downloads/heroic-save-backup.zip"]) fail("files-mouse: a click didn't pick the line (" + page().tickedCount + " picked)")
+                    at("a single click", v.place)
+                    if (page().viewing) fail("files-mouse: a single click opened the file")
+                    const p = middle(cell("bg3-mod-fixer.zip"))
+                    moveTo(p); Hub.testMouse(1, p.x, p.y, Qt.LeftButton, ctrl, 0); Hub.testMouse(2, p.x, p.y, Qt.LeftButton, ctrl, 0)
+                }],
+                [quiet, () => {
+                    if (page().tickedCount !== 2) fail("files-mouse: Ctrl with a click didn't pick a second line (" + page().tickedCount + " picked)")
+                    const p = middle(cell("ProtonGE-notes.txt"))
+                    click(p); click(p)
+                }],
+                [ready, () => {
+                    if (!page().viewing || app.model.viewer.kind !== "text") fail("files-mouse: a double click didn't open the text file")
+                    key(Qt.Key_Escape)
+                }],
+                [ready, () => { if (page().viewing) fail("files-mouse: Esc didn't close the file"); click(middle(cell("wallpaper-jade.png")), Qt.RightButton) }],
+                [ready, () => {
+                    const d = dialog.d
+                    if (!dialog.open || d.options !== true || d.title !== "wallpaper-jade.png") { fail("files-mouse: a right-click didn't open the line's menu"); return }
+                    if ((d.strip || []).map(x => x.title).join(",") !== "Cut,Copy,Rename,Delete") fail("files-mouse: the menu lacks its row of icons (" + (d.strip || []).map(x => x.title).join(",") + ")")
+                    if (d.rows[0].local !== "a" || d.rows[0].title !== "Open") fail("files-mouse: Open isn't the menu's first line")
+                    for (const t of ["Copy as path", "Copy real path", "Properties"]) if (!d.rows.some(r => r.title === t)) fail("files-mouse: the menu lacks " + t)
+                    if (d.rows[d.rows.length - 1].key !== "f1") fail("files-mouse: Help isn't last in the menu")
+                    key(Qt.Key_Escape)
+                }],
+                // A drag onto Documents in the navigation pane moves the file there.
+                [ready, () => {
+                    const from = middle(cell("ProtonGE-notes.txt")), to = middle(navOf("Documents"))
+                    Hub.pointerEvent(0, from.x, from.y, 0, 0, 0)
+                    Hub.pointerEvent(1, from.x, from.y, Qt.LeftButton, Qt.LeftButton, 0)
+                    for (let i = 1; i <= 12; i++) Hub.pointerEvent(0, from.x + (to.x - from.x) * i / 12, from.y + (to.y - from.y) * i / 12, 0, Qt.LeftButton, 0)
+                    if (page().dragging === null) fail("files-mouse: the line didn't follow the mouse")
+                    Hub.pointerEvent(2, to.x, to.y, Qt.LeftButton, 0, 0)
+                }],
+                [ready, () => {
+                    if (has("ProtonGE-notes.txt")) fail("files-mouse: the dragged file is still in Downloads")
+                    if (!String(app.model.undo).startsWith("Undo moving")) fail("files-mouse: the move can't be undone (" + app.model.undo + ")")
+                    at("a drag", v.place)
+                    key(Qt.Key_Z, ctrl)
+                }],
+                [ready, () => {
+                    if (!has("ProtonGE-notes.txt")) fail("files-mouse: Ctrl+Z didn't bring the file back")
+                    click(middle(navOf("Pictures")), Qt.MiddleButton)
+                }],
+                [ready, () => {
+                    if ((app.model.tabs || []).length !== 2 || app.model.place !== "/home/deck/Pictures") fail("files-mouse: the middle button didn't open the folder in a new tab")
+                    key(Qt.Key_W, ctrl)
+                }],
+                [ready, () => { if ((app.model.tabs || []).length !== 1) fail("files-mouse: Ctrl+W didn't close the tab"); at("closing the tab", v.place) }],
+            ]
+            if (name === "files-keys") {
+                const type = (text) => { for (const ch of text) key(ch === "/" ? Qt.Key_Slash : ch.toUpperCase().charCodeAt(0)) }
+                return [
+                    [ready, () => { v.place = app.model.place; lit("wallpaper-jade.png"); key(Qt.Key_F2) }],
+                    [200, () => { if (page().renaming === "" || !app.typing) fail("files-keys: F2 didn't start the renaming"); type("x") }],
+                    [100, () => key(Qt.Key_Return)],
+                    [ready, () => {
+                        if (!has("x.png") || has("wallpaper-jade.png")) fail("files-keys: the typed name wasn't taken (" + names().join(", ") + ")")
+                        if (app.lastFid !== "row:/home/deck/Downloads/x.png") fail("files-keys: the renamed file lost the highlight (" + app.lastFid + ")")
+                        key(Qt.Key_Z, ctrl)
+                    }],
+                    [ready, () => { if (!has("wallpaper-jade.png")) fail("files-keys: Ctrl+Z didn't put the name back"); lit("bg3-mod-fixer.zip"); key(Qt.Key_T) }],
+                    [1000, () => { if (app.lastFid !== "row:/home/deck/Downloads/trailer-capture.mp4") fail("files-keys: T didn't jump to the name that starts with it (" + app.lastFid + ")"); lit("ProtonGE-notes.txt"); key(Qt.Key_C, ctrl) }],
+                    [ready, () => { if (app.model.clip.count !== 1 || app.model.clip.cut) fail("files-keys: Ctrl+C didn't copy the file"); Hub.testKey(Qt.Key_Up, Qt.AltModifier, true, false); Hub.testKey(Qt.Key_Up, Qt.AltModifier, false, false) }],
+                    [ready, () => { at("Alt+Up", "/home/deck"); if (app.lastFid !== "row:/home/deck/Downloads") fail("files-keys: the folder just left didn't keep the highlight (" + app.lastFid + ")"); key(Qt.Key_L, ctrl) }],
+                    [200, () => { if (!app.typing || !page().pathEdit) fail("files-keys: Ctrl+L didn't open the address for typing"); type("c:\\users\\deck\\documents") }],
+                    [100, () => key(Qt.Key_Return)],
+                    [ready, () => { at("a typed path", "/home/deck/Documents"); key(Qt.Key_V, ctrl) }],
+                    [ready, () => {
+                        if (!has("ProtonGE-notes.txt")) fail("files-keys: Ctrl+V didn't paste the copy")
+                        lit("ProtonGE-notes.txt"); key(Qt.Key_Delete)
+                    }],
+                    [ready, () => {
+                        if (has("ProtonGE-notes.txt")) fail("files-keys: Del didn't delete the file")
+                        if (!String(app.model.undo).startsWith("Undo deleting")) fail("files-keys: the delete can't be undone (" + app.model.undo + ")")
+                        key(Qt.Key_Z, ctrl)
+                    }],
+                    [ready, () => { if (!has("ProtonGE-notes.txt")) fail("files-keys: Ctrl+Z didn't bring the file back from the Recycle Bin"); key(Qt.Key_A, ctrl) }],
+                    [200, () => { if (page().tickedCount !== names().length || names().length < 2) fail("files-keys: Ctrl+A didn't tick every line (" + page().tickedCount + " of " + names().length + ")"); key(Qt.Key_Escape) }],
+                    [ready, () => { if (page().tickedCount !== 0) fail("files-keys: Esc didn't untick"); at("Esc with lines ticked", "/home/deck/Documents"); key(Qt.Key_T, ctrl) }],
+                    [ready, () => { if ((app.model.tabs || []).length !== 2) fail("files-keys: Ctrl+T didn't open a tab"); key(Qt.Key_W, ctrl) }],
+                    [ready, () => { if ((app.model.tabs || []).length !== 1) fail("files-keys: Ctrl+W didn't close the tab"); at("closing the tab", "/home/deck/Documents") }],
+                ]
+            }
+            if (name === "files-pad") {
+                const r3 = () => { app.padEvent("r3", true); app.padEvent("r3", false) }
+                return [
+                    [ready, () => { lit("Downloads"); app.padPress("a") }],
+                    [ready, () => { at("A on a folder", "/home/deck/Downloads"); app.padPress("b") }],
+                    [ready, () => { at("B", "/home/deck"); lit("Documents"); app.padPress("start") }],
+                    [200, () => { if (page().tickedCount !== 1) fail("files-pad: Start didn't tick the line"); if (app.parts.bottomBar.hints.find(h => h.k === "b").label !== "Clear selection") fail("files-pad: B doesn't say it unticks"); app.padPress("b") }],
+                    [ready, () => { if (page().tickedCount !== 0) fail("files-pad: B didn't untick"); at("B with a line ticked", "/home/deck"); app.padPress("x") }],
+                    [ready, () => {
+                        if (!dialog.open || dialog.d.options !== true || dialog.d.title !== "Documents") fail("files-pad: X didn't open the line's menu")
+                        else if ((dialog.d.strip || []).length !== 4) fail("files-pad: the menu lacks its row of icons")
+                        else if (!dialog.d.rows.some(r => r.title === "Open in new tab") || !dialog.d.rows.some(r => r.title === "Select" && r.key === "start")) fail("files-pad: the menu lacks Open in new tab or Select")
+                        app.padPress("b")
+                    }],
+                    [ready, () => { if (dialog.open) fail("files-pad: B didn't close the menu"); app.padPress("y") }],
+                    [200, () => { if (!app.typing) fail("files-pad: Y didn't start Find"); app.padPress("b") }],
+                    [ready, () => { if (app.typing) fail("files-pad: B didn't end the typing"); at("B while typing", "/home/deck"); const c = cell("Pictures"); if (c) steer(middle(c)) }],
+                    [200, () => { if (app.lastFid !== "row:/home/deck/Pictures") fail("files-pad: the pointer on a line didn't take the highlight (" + app.lastFid + ")"); r3() }],
+                    [ready, () => { at("the pointer's click", "/home/deck/Pictures"); const c = cell("Screenshots"); if (c) steer(middle(c)) }],
+                    [200, () => { app.padEvent("r3", true) }],
+                    [app.motion.holdClick + 200, () => {}],
+                    [ready, () => {
+                        if (!dialog.open || dialog.d.options !== true || dialog.d.title !== "Screenshots") fail("files-pad: R3 held didn't open the menu of what is under the pointer")
+                        app.padEvent("r3", false)
+                        at("R3 held", "/home/deck/Pictures")
+                        app.padPress("b")
+                    }],
+                    [ready, () => { if (dialog.open) fail("files-pad: B didn't close the menu") }],
+                ]
+            }
         }
         fail("no input check is called " + name)
         return []
@@ -716,7 +854,9 @@ Item {
             counts.texts++
             const at = it.mapToItem(null, 0, 0)
             const w = Math.min(it.width, it.contentWidth > 0 ? it.contentWidth : it.width)
-            if (it.truncated) fail("cut off: " + words(it))
+            // (A file's name in a list is cut where it doesn't fit, as every explorer cuts it: `mayCut`. The whole
+            // name is what a screen reader hears, and what the details pane and Properties show.)
+            if (it.truncated && it.mayCut !== true) fail("cut off: " + words(it))
             if (it.wrapMode === Text.NoWrap && it.contentWidth > it.width + 1 && it.width > 0 && it.elide === Text.ElideNone && it.fontSizeMode === Text.FixedSize) fail("wider than its box: " + words(it))
             if (it.font.pixelSize < app.textFloor) fail("too small (" + it.font.pixelSize + " px, the floor is " + app.textFloor + "): " + words(it))
             // Words taller or wider than the box drawn around them (a box that didn't grow with the text floor).

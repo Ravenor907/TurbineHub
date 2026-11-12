@@ -207,6 +207,86 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("help-controls", "--page=help --arg=games@steam:1086940 --machine=handheld --mode=guided"),
     ("help-controls-quick", "--page=help --arg=quick@ --machine=desktop --mode=veteran"),
     ("motion-options", "--page=machine --keys=down,x,down --machine=handheld --mode=guided --motion=full"),
+    // Files, the explorer. Each is taken at 1280x800 (a handheld), 1920x1080 and as a 1600x900 Desktop Mode window
+    // (Explorer's strip of tabs, lines for a mouse). The page's argument sets it up: the place, the view, what is
+    // highlighted (engine/src/ui/files.rs, `apply`).
+    ("files-home", "--page=files --machine=handheld --mode=guided"),
+    ("files-this-pc", "--page=files --arg=at=pc --machine=handheld --mode=guided"),
+    ("files-downloads", "--page=files --arg=at=/home/deck/Downloads --machine=handheld --mode=guided"),
+    ("files-downloads-linux", "--page=files --arg=view=linux;at=/home/deck/Downloads --machine=handheld --mode=guided"),
+    ("files-veteran", "--page=files --machine=handheld --mode=veteran"),
+    ("files-linux-root", "--page=files --arg=view=linux;at=/ --machine=handheld --mode=veteran"),
+    ("files-c-drive", "--page=files --arg=at=/ --machine=handheld --mode=guided"),
+    ("files-games", "--page=files --arg=at=games --machine=handheld --mode=guided"),
+    ("files-game", "--page=files --arg=at=game:steam:1086940 --machine=handheld --mode=guided"),
+    ("files-game-windows-drive", "--page=files --arg=at=/home/deck/.local/share/Steam/steamapps/compatdata/1086940/pfx/drive_c --machine=handheld --mode=guided"),
+    ("files-program-files", "--page=files --arg=at=programs --machine=handheld --mode=guided"),
+    ("files-appdata", "--page=files --arg=at=appdata --machine=handheld --mode=guided"),
+    ("files-windows-locked", "--page=files --arg=at=windows --machine=handheld --mode=guided"),
+    ("files-sd-card", "--page=files --arg=at=/run/media/deck/sdcard --machine=handheld --mode=guided"),
+    ("files-recycle-bin", "--page=files --arg=at=trash --machine=handheld --mode=guided"),
+    ("dialog-files-empty-bin", "--page=files --arg=at=trash --act=files-empty: --machine=handheld --mode=guided"),
+    ("files-menu", "--page=files --arg=at=/home/deck/Downloads;sel=wallpaper-jade.png --keys=x --machine=handheld --mode=guided"),
+    ("files-menu-folder", "--page=files --arg=at=/home/deck/Pictures --keys=x --machine=handheld --mode=guided"),
+    ("files-menu-page", "--page=files --arg=at=/home/deck/Music --keys=x --machine=handheld --mode=guided"),
+    ("files-menu-new", "--page=files --arg=at=/home/deck/Documents --act=files-menu:new --machine=handheld --mode=guided"),
+    ("files-menu-view", "--page=files --arg=at=/home/deck/Documents --act=files-menu:view --machine=handheld --mode=guided"),
+    ("files-rename", "--page=files --arg=at=/home/deck/Downloads --act=files-rename-start:/home/deck/Downloads/wallpaper-jade.png --machine=handheld --mode=guided"),
+    ("dialog-files-conflict", "--page=files --arg=at=/home/deck/Pictures --act=files-drop:copy|/home/deck/Pictures --value=[\"/home/deck/Downloads/wallpaper-jade.png\"] --machine=handheld --mode=guided"),
+    ("files-copying", "--page=files --arg=at=/home/deck/Downloads --act=files-demo:copy --machine=handheld --mode=guided"),
+    ("dialog-files-properties", "--page=files --arg=at=/home/deck/Downloads --act=files-props:/home/deck/Downloads/wallpaper-jade.png --machine=handheld --mode=guided"),
+    ("dialog-files-properties-veteran", "--page=files --arg=at=/home/deck --act=files-props:/home/deck/Downloads --machine=handheld --mode=veteran"),
+    ("files-pane-picture", "--page=files --arg=at=/home/deck/Downloads;pane=1;sel=wallpaper-jade.png --machine=handheld --mode=guided"),
+    ("files-pane-text", "--page=files --arg=at=/home/deck/Downloads;pane=1;sel=ProtonGE-notes.txt --machine=handheld --mode=guided"),
+    ("files-pane-folder", "--page=files --arg=at=/home/deck;pane=1;sel=Pictures --machine=handheld --mode=guided"),
+    ("files-search", "--page=files --arg=at=/home/deck/Downloads;search=zip --machine=handheld --mode=guided"),
+    ("files-search-below", "--page=files --arg=at=/home/deck;search=wallpaper;deep=1 --machine=handheld --mode=guided"),
+    ("files-search-none", "--page=files --arg=at=/home/deck/Downloads;search=zelda --machine=handheld --mode=guided"),
+    ("files-large-icons", "--page=files --arg=at=/home/deck/Downloads;layout=icons --machine=handheld --mode=guided"),
+    ("files-list-view", "--page=files --arg=at=/home/deck/Downloads;layout=list;sort=name --machine=handheld --mode=guided"),
+    ("files-hidden", "--page=files --arg=at=/home/deck;hidden=1 --machine=handheld --mode=guided"),
+    ("files-narrow", "--page=files --arg=at=/home/deck/Downloads --half --machine=handheld --mode=guided"),
+    ("files-narrow-this-pc", "--page=files --arg=at=pc --half --machine=desktop --mode=guided"),
+    ("files-tabs", "--page=files --arg=at=/home/deck/Downloads;tab=pc;tab=games --machine=handheld --mode=guided"),
+    ("files-ticked", "--page=files --arg=at=/home/deck/Downloads --keys=start,down,start,down --machine=handheld --mode=guided"),
+    ("files-view-text", "--page=files --arg=at=/home/deck/Downloads --act=files-open:/home/deck/Downloads/ProtonGE-notes.txt --machine=handheld --mode=guided"),
+    ("files-view-picture", "--page=files --arg=at=/home/deck/Downloads --act=files-open:/home/deck/Downloads/wallpaper-jade.png --machine=handheld --mode=guided"),
+    ("dialog-files-desktop-mode", "--page=files --arg=at=/home/deck/Downloads --act=files-open:/home/deck/Downloads/trailer-capture.mp4 --machine=handheld --mode=guided"),
+    ("dialog-files-shortcut", "--page=files --arg=at=/home/deck/Desktop --act=files-new:shortcut --machine=handheld --mode=guided"),
+    ("files-pointer", "--page=files --arg=at=/home/deck/Downloads --pointer=0.62,0.52 --machine=handheld --mode=guided"),
+    // The same on a TV PC (125% from the couch) and on a desktop PC.
+    ("files-tv-home", "--page=files --machine=tv --mode=guided"),
+    ("files-tv-this-pc", "--page=files --arg=at=pc --machine=tv --mode=guided"),
+    ("files-tv-downloads", "--page=files --arg=at=/home/deck/Downloads --machine=tv --mode=guided"),
+    ("files-tv-downloads-linux", "--page=files --arg=view=linux;at=/home/deck/Downloads --machine=tv --mode=guided"),
+    ("files-tv-game", "--page=files --arg=at=game:steam:1086940 --machine=tv --mode=guided"),
+    ("files-tv-windows-locked", "--page=files --arg=at=windows --machine=tv --mode=guided"),
+    ("files-tv-recycle-bin", "--page=files --arg=at=trash --machine=tv --mode=guided"),
+    ("files-tv-menu", "--page=files --arg=at=/home/deck/Downloads;sel=wallpaper-jade.png --keys=x --machine=tv --mode=guided"),
+    ("files-tv-pane-picture", "--page=files --arg=at=/home/deck/Downloads;pane=1;sel=wallpaper-jade.png --machine=tv --mode=guided"),
+    ("files-tv-large-icons", "--page=files --arg=at=/home/deck/Downloads;layout=icons --machine=tv --mode=guided"),
+    ("files-tv-tabs", "--page=files --arg=at=/home/deck/Downloads;tab=pc --machine=tv --mode=guided"),
+    ("dialog-files-tv-conflict", "--page=files --arg=at=/home/deck/Pictures --act=files-drop:copy|/home/deck/Pictures --value=[\"/home/deck/Downloads/wallpaper-jade.png\"] --machine=tv --mode=guided"),
+    ("files-pc-this-pc", "--page=files --arg=at=pc --machine=desktop --mode=guided"),
+    ("files-pc-downloads", "--page=files --arg=at=/home/deck/Downloads --machine=desktop --mode=veteran"),
+    ("files-pc-sd-card", "--page=files --arg=at=/run/media/deck/sdcard;pane=1 --machine=desktop --mode=guided"),
+    // Every look, the smallest and the largest interface size, a dense screen.
+    ("files-light", "--page=files --arg=at=/home/deck/Downloads;pane=1;sel=wallpaper-jade.png --machine=handheld --mode=guided --theme=light"),
+    ("files-contrast", "--page=files --arg=at=pc --machine=handheld --mode=guided --theme=contrast"),
+    ("files-dark-brass", "--page=files --arg=at=/home/deck/Downloads --keys=start --machine=handheld --mode=guided --theme=dark --accent=brass"),
+    ("files-vision-none", "--page=files --arg=at=windows --machine=handheld --mode=guided --vision=none"),
+    ("files-size-50", "--page=files --arg=at=/home/deck/Downloads --machine=handheld --mode=guided --scale=50"),
+    ("files-this-pc-size-50", "--page=files --arg=at=pc --machine=handheld --mode=guided --scale=50"),
+    ("files-size-150", "--page=files --arg=at=/home/deck/Downloads --machine=handheld --mode=guided --scale=150"),
+    ("files-menu-size-150", "--page=files --arg=at=/home/deck/Downloads --keys=x --machine=handheld --mode=guided --scale=150"),
+    ("files-dense", "--page=files --arg=at=/home/deck/Downloads --machine=handheld --mode=guided --finger=74"),
+    ("motion-files", "--page=files --arg=at=/home/deck --keys=down,down,a,down --machine=handheld --mode=guided --motion=full"),
+    ("motion-files-menu", "--page=files --arg=at=/home/deck/Downloads --keys=down,x,down --machine=handheld --mode=guided --motion=full"),
+    ("help-files", "--page=help --arg=files@ --machine=handheld --mode=guided"),
+    // Files worked with a real mouse, real keys and the controller (app/qml/SelfCheck.qml).
+    ("check-files-mouse", "--page=files --arg=at=/home/deck/Downloads;sort=name --check=files-mouse --machine=desktop --mode=guided"),
+    ("check-files-keys", "--page=files --arg=at=/home/deck/Downloads;sort=name --check=files-keys --machine=desktop --mode=guided"),
+    ("check-files-pad", "--page=files --arg=at=/home/deck --check=files-pad --machine=handheld --mode=guided"),
 ];
 
 fn w(base: &Path, rel: &str, text: &str) {
@@ -260,10 +340,48 @@ fn home(home: &Path) {
     w(home, "homebrew/plugins/protondb/plugin.json", "{\"name\":\"ProtonDB Badges\"}");
 }
 
+/// What the file explorer shows on the made-up machine: the explorer's own files (`fake::files`: the player's
+/// folders, the card with a Steam library on it, apps, both Recycle Bins) and a Downloads folder filled over the
+/// last weeks, so its list has dates to group by.
+fn explorer_files(root: &Path, home: &Path, now: u64) {
+    fake::files(root, home);
+    // SteamOS itself, as much of it as a list needs.
+    for f in ["usr/bin/bash", "usr/bin/steam", "usr/lib/os-release", "usr/lib/libc.so.6", "usr/share/applications/steam.desktop", "usr/share/fonts/readme.txt", "etc/hostname", "etc/os-release"] {
+        w(root, f, if f.ends_with("os-release") { "NAME=\"SteamOS\"\nVERSION_ID=3.9.5\n" } else { "steamos\n" });
+    }
+    let downloads = home.join("Downloads");
+    w(&downloads, "heroic-save-backup.zip", &format!("PK\x03\x04{}", "0".repeat(9000)));
+    w(&downloads, "ProtonGE-notes.txt", "GE-Proton10-4 fixes the launcher of two games.\nKeep Proton 11 for the rest.\n");
+    w(&downloads, "old-controller-profile.vdf", "\"controller_mappings\"\n{\n\t\"title\"\t\"Back paddles\"\n}\n");
+    w(&downloads, "trailer-capture.mp4", &format!("\0\0\0\x18ftypmp42{}", "0".repeat(20_000)));
+    w(&downloads, "Handheld-manual.pdf", &format!("%PDF-1.7\n{}", "0".repeat(6000)));
+    let day = 86_400;
+    // (name, how long ago it arrived, its size: the big ones are only said to be big, nothing is written for them.)
+    let files: [(&str, u64, u64); 9] = [
+        ("TurbineHub.flatpak", 1500, 3_355_443),
+        ("NonSteamLaunchers-install.log", 6000, 0),
+        ("heroic-save-backup.zip", 7200, 13_002_342),
+        ("bg3-mod-fixer.zip", 3 * day, 50_960_793),
+        ("wallpaper-jade.png", 4 * day, 0),
+        ("ProtonGE-notes.txt", 4 * day + 3000, 0),
+        ("old-controller-profile.vdf", 15 * day, 6144),
+        ("trailer-capture.mp4", 22 * day, 192_937_984),
+        ("Handheld-manual.pdf", 29 * day, 5_976_883),
+    ];
+    for (name, ago, size) in files {
+        if let Ok(f) = fs::File::options().write(true).open(downloads.join(name)) {
+            if size > 0 {
+                let _ = f.set_len(size);
+            }
+            let _ = f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(now.saturating_sub(ago)));
+        }
+    }
+}
+
 fn cache(cache: &Path, now: u64, offline: bool) {
     w(cache, "anticheat.json", ANTICHEAT);
     w(cache, "fixes.json", FIXES);
-    for (id, cat) in GAMES.iter().filter(|g| g.3 > 0).map(|g| (g.0, g.3)).chain([("632470", 3), ("1145360", 3)]) {
+    for (id, cat) in GAMES.iter().filter(|g| g.3 > 0).map(|g| (g.0, g.3)).chain([("632470", 3), ("1145360", 3), ("892970", 3)]) {
         w(cache, &format!("valve/{id}.json"), &format!("{{\"success\":1,\"results\":{{\"appid\":{id},\"resolved_category\":{cat}}}}}"));
     }
     w(cache, "checked", &(now - if offline { 3 * 86_400 } else { 600 }).to_string());
@@ -331,8 +449,11 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
         w(&root, "sys/bus/usb/devices/3-1/product", "Built-in controller\n");
     }
     let now = crate::now();
-    let ctx = Ctx { root: root.clone(), home: dir.join("home"), config_home: dir.join("config"), efibootmgr: if preset == Preset::TvPc { String::new() } else { fake::EFI_WITH_WINDOWS.into() }, version: "0.1".into() };
+    // The home folder is where a real one is, under the folder that stands for "/", so the file explorer finds it
+    // by its real path.
+    let ctx = Ctx { root: root.clone(), home: root.join(fake::FILES_HOME.trim_start_matches('/')), config_home: dir.join("config"), efibootmgr: if preset == Preset::TvPc { String::new() } else { fake::EFI_WITH_WINDOWS.into() }, version: "0.1".into() };
     home(&ctx.home);
+    explorer_files(&root, &ctx.home, now);
     ledger(&root, preset, now);
     let st = Settings { mode, setup_done: vec!["machine".into(), "games".into()], ..Settings::default() };
     let _ = st.save(&ctx.config_home);
@@ -376,7 +497,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     ui.agent_on = Some(true);
     agent_files(&ui, preset, now);
     ui.absorb();
-    for (ago, text) in [(86_400 * 2, "Tune-up: 3 settings turned on"), (3600 * 5, if preset == HANDHELD { "Charge limit set to 80%" } else { "Sound goes to Headset" }), (3600 * 2, "Heroic Games Launcher installed"), (1500, "Checked 10 games against the ratings"), (240, "Xbox Cloud added to the library")] {
+    for (ago, text) in [(86_400 * 2, "Tune-up: 3 settings turned on"), (3600 * 5, if preset == HANDHELD { "Charge limit set to 80%" } else { "Sound goes to Headset" }), (3600 * 2, "Heroic Games Launcher installed"), (1500, "Checked 11 games against the ratings"), (240, "Xbox Cloud added to the library")] {
         super::note_activity(&ui.folder(), now - ago, text);
     }
     ui
@@ -398,7 +519,9 @@ impl Ui {
     /// A sample run where Steam lists a second library on a drive Turbine Hub isn't allowed to read.
     pub fn sample_with_unseen_library(&mut self) {
         let steam = self.ctx.home.join(".local/share/Steam");
-        w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{UNSEEN_LIBRARY}\"\n}}\n}}\n", steam.display()));
+        // (The card's library stays in the list: only the third one is out of reach.)
+        let card = self.ctx.root.join(fake::FILES_DRIVE.trim_start_matches('/'));
+        w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{}\"\n}}\n\"2\"\n{{\n\"path\" \"{UNSEEN_LIBRARY}\"\n}}\n}}\n", steam.display(), card.display()));
     }
     /// A sample run where Turbine Hub's helper is set up already: no change asks for the password.
     pub fn sample_with_helper(&mut self) {

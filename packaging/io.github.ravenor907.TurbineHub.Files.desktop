@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Turbine Files
+GenericName=File explorer
+Comment=Turbine Hub's file explorer, laid out like the one on Windows
+Exec=turbinehub --page=files
+Icon=io.github.ravenor907.TurbineHub.Files
+Terminal=false
+StartupWMClass=io.github.ravenor907.TurbineHub
+Categories=System;FileManager;Utility;
+Keywords=files;explorer;folders;steamos;

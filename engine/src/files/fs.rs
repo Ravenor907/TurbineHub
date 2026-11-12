@@ -140,7 +140,9 @@ impl Map {
             let rest = real.strip_prefix(r).ok()?;
             return Some(if rest.as_os_str().is_empty() { d.clone() } else { d.join(rest) });
         }
-        let shut = self.closed.iter().any(|c| real.starts_with(c)) && !self.open.iter().any(|o| real.starts_with(o));
+        // Inside a closed folder only what was opened can be reached, and the folders on the way to it (/var and
+        // /var/lib on the way to /var/lib/flatpak): without those a path into it couldn't be followed step by step.
+        let shut = self.closed.iter().any(|c| real.starts_with(c)) && !self.open.iter().any(|o| real.starts_with(o) || o.starts_with(&real));
         (!shut && !self.only).then_some(real)
     }
 
@@ -407,8 +409,13 @@ mod tests {
         assert_eq!(m.disk(Path::new("/var/lib/flatpak/app")), Some("/var/lib/flatpak/app".into()));
         assert_eq!(m.disk(Path::new("/")), Some("/".into()));
         // The sandbox's own: not the machine's, so not shown as if it were.
-        for p in ["/var/log", "/tmp/x", "/proc/1", "/app/bin", "/run/user/1000", "/sys/class", "/dev/sda"] {
+        for p in ["/var/log", "/tmp/x", "/proc/1", "/app/bin", "/run/user/1000", "/sys/class", "/dev/sda", "/var/lib/systemd", "/run/mediax"] {
             assert_eq!(m.disk(Path::new(p)), None, "{p}");
+        }
+        // The folders on the way to what is open are there to walk through (a card under /run/media, an app
+        // under /var/lib/flatpak), and nothing else in them shows.
+        for p in ["/var", "/var/lib", "/run", "/run/media"] {
+            assert_eq!(m.disk(Path::new(p)), Some(PathBuf::from(p)), "{p}");
         }
         // Dots never get around the map.
         assert_eq!(m.disk(Path::new("/home/../usr/bin")), Some("/run/host/usr/bin".into()));

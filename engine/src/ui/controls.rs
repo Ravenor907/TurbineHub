@@ -26,7 +26,7 @@ pub const SCHEME: &[Control] = &[
     Control { name: "Back", pad: "B", keys: "Esc or Backspace", mouse: "Back side button", does: "Back to where you were. It also empties a search and ends typing." },
     Control { name: "Options", pad: "X", keys: "R", mouse: "Right-click", does: "A menu of everything the highlighted thing and this page can do." },
     Control { name: "Find", pad: "Y", keys: "F, Ctrl+F or /", mouse: "Click the search box", does: "Jumps to the search box of a page that has a list. Typing letters on a keyboard finds too." },
-    Control { name: "Tabs", pad: "LB / RB", keys: "Q / E, or Page Up / Page Down", mouse: "Click a tab", does: "Home, Games, Store, My machine, Settings." },
+    Control { name: "Tabs", pad: "LB / RB", keys: "Q / E, or Page Up / Page Down", mouse: "Click a tab", does: "Home, Games, Store, Files, My machine, Settings." },
     Control { name: "Menu", pad: "View", keys: "Tab", mouse: "Click Menu in the footer", does: "Help, Where's my...?, Bring it over, Review changes, Settings, Close." },
     Control { name: "Main button", pad: "Start", keys: "Ctrl+Enter", mouse: "Click the button", does: "Presses the page's main button (Continue, Apply, Copy). Without one it opens Settings." },
     Control { name: "Play", pad: "Hold Start", keys: "Hold Space", mouse: "Click Play", does: "Starts the highlighted game, from the Games tab." },

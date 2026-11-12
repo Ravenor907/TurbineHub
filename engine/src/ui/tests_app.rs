@@ -175,10 +175,12 @@ fn a_steam_library_turbine_hub_may_not_read_is_shown_with_allow() {
 #[test]
 fn with_no_games_at_all_the_games_tab_still_offers_allow() {
     let mut u = ui("unseen-empty", HANDHELD, Mode::Guided);
-    let steam = u.ctx.home.join(".local/share/Steam");
-    for e in std::fs::read_dir(steam.join("steamapps")).unwrap().flatten() {
-        if e.file_name().to_string_lossy().starts_with("appmanifest_") {
-            std::fs::remove_file(e.path()).unwrap();
+    // Both libraries: Steam's own and the one on the card.
+    for lib in [u.ctx.home.join(".local/share/Steam"), u.ctx.root.join(crate::fake::FILES_DRIVE.trim_start_matches('/'))] {
+        for e in std::fs::read_dir(lib.join("steamapps")).unwrap().flatten() {
+            if e.file_name().to_string_lossy().starts_with("appmanifest_") {
+                std::fs::remove_file(e.path()).unwrap();
+            }
         }
     }
     let j = parse(&u.page("games", "")).unwrap();

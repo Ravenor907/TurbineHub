@@ -7,6 +7,7 @@ mod activity;
 mod after;
 pub mod bring;
 pub mod controls;
+pub mod files;
 pub mod games;
 mod help;
 mod home;
@@ -138,13 +139,15 @@ pub struct Ui {
     pub(crate) pending: Option<Plan>,
     pub(crate) home_all: bool,
     pub(crate) filter: BTreeMap<String, String>,
+    /// The file explorer: its tabs, its view and what it is doing.
+    pub(crate) files: files::Explorer,
 }
 
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new(), files: files::Explorer::default() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -275,6 +278,7 @@ impl Ui {
             "home" => home::page(self),
             "machine" => machine::cards_page(self),
             "games" => games::page(self, arg),
+            "files" => files::page(self, arg),
             "library" => games::library(self),
             "store" => store::page(self, arg),
             "store-item" => store::item(self, arg),
@@ -302,6 +306,12 @@ impl Ui {
     /// (the page changed), `state` (the look or mode changed).
     pub fn act(&mut self, action: &str, arg: &str, value: &str) -> String {
         plan::act(self, action, arg, value).to_text()
+    }
+
+    /// What the file explorer did in the background since the last look (a copy's progress or its end, a search
+    /// finding more), as JSON; None when there is no news.
+    pub fn files_tick(&mut self) -> Option<String> {
+        files::tick(self)
     }
 
     /// The dialog the player just confirmed, with its commands in order. None when nothing waits.
@@ -435,3 +445,5 @@ mod tests_lights;
 mod tests_nsl;
 #[cfg(test)]
 mod tests_app;
+#[cfg(test)]
+mod tests_files;

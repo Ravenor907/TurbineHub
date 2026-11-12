@@ -8,7 +8,12 @@
 #include <QtCore/QFile>
 #include <QtCore/QSize>
 #include <QtCore/QString>
+#include <QtCore/QVariantMap>
+#include <QtDBus/QDBusConnection>
+#include <QtDBus/QDBusMessage>
+#include <QtDBus/QDBusUnixFileDescriptor>
 #include <QtGui/QAccessible>
+#include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
 #include <QtGui/QKeyEvent>
@@ -18,6 +23,8 @@
 #include <QtGui/QWindow>
 #include <QtGui/qtestsupport_gui.h>
 #include <cstdio>
+#include <fcntl.h>
+#include <unistd.h>
 
 // With the desktop file's name the taskbar finds Turbine Hub's menu entry; the window icon itself comes from the
 // icons the bundle installs, for every place that asks the window and not the entry.
@@ -35,6 +42,34 @@ extern "C" void turbinehub_window_identity()
         icon = QIcon::fromTheme(id);
     if (!icon.isNull())
         QGuiApplication::setWindowIcon(icon);
+}
+
+// Files, Copy as path: text onto the clipboard. Returns 1 when there is a clipboard to put it on.
+extern "C" int turbinehub_copy_text(const char *text)
+{
+    QClipboard *board = QGuiApplication::clipboard();
+    if (!board)
+        return 0;
+    board->setText(QString::fromUtf8(text));
+    return 1;
+}
+
+// Files, Open with (Desktop Mode): hands a file to the desktop's own portal and asks it to show its list of apps
+// (org.freedesktop.portal.OpenURI, OpenFile with "ask"). The file is passed as an open file, the way the portal
+// wants it from a sandboxed app; the app that is picked gets that one file and nothing else. Returns 1 when the
+// request was sent, 0 when the file can't be opened or there is no session bus (Game Mode has no such list).
+extern "C" int turbinehub_open_with(const char *path)
+{
+    const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.portal.Desktop"), QStringLiteral("/org/freedesktop/portal/desktop"), QStringLiteral("org.freedesktop.portal.OpenURI"), QStringLiteral("OpenFile"));
+    QVariantMap options;
+    options.insert(QStringLiteral("ask"), true);
+    call << QString() << QVariant::fromValue(QDBusUnixFileDescriptor(fd)) << options;
+    const bool sent = QDBusConnection::sessionBus().isConnected() && QDBusConnection::sessionBus().send(call);
+    ::close(fd);
+    return sent ? 1 : 0;
 }
 
 // The build's checks (screenshot runs only): keys and a mouse delivered to the window the way the system delivers

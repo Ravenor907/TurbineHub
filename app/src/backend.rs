@@ -120,6 +120,8 @@ unsafe extern "C" {
     fn turbinehub_test_spoken(what: i32) -> i32;
     fn turbinehub_pointer_event(kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) -> i32;
     fn turbinehub_window_size(w: *mut f64, h: *mut f64) -> i32;
+    fn turbinehub_copy_text(text: *const std::os::raw::c_char) -> i32;
+    fn turbinehub_open_with(path: *const std::os::raw::c_char) -> i32;
 }
 
 use crate::pad::Pads;
@@ -617,6 +619,16 @@ impl qobject::Hub {
             if j.get("state").is_some() {
                 self.as_mut().refresh_state();
             }
+            // Files: a path for the clipboard (Copy as path), and a file for the system's own list of apps (Open
+            // with, in Desktop Mode). Neither on a made-up machine, whose paths lead nowhere.
+            if let Some(text) = j.str_at("copy").and_then(|t| std::ffi::CString::new(t).ok()) {
+                // SAFETY: a plain call into qtglue.cpp on the interface thread with a string that lives through it.
+                unsafe { turbinehub_copy_text(text.as_ptr()) };
+            }
+            if let Some(path) = j.str_at("openWith").filter(|_| !self.rust().ui.sample).and_then(|t| std::ffi::CString::new(t).ok()) {
+                // SAFETY: as above; the call only hands the open file to the desktop's portal.
+                unsafe { turbinehub_open_with(path.as_ptr()) };
+            }
             // A harmless host command the engine wants run right away.
             let line: Vec<String> = j.get("run").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect();
             if !line.is_empty() && !self.rust().ui.sample {
@@ -742,8 +754,12 @@ impl qobject::Hub {
             out.push(("keys", format!("[{}]", keys.join(","))));
         }
         // A second launch asked this window to come to the front.
-        if crate::single::take_show() {
-            out.push(("show", "true".into()));
+        if let Some(page) = crate::single::take_show() {
+            out.push(("show", if page.is_empty() { "true".into() } else { quote(&page) }));
+        }
+        // Files: a copy's progress or its end, a search below a folder finding more.
+        if let Some(news) = self.as_mut().rust_mut().ui.files_tick() {
+            out.push(("files", news));
         }
         // What the background helper wrote since the last look (a sleep, updates it found), every half minute.
         if !self.rust().ui.sample && self.rust().looked.elapsed() >= Duration::from_secs(30) {

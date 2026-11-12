@@ -278,9 +278,9 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
             let places = turbinehub_engine::saves::Places { folder: &job.folder, data: &job.data, home: &job.home };
             turbinehub_engine::saves::run(work, &places, turbinehub_engine::now(), say, &mut runner).map(|_| ())
         }
-        Step::SelfTile { .. } | Step::SelfArt => {
+        Step::SelfTile { .. } | Step::SelfArt | Step::FilesTile { .. } => {
             // Only the entry itself is in Steam's list; the pictures go beside it and need no answer.
-            let steam = if matches!(st, Step::SelfTile { .. }) { steam_now() } else { Steam::Closed };
+            let steam = if matches!(st, Step::SelfTile { .. } | Step::FilesTile { .. }) { steam_now() } else { Steam::Closed };
             ui::selftile::run_step(st, &job.home, &job.folder, &share_dir(), steam).unwrap_or(Ok(()))
         }
         Step::TileRemove { url } => {

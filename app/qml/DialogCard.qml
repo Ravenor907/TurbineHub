@@ -9,6 +9,10 @@ import TurbineHub
 // each row with the button that does it directly, where it has one) and plain explanations (one Close button).
 // At a keyboard Tab and Shift+Tab go from one thing in it to the next.
 //
+// Files adds three things to it: `strip` (a row of icons across the top of a menu: Cut, Copy, Rename, Delete, as
+// Windows 11 has them), `input` (one line to type: a path, where a shortcut leads) and `then` (the press the
+// confirm button makes, with what was typed, in place of a plan the engine holds).
+//
 // A dark backdrop covers the page behind it (the footer stays clear, it says what A and B do here), and nothing
 // behind it takes a press while it is open.
 //
@@ -44,6 +48,7 @@ Item {
         d = model
         error = ""
         pw.text = ""; pw2.text = ""
+        typedBox.text = d.input ? (d.input.value || "") : ""
         list.contentY = 0
         remaining = d.keep ? (d.keep.seconds || 10) : 0
         app.lastFid = ""
@@ -53,6 +58,7 @@ Item {
             app.restoreFocus()
             // At a keyboard the password can be typed at once.
             if (dlg.ask !== "" && app.keyboard) app.typeIn(pw)
+            if (dlg.d && dlg.d.input && app.keyboard) app.typeIn(typedBox)
         })
     }
     function close() {
@@ -71,6 +77,8 @@ Item {
     function confirm() {
         if (d && d.local === "quit") { Qt.quit(); return }
         if (d && d.keep) { close(); return }
+        // A press of the window's own making (Files): the dialog closes, then the press is made with what was typed.
+        if (d && d.then) { const t = d.then, text = d.input ? typedBox.text : (t.value || ""); close(); app.doAct(t.act, t.arg || "", text); return }
         if (!typed) { error = ask === "new" ? "Type the new password in both boxes first." : "Type the password first."; return }
         app.confirmDialog(pw.text, pw2.text)
     }
@@ -151,7 +159,7 @@ Item {
             Focusable {
                 id: reader
                 app: dlg.app
-                visible: dlg.d !== null && ((dlg.d.text || "") !== "" || (dlg.d.items || []).length > 0 || (dlg.d.rows || []).length > 0)
+                visible: dlg.d !== null && ((dlg.d.text || "") !== "" || (dlg.d.items || []).length > 0 || (dlg.d.rows || []).length > 0 || (dlg.d.strip || []).length > 0)
                 focusable: dlg.open && dlg.scrolls && !(dlg.d && dlg.d.rows)
                 fid: "list"
                 aLabel: ""
@@ -187,12 +195,45 @@ Item {
                                 width: listCol.width
                                 spacing: dlg.app.px(10)
                                 // A tick for a change the dialog makes; a plain marker for a step of a how-to (nothing is done yet).
-                                Icon { app: dlg.app; d: dlg.d && dlg.d.guide === true ? dlg.app.icons.chevron : dlg.app.icons.check; size: 18; tint: dlg.d && dlg.d.guide === true ? dlg.app.colors.muted : dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
+                                Icon { app: dlg.app; visible: !(dlg.d && dlg.d.props === true); d: dlg.d && dlg.d.guide === true ? dlg.app.icons.chevron : dlg.app.icons.check; size: 18; tint: dlg.d && dlg.d.guide === true ? dlg.app.colors.muted : dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 0
                                     Label { app: dlg.app; Layout.fillWidth: true; text: item.modelData.title; font.weight: Font.DemiBold; wrapMode: Text.Wrap }
                                     Label { app: dlg.app; Layout.fillWidth: true; visible: text !== ""; text: item.modelData.line; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15); wrapMode: Text.Wrap }
+                                }
+                            }
+                        }
+                        // The icons across the top of a file's menu.
+                        Row {
+                            id: stripRow
+                            visible: dlg.d !== null && (dlg.d.strip || []).length > 0
+                            x: dlg.app.px(4)
+                            spacing: dlg.app.px(8)
+                            Repeater {
+                                model: dlg.d ? (dlg.d.strip || []) : []
+                                Focusable {
+                                    id: stripItem
+                                    required property var modelData
+                                    required property int index
+                                    app: dlg.app
+                                    fid: "strip:" + index
+                                    aLabel: "Choose"
+                                    sayRole: Accessible.MenuItem
+                                    sayName: modelData.title || ""
+                                    width: Math.max(dlg.app.touchFloor, Math.floor((listCol.width - dlg.app.px(8) - stripRow.spacing * ((dlg.d ? (dlg.d.strip || []).length : 1) - 1)) / Math.max(1, dlg.d ? (dlg.d.strip || []).length : 1)))
+                                    height: Math.max(dlg.app.tpx(58), stripCol.implicitHeight + dlg.app.px(12))
+                                    ringRadius: dlg.app.px(8)
+                                    ringGap: -dlg.app.px(1)
+                                    onActivated: dlg.choose(modelData)
+                                    Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.raised }
+                                    Column {
+                                        id: stripCol
+                                        anchors.centerIn: parent
+                                        spacing: dlg.app.px(3)
+                                        Icon { app: dlg.app; d: dlg.app.icons[stripItem.modelData.icon] || ""; size: 20; tint: dlg.app.colors.accentText; anchors.horizontalCenter: parent.horizontalCenter }
+                                        Text { text: stripItem.modelData.title || ""; color: dlg.app.colors.soft; font.family: dlg.app.bodyFont; font.pixelSize: dlg.app.fpx(13); anchors.horizontalCenter: parent.horizontalCenter }
+                                    }
                                 }
                             }
                         }
@@ -205,7 +246,7 @@ Item {
                                 app: dlg.app
                                 fid: "menu:" + index
                                 firstFocus: index === 0
-                                aLabel: dlg.d && dlg.d.options === true ? "Choose" : "Open"
+                                aLabel: dlg.d && (dlg.d.options === true || dlg.d.choose === true) ? "Choose" : "Open"
                                 sayRole: Accessible.MenuItem
                                 readonly property string keyName: modelData.key ? dlg.app.glyph(modelData.key) : ""
                                 sayName: (modelData.title || "") + (keyName !== "" && modelData.key !== "a" ? ", " + (modelData.key === "play" ? "hold " : "") + keyName : "") + ", " + (index + 1) + " of " + (dlg.d ? (dlg.d.rows || []).length : 0)
@@ -319,6 +360,45 @@ Item {
                 }
                 Label { app: dlg.app; visible: Hub.gamemode; Layout.fillWidth: true; text: "No keyboard on screen? Steam button and X opens it."; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
             }
+            // One line to type (Files: a path, where a shortcut leads).
+            ColumnLayout {
+                visible: dlg.d !== null && !!dlg.d.input
+                Layout.fillWidth: true
+                Layout.minimumHeight: implicitHeight
+                spacing: dlg.app.px(8)
+                Label { app: dlg.app; text: dlg.d && dlg.d.input ? (dlg.d.input.label || "") : ""; color: dlg.app.colors.muted; font.pixelSize: dlg.app.fpx(15) }
+                Focusable {
+                    app: dlg.app
+                    focusable: dlg.d !== null && !!dlg.d.input
+                    fid: "typed"
+                    firstFocus: true
+                    aLabel: "Type"
+                    sayRole: Accessible.EditableText
+                    sayName: (dlg.d && dlg.d.input ? (dlg.d.input.label || "") : "") + (typedBox.text === "" ? ", empty" : ": " + typedBox.text)
+                    Layout.fillWidth: true
+                    implicitHeight: dlg.app.tpx(48)
+                    onActivated: dlg.app.typeIn(typedBox)
+                    Rectangle { anchors.fill: parent; radius: dlg.app.px(8); color: dlg.app.colors.ground; border.width: Math.max(1, dlg.app.px(2)); border.color: typedBox.activeFocus ? dlg.app.colors.accent : dlg.app.colors.line }
+                    TextInput {
+                        id: typedBox
+                        Accessible.ignored: true
+                        anchors { fill: parent; leftMargin: dlg.app.px(14); rightMargin: dlg.app.px(14) }
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: dlg.app.colors.text
+                        font.family: dlg.app.bodyFont
+                        font.pixelSize: dlg.app.fpx(18)
+                        clip: true
+                        maximumLength: 1024
+                        onActiveFocusChanged: if (activeFocus) dlg.app.typingBegan(typedBox); else dlg.app.typingEnded(typedBox)
+                        Keys.onEscapePressed: dlg.app.keysBack()
+                        Keys.onReturnPressed: (e) => { if (!e.isAutoRepeat) { dlg.app.typingDone(); dlg.confirm() } }
+                        Keys.onEnterPressed: (e) => { if (!e.isAutoRepeat) { dlg.app.typingDone(); dlg.confirm() } }
+                        Keys.onTabPressed: dlg.app.tabMove(1)
+                        Keys.onBacktabPressed: dlg.app.tabMove(-1)
+                        Text { visible: typedBox.text === ""; text: dlg.d && dlg.d.input ? (dlg.d.input.hint || "") : ""; color: dlg.app.colors.muted; font: typedBox.font; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                }
+            }
             Label { app: dlg.app; visible: text !== ""; Layout.fillWidth: true; Layout.minimumHeight: implicitHeight; text: dlg.error; color: dlg.app.colors.readable(dlg.app.colors.stop, dlg.app.colors.panel); font.weight: Font.DemiBold; Accessible.role: Accessible.AlertMessage; Accessible.name: text }
 
             // The buttons, always in view.
@@ -331,7 +411,7 @@ Item {
                     app: dlg.app
                     focusable: dlg.open
                     fid: "cancel"
-                    firstFocus: dlg.ask === "" && (!dlg.hasConfirm || (dlg.d !== null && dlg.d.danger === true)) && !(dlg.d && dlg.d.rows)
+                    firstFocus: dlg.ask === "" && (!dlg.hasConfirm || (dlg.d !== null && dlg.d.danger === true)) && !(dlg.d && dlg.d.rows) && !(dlg.d && dlg.d.input)
                     label: dlg.cancelLabel
                     cap: "b"
                     onActivated: dlg.cancel()
@@ -341,7 +421,7 @@ Item {
                     visible: dlg.hasConfirm
                     focusable: dlg.hasConfirm
                     fid: "confirm"
-                    firstFocus: dlg.ask === "" && dlg.d !== null && dlg.d.danger !== true
+                    firstFocus: dlg.ask === "" && dlg.d !== null && dlg.d.danger !== true && !dlg.d.input
                     primary: true
                     label: dlg.d ? (dlg.d.confirm || "") : ""
                     opacity: dlg.typed ? 1 : 0.45

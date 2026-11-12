@@ -204,7 +204,8 @@ fn library_check_counts_orders_filters_and_fixes() {
     let mut h = ui("library-h", HANDHELD, Mode::Veteran);
     let j = parse(&h.page("library", "")).unwrap();
     let tiles: Vec<&str> = j.get("tiles").unwrap().as_array().iter().map(|t| t.str_at("value").unwrap()).collect();
-    assert_eq!(tiles, vec!["6", "0", "1", "1"]);
+    // (Seven that work: the six on the internal drive and Valheim on the card.)
+    assert_eq!(tiles, vec!["7", "0", "1", "1"]);
     assert!(j.get("primary").unwrap() == &Json::Null);
     assert!(rows(&parse(&h.page("games", "steam:1091500")).unwrap()).iter().all(|r| r.str_at("arg") != Some("steam:1091500|fsr4")));
     assert!(parse(&h.act("switch", "steam:1091500|fsr4", "")).unwrap().str_at("toast").unwrap().contains("RX 9000"));
@@ -214,7 +215,7 @@ fn library_check_counts_orders_filters_and_fixes() {
     let mut u = ui("library", Preset::Desktop, Mode::Guided);
     let j = parse(&u.page("library", "")).unwrap();
     let tiles: Vec<&str> = j.get("tiles").unwrap().as_array().iter().map(|t| t.str_at("value").unwrap()).collect();
-    assert_eq!(tiles, vec!["5", "1", "1", "1"]);
+    assert_eq!(tiles, vec!["6", "1", "1", "1"]);
     let all = rows(&j);
     let names: Vec<&str> = all.iter().skip(1).map(|r| r.str_at("title").unwrap()).collect();
     assert_eq!(names.first(), Some(&"Baldur's Gate 3"));
@@ -763,7 +764,7 @@ fn help_is_about_the_page_it_was_asked_on() {
 const WITH_ARGS: &[(&str, &str)] = &[
     ("home", ""), ("games", ""), ("games", "steam:1086940"), ("library", ""), ("store", ""), ("store", "apps"), ("store-item", "com.heroicgameslauncher.hgl"), ("tool", ""), ("proton", "steam:1086940"), ("saves", "steam:1086940"),
     ("machine", ""), ("module:lighting", ""), ("module:power", ""), ("module:tuneup", ""), ("module:battery", ""), ("settings", ""), ("settings", "look"), ("changes", ""), ("bring", ""), ("windrive", ""), ("winapps", ""),
-    ("wheres", ""), ("help", "games@"), ("pick", ""), ("setup", "machine"), ("setup", "games"), ("setup", "picks"), ("quick", ""),
+    ("wheres", ""), ("help", "games@"), ("files", ""), ("files", "at=trash"), ("help", "files@"), ("pick", ""), ("setup", "machine"), ("setup", "games"), ("setup", "picks"), ("quick", ""),
 ];
 
 #[test]

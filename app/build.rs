@@ -16,5 +16,5 @@ fn main() {
     println!("cargo:rerun-if-changed=qml");
     // The version comes from the build (the Flatpak manifest sets it from VERSION).
     println!("cargo:rerun-if-env-changed=TURBINEHUB_VERSION");
-    CxxQtBuilder::new_qml_module(QmlModule::new("TurbineHub").qml_files(files)).qt_module("Quick").qt_module("Gui").files(["src/backend.rs"]).cpp_file("src/qtglue.cpp").build();
+    CxxQtBuilder::new_qml_module(QmlModule::new("TurbineHub").qml_files(files)).qt_module("Quick").qt_module("Gui").qt_module("DBus").files(["src/backend.rs"]).cpp_file("src/qtglue.cpp").build();
 }

@@ -30,7 +30,12 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 - **For a screen reader.** Everything the highlight lands on says its kind, its name with its state in words, more
   about it, and that the highlight is on it (`sayRole`, `sayName`, `sayMore` on Focusable); tabs, footer hints,
   the dialog, the toast and the busy cover speak too; icons are skipped. Orca in Desktop Mode reads them.
-- **Pages.** Five tabs, and a stack of pages opened on top. `fileFor` picks the component for a page name.
+- **Files in a window.** `app.dense`: Files in a Desktop Mode window is drawn at one size whatever the window's
+  (`fit` is 1: a bigger monitor shows more files, not bigger words; the interface size still scales it) with a
+  mouse's floor for things to press (28 pixels in place of a finger's 44). The top bar gives way to Files' own strip
+  of tabs, and the footer shows only once a controller is used. Everywhere else, and Files full screen, sizes are
+  as above.
+- **Pages.** Six tabs, and a stack of pages opened on top. `fileFor` picks the component for a page name.
   The first-run pages (pick, setup, quick) hide the tabs, and no tab opens before a mode is picked. A page opened
   on top keeps what it showed (the game, the section, the highlight) for when Back comes to it; the top bar lights
   the tab the page on screen belongs to (`tabOf`). Back on the first screen or on Home asks to close Turbine Hub.
@@ -110,7 +115,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | PageButtons | The page's own actions as buttons (the options the engine marks `button`): under a list, beside a header. |
 | PointerLayer | The controller's pointer (an arrow drawn by Turbine Hub, its tip where R3 clicks) and the ring of a held button. Takes no input. |
 | Toast | A short note above the footer, or at the top when the highlight is down there. |
-| DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu and every Options menu (rows, each with its button where it has one). |
+| DialogCard | The one dialog: title, words, the exact changes, password box, pinned buttons. Also the menu and every Options menu (rows, each with its button where it has one). For Files: `strip` (a row of icons across the top of a menu), `input` (one line to type) and `then` (the press its confirm button makes). |
 | Motion | Every duration and curve, at the player's level (full, reduced, off). No other file names one. |
 | Backdrop | What takes the mouse and the finger away from everything under it: the dialog's backdrop and card, the busy cover. The only MouseArea. |
 | SelfCheck | The picture run's checks: layout, text size, contrast of the words as drawn, finger sizes, state chips, names for a screen reader (also asked from Qt's accessibility tree), all 80 palettes, and with `--motion=full` or `reduced` that everything comes to rest. With `--check=taps`, `hold`, `hover`, `typing` or `mouse` the same page is worked with real keys, a real mouse and a finger first. Loaded only with `--screenshot`. |
@@ -122,6 +127,7 @@ Every component takes `app`, Main.qml's window, for colors (`app.colors`), sizes
 | HomePage | Home, Guided and Veteran. |
 | SidePage | Games, Store, Settings: a list on the left, its rows on the right. Games and Store have a search box above the list (Find: Y, or F on a keyboard); every letter goes to the engine, which answers with the narrowed page. The page's own actions are buttons under the list. |
 | CardsPage | My machine, Bring it over. |
+| FilesPage | Files: Explorer's layout (tabs, back, forward, up, address, search, command bar, navigation pane, list or tiles, details pane, status bar). It keeps what the hand is doing (what is ticked, the line the highlight was on, a name being typed, a drag) and asks the engine for everything else. The list is a ListView: lines out of view aren't drawn, so Up and Down go by index (`move`), and a line that scrolls away leaves the highlight with the list (`list-park`). `key(e)` has Explorer's keys, `local()` the Options entries the page carries out itself. With FileCell (a line, a large icon, a short line or a tile), FileTool (a button of its bars) and CutText (words cut where they don't fit). |
 | RowsPage | Every card's controls, the library check, a Store item's own page, Turbine Hub in Steam, a game's Proton, a game's saves, the Windows drive, Windows apps, Review changes, quick setup, Where's my...? |
 | PickPage | Guided or Veteran. |
 | SetupPage | Guided's four steps. |
@@ -133,6 +139,7 @@ machine and runs SelfCheck. `tools/ci-shots.sh` takes them all at 1280x800, 1920
 window. `--theme=`, `--accent=`, `--vision=` and `--scale=` pick the look; `--finger=<pixels>` stands in for a dense
 screen's finger size; `--motion=full` or `reduced` leaves
 animations on (pictures are otherwise taken with them off); `--pointer=<x>,<y>` shows the controller's pointer there
-(as parts of the window); `--check=taps|hold|hover|mouse|typing|pointer|options` works the page with real keys, a
+(as parts of the window); `--half` takes it half as wide (a window snapped to half the screen);
+`--check=taps|hold|hover|mouse|typing|pointer|options|files-mouse|files-keys|files-pad` works the page with real keys, a
 mouse, a finger and fed sticks first; `--spoken` prints what a screen reader is told. A
 picture named `motion-...` must end on the very picture the same presses give with animations off.

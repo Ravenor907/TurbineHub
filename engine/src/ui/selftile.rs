@@ -19,6 +19,28 @@ pub fn tile() -> NewShortcut {
     NewShortcut { name: "Turbine Hub".into(), exe: "\"/usr/bin/flatpak\"".into(), start_dir: "\"/usr/bin/\"".into(), launch_options: format!("run --branch=stable --arch=x86_64 {MARKER} {FLATPAK_ID}"), flatpak_id: FLATPAK_ID.into(), icon: String::new() }
 }
 
+/// Turbine Files: the same Flatpak opened straight on Files, as its own entry with its own art (a folder in the
+/// hex). Its launch options carry `shortcuts::FILES_MARK` and not `MARKER`, so the two entries are never mixed up.
+pub fn files_tile() -> NewShortcut {
+    NewShortcut { name: "Turbine Files".into(), exe: "\"/usr/bin/flatpak\"".into(), start_dir: "\"/usr/bin/\"".into(), launch_options: format!("run --branch=stable --arch=x86_64 {FLATPAK_ID} {}", shortcuts::FILES_MARK), flatpak_id: FLATPAK_ID.into(), icon: String::new() }
+}
+pub const FILES_TITLE: &str = "Turbine Files in your Game Mode library";
+
+/// Which grid files Turbine Hub wrote for Turbine Files.
+pub fn files_record(folder: &Path) -> PathBuf {
+    folder.join("steam-art-files.json")
+}
+
+/// Turbine Files' art set inside Turbine Hub's shared files.
+pub fn files_art_dir(share: &Path) -> PathBuf {
+    share.join("steam-art-files")
+}
+
+/// Is Turbine Files in the library?
+pub fn files_added(home: &Path) -> bool {
+    shortcuts::shortcut_files(home).iter().any(|f| std::fs::read(f).ok().and_then(|bytes| shortcuts::parse(&bytes).ok()).is_some_and(|list| list.iter().any(|x| shortcuts::is_self(x) && x.launch_options.contains(shortcuts::FILES_MARK))))
+}
+
 /// Where the art's record is kept: which grid files Turbine Hub wrote.
 pub fn record(folder: &Path) -> PathBuf {
     folder.join("steam-art.json")
@@ -77,6 +99,17 @@ pub(crate) fn pick_lock(ui: &Ui) -> Option<&'static str> {
 
 /// The rows in Settings: where it stands and the one press that fits, and Remove once it is there.
 pub(crate) fn rows(ui: &Ui) -> Vec<Json> {
+    let mut out = own_rows(ui);
+    // Turbine Files: the explorer as an entry of its own.
+    out.push(if files_added(&ui.ctx.home) {
+        with(with(row("files-tile", "remove", "button", "Take Turbine Files out of the library", "Only the library entry and its pictures go. Files stays a tab here."), "icon", s("remove")), "button", s("Remove"))
+    } else {
+        with(with(row("files-tile", "add", "button", FILES_TITLE, "Not there yet. Add it and the file explorer opens from Game Mode as its own entry, with its own art."), "icon", s("folder")), "button", s("Add"))
+    });
+    out
+}
+
+fn own_rows(ui: &Ui) -> Vec<Json> {
     let button = |arg: &str, line: &str, label: &str| with(with(row("self-tile", arg, "button", TITLE, line), "icon", s("games")), "button", s(label));
     match state(&ui.ctx.home) {
         State::Missing => vec![button("add", "Not there yet. Add it and it opens from Game Mode like a game, with its own art.", "Add")],
@@ -112,7 +145,39 @@ fn steam_open_guide(adding: bool, unsure: bool) -> Json {
     }
 }
 
+/// Turbine Files' entry: added and removed the way Turbine Hub's own is, only while Steam is closed.
+fn files_act(ui: &mut Ui, arg: &str) -> Json {
+    let there = files_added(&ui.ctx.home);
+    match (arg, there) {
+        ("add", true) => toast("Turbine Files is in your library already."),
+        ("remove", false) => toast("Turbine Files isn't in your library."),
+        _ if ui.steam_running => steam_open_guide(arg == "add", ui.steam_unsure),
+        ("add", false) => {
+            if shortcuts::tile_file(&ui.ctx.home).is_none() {
+                return toast("Steam hasn't been signed in to on this machine yet. Start Steam once and sign in.");
+            }
+            let mut p = Plan::new("Add Turbine Files to your library?", "Turbine Hub adds a second entry to Steam's list of non-Steam games: Turbine Files, which opens Turbine Hub straight on its file explorer. A backup of the list is kept first.", "Add");
+            p.items.push(("Turbine Files".into(), "Under Non-Steam in your library, after Steam's next start".into()));
+            p.items.push(("Its pictures".into(), "Cover, banner, background, logo and icon: the hex with a folder in it.".into()));
+            p.steps.push(Step::FilesTile { add: true });
+            p.done = "Turbine Files added. It shows after Steam starts again.".into();
+            dialog(ui, p)
+        }
+        _ => {
+            let mut p = Plan::new("Take Turbine Files out of your library?", "Only the library entry and the pictures Turbine Hub wrote for it go. Files stays a tab in Turbine Hub. A backup of the list is kept first.", "Remove");
+            p.danger = true;
+            p.items.push(("Turbine Files".into(), "Gone from your library after Steam's next start".into()));
+            p.steps.push(Step::FilesTile { add: false });
+            p.done = "Turbine Files is out of the library".into();
+            dialog(ui, p)
+        }
+    }
+}
+
 pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<Json> {
+    if action == "files-tile" {
+        return Some(files_act(ui, arg));
+    }
     if action != "self-tile" {
         return None;
     }
@@ -202,6 +267,14 @@ pub fn run_step(step: &Step, home: &Path, folder: &Path, share: &Path, steam: sh
             }
         }
         Step::SelfArt => write_art(home, folder, share),
+        Step::FilesTile { add } => {
+            let Some(file) = shortcuts::tile_file(home) else { return Some(Err("Steam's list of non-Steam games wasn't found. Start Steam once and sign in.".into())) };
+            if *add {
+                shortcuts::add_tile_with_art(&file, &files_tile(), shortcuts::FILES_MARK, &files_art_dir(share), &files_record(folder), steam).map(|_| ())
+            } else {
+                shortcuts::remove_tile_with_art(&file, shortcuts::FILES_MARK, &files_record(folder), steam).map(|_| ())
+            }
+        }
         _ => return None,
     })
 }

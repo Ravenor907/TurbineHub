@@ -30,7 +30,8 @@ Window {
         readonly property string path: Hub.option("screenshot")
         readonly property bool on: path !== ""
         readonly property var size: Hub.option("size").split("x")
-        readonly property int w: parseInt(size[0]) || 1280
+        // (--half: a window snapped to half the screen, half as wide.)
+        readonly property int w: Math.round((parseInt(size[0]) || 1280) / (Hub.option("half") !== "" ? 2 : 1))
         readonly property int h: parseInt(size[1]) || 800
         readonly property string page: Hub.option("page")
         readonly property string arg: Hub.option("arg")
@@ -51,7 +52,12 @@ Window {
     // A window far from 16:10 (half a screen, a tall or a wide one) keeps a readable size on its roomy side and
     // re-flows on the other, instead of shrinking the whole 1280 x 800 layout into it. Nothing gets smaller than
     // the text floor allows, so boxes and their words always shrink together.
-    readonly property real fit: Math.max(Math.min(width / 1280, height / 800), Math.min(0.85, Math.max(width / 1280, height / 800)))
+    // Files in a Desktop Mode window is the exception: it is drawn at one size whatever the window's (a bigger
+    // monitor shows more files, not bigger words; the display's own scaling still applies), with rows for a mouse
+    // instead of a thumb. The interface size still scales it. Full screen (a handheld, a TV) it grows with the
+    // screen like every other page.
+    readonly property bool dense: windowed && current.page === "files"
+    readonly property real fit: dense ? 1 : Math.max(Math.min(width / 1280, height / 800), Math.min(0.85, Math.max(width / 1280, height / 800)))
     readonly property real unit: Math.max(0.5, fit * st.scale / 100)
     function px(v) { return Math.round(v * unit) }
     // The screen's pixels per point (display scaling).
@@ -63,7 +69,8 @@ Window {
     // Something to press never shrinks under a finger, whatever the interface size: 44 pixels, or 6 mm on a dense
     // screen (a 7 inch 1080p handheld has about 12 pixels to the millimetre).
     // (A picture can ask for a dense screen's floor with --finger=<pixels>, since a picture has no screen to measure.)
-    readonly property int touchFloor: shot.on && parseInt(Hub.option("finger")) > 0 ? parseInt(Hub.option("finger")) : Math.max(44, Math.round(Screen.pixelDensity * 6))
+    // (A mouse needs less than a finger: in the window that Files draws for one, 28 pixels.)
+    readonly property int touchFloor: shot.on && parseInt(Hub.option("finger")) > 0 ? parseInt(Hub.option("finger")) : dense ? 28 : Math.max(44, Math.round(Screen.pixelDensity * 6))
     function tpx(v) { return Math.max(touchFloor, Math.round(v * unit)) }
     // An icon: never under three quarters of its design size, so it stays a mark and not a speck beside words that
     // keep nine tenths of theirs.
@@ -133,6 +140,30 @@ Window {
         chevron: "M9 5l7 7-7 7",
         play: "M8 5v14l11-7z",
         warn: "M12 4l9 16H3z M12 10v4 M12 17v.3",
+        folder: "M3 7.500A1.500 1.500 0 0 1 4.500 6h4.600l2 2.200h8.400A1.500 1.500 0 0 1 21 9.700v7.800a1.500 1.500 0 0 1-1.500 1.500h-15A1.500 1.500 0 0 1 3 17.500z",
+        file: "M6.500 3h7.500l4.500 4.500V20.500a.5.5 0 0 1-.5.5H6.500a.5.5 0 0 1-.5-.5V3.500a.5.5 0 0 1 .5-.5z M14 3v4.500h4.500",
+        textfile: "M6.500 3h7.500l4.500 4.500V20.500a.5.5 0 0 1-.5.5H6.500a.5.5 0 0 1-.5-.5V3.500a.5.5 0 0 1 .5-.5z M14 3v4.500h4.500 M9 12.500h6 M9 16h6",
+        zip: "M6.500 3h7.500l4.500 4.500V20.500a.5.5 0 0 1-.5.5H6.500a.5.5 0 0 1-.5-.5V3.500a.5.5 0 0 1 .5-.5z M14 3v4.500h4.500 M10 5v1.500 M10 9v1.500 M10 13v1.500 M9 17h2v2.500H9z",
+        picture: "M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M4 17l5-4.500 3.500 3 3-2.500 4.500 4 M8.500 9.400v.2",
+        video: "M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M10 9.200v5.600l5-2.800z",
+        music: "M9 18V6l10-2v12 M6.500 15.500a2.500 2.500 0 1 1 0 5 2.500 2.500 0 0 1 0-5z M16.500 13.500a2.500 2.500 0 1 1 0 5 2.500 2.500 0 0 1 0-5z",
+        apps: "M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z",
+        bin: "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13",
+        pc: "M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z M9 21h6 M12 17v4",
+        shortcut: "M14 4h6v6 M20 4l-9 9 M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+        cut: "M6 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6z M6 15a3 3 0 1 1 0 6 3 3 0 0 1 0-6z M8.100 8.100L20 20 M8.100 15.900L20 4",
+        copy: "M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
+        paste: "M9 4.500H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.500a1 1 0 0 0-1-1h-3 M9 3h6v3.500H9z",
+        rename: "M4 20h4L19 9l-4-4L4 16z M13.500 6.500l4 4",
+        plus: "M12 5v14 M5 12h14",
+        sort: "M7 4v16 M3.500 7.500L7 4l3.500 3.500 M17 20V4 M13.500 16.500L17 20l3.500-3.500",
+        viewlist: "M4 6h16 M4 12h16 M4 18h16",
+        grid: "M4 4h7v7H4z M13 4h7v7h-7z M4 13h7v7H4z M13 13h7v7h-7z",
+        pane: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z M14.500 5v14",
+        pin: "M9 4h6l-1 6 3 3H7l3-3z M12 13v7",
+        back: "M19 12H5 M11 6l-6 6 6 6",
+        forward: "M5 12h14 M13 6l6 6-6 6",
+        up: "M12 19V5 M6 11l6-6 6 6",
         turbine: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 12C12 8 14 6.5 16 7 M12 12C15.5 12 17 14 16.5 16 M12 12C12 16 10 17.5 8 17 M12 12C8.5 12 7 10 7.5 8"
     })
 
@@ -147,6 +178,10 @@ Window {
     // where Steam's own pad stands in for whichever is held.)
     readonly property bool oldPad: !Hub.gamemode && /360/.test(Hub.padName) && !/steam|virtual/i.test(Hub.padName)
     function glyph(k) {
+        // A key of the keyboard alone ("ctrl+c", "f2", "del"): its name at a keyboard, nothing on a controller.
+        if (/\+|^f\d+$|^del$/.test(k) && k !== "f1" && k !== "f5") return keyboard ? k.split("+").map(p => p === "del" ? "Del" : p.charAt(0).toUpperCase() + p.slice(1)).join("+") : ""
+        // In Files a letter jumps to the name that starts with it, as on Windows, so the hints name the other keys.
+        if (keyboard && current.page === "files" && !dialog.open) { const own = { x: "Shift+F10", y: "Ctrl+F", lb: "PgUp", rb: "PgDn" }; if (own[k]) return own[k] }
         // (Start is called Start on every pad: Turbine Hub's own menu is on View, so "MENU" would name two things.
         // F1 and F5 have no button on a controller: no cap there.)
         const names = keyboard ? { a: "Enter", b: "Esc", x: "R", y: "F", lb: "Q", rb: "E", lt: "Home", rt: "End", view: "Tab", start: "Ctrl+Enter", play: "Space", r3: "Click", f1: "F1", f5: "F5", move: "Arrows" }
@@ -164,11 +199,12 @@ Window {
     // ---------------------------------------------------------------- pages
     readonly property var tabs: [
         { id: "home", title: "Home", icon: "home" }, { id: "games", title: "Games", icon: "games" }, { id: "store", title: "Store", icon: "store" },
-        { id: "machine", title: "My machine", icon: "machine" }, { id: "settings", title: "Settings", icon: "settings" }]
+        { id: "files", title: "Files", icon: "folder" }, { id: "machine", title: "My machine", icon: "machine" }, { id: "settings", title: "Settings", icon: "settings" }]
+    function tabIndex(id) { return tabs.findIndex(x => x.id === id) }
     property int tab: 0
     // What each tab showed last (the picked game, the section), so coming back to it finds the same thing.
-    property var tabArgs: ["", "", "", "", ""]
-    property var tabFids: ["", "", "", "", ""]
+    property var tabArgs: ["", "", "", "", "", ""]
+    property var tabFids: ["", "", "", "", "", ""]
     // Pages opened on top of the tab, newest last: { page, arg }. The first screen of a fresh start is marked
     // `first`: Back there asks to close Turbine Hub.
     property var stack: []
@@ -178,10 +214,11 @@ Window {
     // The tab a page belongs to (-1: it belongs to the one it was opened from).
     function tabOf(page) {
         if (page === "home") return 0
-        if (["games", "library", "tool", "proton", "saves"].indexOf(page) >= 0) return 1
-        if (page === "store" || page === "store-item") return 2
-        if (page === "machine" || page.startsWith("module:")) return 3
-        if (page === "settings" || page === "changes") return 4
+        if (["games", "library", "tool", "proton", "saves"].indexOf(page) >= 0) return tabIndex("games")
+        if (page === "store" || page === "store-item") return tabIndex("store")
+        if (page === "files") return tabIndex("files")
+        if (page === "machine" || page.startsWith("module:")) return tabIndex("machine")
+        if (page === "settings" || page === "changes") return tabIndex("settings")
         return -1
     }
     // The tab the top bar lights: always the one the page on screen belongs to, and none for a page that belongs to
@@ -193,6 +230,7 @@ Window {
 
     function fileFor(page) {
         if (page === "home") return "HomePage.qml"
+        if (page === "files") return "FilesPage.qml"
         if (page === "games" || page === "store" || page === "settings") return "SidePage.qml"
         if (page === "machine" || page === "bring") return "CardsPage.qml"
         if (page === "pick") return "PickPage.qml"
@@ -384,6 +422,8 @@ Window {
         if (r.refresh && !r.root && !r.open) reloadPage()
         if (r.toast) toast.show(r.toast)
         if (r.dialog) dialog.show(r.dialog)
+        // Files: the line just made is named right away, as on Windows.
+        if (r.rename && view.item && view.item.startRename) view.item.startRename(r.rename)
         // A change that could leave the screen unreadable asks to be kept, and goes back by itself.
         if (r.keep) dialog.show({ title: r.keep.title, text: r.keep.text, items: [], confirm: r.keep.confirm, cancel: r.keep.cancel, ask: "", danger: true, keep: r.keep })
     }
@@ -559,7 +599,7 @@ Window {
         // The menu leads to the tabs' places, so it waits until first run is through.
         else if (k === "view" && !bare) doAct("menu", current.page + "@" + pageArg, "")
         // The page's main button; where there is none, Settings (and from Settings, back).
-        else if (k === "start") { if (!pageKey(model, k) && !bare) { if (stack.length === 0 && tab === 4) back(); else goTab(4) } }
+        else if (k === "start") { if (!pageKey(model, k) && !bare) { if (stack.length === 0 && tab === tabIndex("settings")) back(); else goTab(tabIndex("settings")) } }
         // What holding Start does, at once (a click on its hint in the footer).
         else if (k === "play") play()
         else if (k === "f1") help()
@@ -620,17 +660,21 @@ Window {
         const it = item && item.focusable === true ? item : null
         const rows = []
         if (it && it.aLabel) rows.push({ title: it.optionLabel || it.aLabel, key: "a", local: "a" })
+        // The icons across the top of a file's menu (Cut, Copy, Rename, Delete), as Windows 11 has them.
+        const strip = []
         // Said once: what the page offers may be among the thing's own already (then it only brings its button).
         const add = (o) => {
-            const at = rows.findIndex(r => r.title === o.title || (!!o.act && r.act === o.act && r.arg === o.arg))
+            if (o.strip === true) { strip.push(o); return }
+            const at = rows.findIndex(r => r.title === o.title || (!!o.act && r.act === o.act && r.arg === o.arg && (r.value || "") === (o.value || "")))
             if (at < 0) rows.push(o)
             else if (o.key && !rows[at].key) rows[at] = Object.assign({}, rows[at], { key: o.key })
         }
-        for (const o of (it && it.offers) || []) add(o)
+        // (A line of a long list works its offers out when asked, not for every line there is.)
+        for (const o of (it && (it.offersNow ? it.offersNow() : it.offers)) || []) add(o)
         for (const o of model.options || []) add(o)
-        if (rows.length === 0) return
+        if (rows.length === 0 && strip.length === 0) return
         optionsFor = it
-        dialog.show({ title: (it && it.optionsTitle) || model.title || (shownTab >= 0 ? tabs[shownTab].title : "") || "Options", text: "", items: [], confirm: "", cancel: "Close", ask: "", danger: false, rows: rows, options: true })
+        dialog.show({ title: (it && it.optionsTitle) || model.title || (shownTab >= 0 ? tabs[shownTab].title : "") || "Options", text: "", items: [], confirm: "", cancel: "Close", ask: "", danger: false, rows: rows, strip: strip, options: true })
     }
     // What was picked in a menu (the dialog has closed by now).
     function chosen(row) {
@@ -640,7 +684,9 @@ Window {
             if (it && it.visible && it.press) { setFocus(it, true); if (it.fid !== "") lastFid = it.fid; it.press("a") }
         } else if (row.local === "find") Qt.callLater(find, "")
         else if (row.local === "reload") reloadPage()
-        else doAct(row.act, row.arg, "")
+        // Something the page does itself (Files: rename in place, tick, select all, type a path).
+        else if (row.local && view.item && view.item.local) view.item.local(row.local, row)
+        else doAct(row.act, row.arg, row.value || "")
         optionsFor = null
     }
     // The thing that takes the highlight at a place in the window: the one drawn last, and only where its list
@@ -803,6 +849,9 @@ Window {
                 return
             }
             const shift = (e.modifiers & Qt.ShiftModifier) !== 0
+            // A page's own keys come first (Files has Explorer's: F2, Del, Ctrl+C, Alt+Up, a letter that jumps to a
+            // name). Never under a dialog, while work runs, or before the page is ready.
+            if (!dialog.open && !Hub.busy && app.ready && view.item && view.item.key && view.item.key(e)) { e.accepted = true; app.keyUsed(); return }
             // Ctrl+F finds, Ctrl+Enter is Start, Shift+F10 is Options.
             let k = ctrl ? (e.key === Qt.Key_F ? "y" : e.key === Qt.Key_Return || e.key === Qt.Key_Enter ? "start" : "") : shift && e.key === Qt.Key_F10 ? "x" : shift && e.key === Qt.Key_Tab ? "backtab" : ""
             // Any other key with Ctrl, Alt or the system key belongs to the desktop.
@@ -943,12 +992,22 @@ Window {
             if (r.show) {
                 if (app.visibility === Window.Minimized) { if (Hub.gamemode) app.showFullScreen(); else app.showNormal() }
                 app.raise(); app.requestActivate()
+                // (Turbine Files, its own icon: the open window comes forward on Files.)
+                if (r.show === "files" && st.mode !== "" && !dialog.open && !Hub.busy && current.page !== "files") goTab(tabIndex("files"))
             }
+            // Files: a copy's progress or its end, a search below a folder finding more.
+            if (r.files) app.filesNews(r.files)
             if (r.done) {
                 if (r.done.ok && r.done.open) app.open(r.done.open); else app.reloadPage()
                 if (r.done.toast) toast.show(r.done.toast)
-            } else if (r.tick && !dialog.open) app.reloadPage()
+            } else if (r.tick && !dialog.open && !(view.item && view.item.busyTyping === true)) app.reloadPage()
         }
+    }
+    function filesNews(n) {
+        const here = current.page === "files" && view.item
+        if (n.done) { if (here && !dialog.open && view.item.busyTyping !== true) reloadPage(); if (n.toast) toast.show(n.toast) }
+        else if (n.search) { if (here && !dialog.open && !typing && view.item.busyTyping !== true) reloadPage() }
+        else if (n.job && here && view.item.jobNews) view.item.jobNews(n.job)
     }
     // What the controller did since the last look: its buttons, and the pointer.
     function took(r) {
@@ -966,7 +1025,8 @@ Window {
     TopBar {
         id: topBar
         app: app
-        visible: !app.bare
+        // (Files in a Desktop Mode window has Explorer's own strip of tabs up there instead.)
+        visible: !app.bare && !app.dense
         enabled: view.enabled
         anchors { top: parent.top; left: parent.left; right: parent.right }
     }
@@ -979,16 +1039,22 @@ Window {
         // resting on it then (a backdrop alone doesn't stop those, see Backdrop.qml).
         enabled: !dialog.open && !Hub.busy
         // On an ultrawide screen the page keeps a sensible width, centered, so a switch stays near its words.
-        width: Math.min(parent.width, Math.max(app.px(1280), app.height * 1.9))
-        anchors { top: app.bare ? parent.top : topBar.bottom; horizontalCenter: parent.horizontalCenter; bottom: bottomBar.top }
+        // (Files uses all of it: a wider window shows more of a list.)
+        width: app.current.page === "files" ? parent.width : Math.min(parent.width, Math.max(app.px(1280), app.height * 1.9))
+        anchors { top: app.bare || app.dense ? parent.top : topBar.bottom; horizontalCenter: parent.horizontalCenter; bottom: bottomBar.top }
     }
     BottomBar {
         id: bottomBar
         app: app
         anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
         enabled: !Hub.busy
+        // Files in a Desktop Mode window, used with a mouse or a keyboard, has no footer, as Explorer has none:
+        // the hints come back with the first press on a controller.
+        visible: !app.footerHidden
+        height: app.footerHidden ? 0 : Math.max(app.px(58), app.touchFloor + app.px(6))
         hints: app.footerHints()
     }
+    readonly property bool footerHidden: dense && keyboard && !typing
     // The footer's hints, most important first: A and B (they follow the highlight), the pointer's click while it
     // shows, then the page's own as the engine worked them out (its main button, Find, Options, Menu).
     function footerHints() {
@@ -1062,13 +1128,11 @@ Window {
     }
 
     Component.onCompleted: {
+        keys.forceActiveFocus()
         if (shot.on && shot.page !== "") {
             const t = tabs.findIndex(x => x.id === shot.page)
             // A picture of a page that opens from a tab shows that tab as the open one.
-            if (shot.page.startsWith("module:")) tab = 3
-            else if (shot.page === "changes") tab = 4
-            else if (["library", "tool", "proton", "saves"].indexOf(shot.page) >= 0) tab = 1
-            else if (shot.page === "store-item") tab = 2
+            if (tabOf(shot.page) >= 0) tab = tabOf(shot.page)
             if (t >= 0) { tab = t; stack = [] } else stack = [{ page: shot.page, arg: shot.arg, first: shot.page === "pick" && st.mode === "" }]
             loadPage()
             if (t >= 0 && shot.arg !== "") setArg(shot.arg)
@@ -1076,8 +1140,11 @@ Window {
         } else if (st.mode === "") {
             stack = [{ page: "pick", arg: "", first: true }]
             loadPage()
-        } else loadPage()
-        keys.forceActiveFocus()
+        } else {
+            // Started from its own icon (Turbine Files: --page=files), it opens on Files.
+            if (Hub.option("page") === "files") tab = tabIndex("files")
+            loadPage()
+        }
         if (shot.on) {
             selfCheck.setSource("SelfCheck.qml", { app: app, target: shot.path })
             scripted.start()

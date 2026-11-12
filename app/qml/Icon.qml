@@ -11,12 +11,14 @@ import QtQuick.Shapes
 // smallest interface size. A screen reader skips it: the words beside it say what it stands for.
 //
 // app (required): Main.qml's window. d: the path data (app.icons). size: design pixels. tint: its color.
+// filled: the shape is filled with its color too (a folder in Files, so it is told from a file at a glance).
 Item {
     id: icon
     required property var app
     property string d: ""
     property real size: 22
     property color tint: app.colors.muted
+    property bool filled: false
     implicitWidth: app.ipx(size)
     implicitHeight: app.ipx(size)
     Accessible.ignored: true
@@ -32,7 +34,7 @@ Item {
             ShapePath {
                 strokeColor: icon.tint
                 strokeWidth: 2
-                fillColor: "transparent"
+                fillColor: icon.filled ? icon.tint : "transparent"
                 capStyle: ShapePath.RoundCap
                 joinStyle: ShapePath.RoundJoin
                 scale: Qt.size(icon.implicitWidth / 24, icon.implicitHeight / 24)
@@ -44,7 +46,7 @@ Item {
         id: painted
         Canvas {
             id: canvas
-            readonly property string look: icon.d + icon.tint + width + height
+            readonly property string look: icon.d + icon.tint + width + height + icon.filled
             onLookChanged: requestPaint()
             onPaint: {
                 const ctx = getContext("2d")
@@ -57,6 +59,7 @@ Item {
                 ctx.lineCap = "round"
                 ctx.lineJoin = "round"
                 ctx.path = icon.d
+                if (icon.filled) { ctx.fillStyle = icon.tint; ctx.fill() }
                 ctx.stroke()
             }
         }

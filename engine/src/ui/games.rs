@@ -258,7 +258,11 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     let side = arr(all.iter().map(|l| obj! {"id": s(game_id(&l.game)), "title": s(&l.game.name), "chip": s(chip(&l.verdict)), "tone": s(tone(&l.verdict)), "lock": b(false)}));
     let Some(l) = all.get(picked) else {
         if total == 0 {
-            return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s("No games found. Install one in Steam or Heroic and it shows up here."), "sections": arr([]), "hints": arr([])};
+            // Nothing to show may only mean the games are in a folder Turbine Hub can't look in: the way to allow
+            // it is the page's one row then.
+            let unseen = unseen_section(ui);
+            let empty = if unseen.is_some() { "No games found yet. Steam lists a library Turbine Hub isn't allowed to read." } else { "No games found. Install one in Steam or Heroic and it shows up here." };
+            return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s(empty), "sections": arr(unseen), "hints": arr([])};
         }
         return obj! {"side": arr([]), "sideTitle": s(format!("0 of {total} games")), "index": n(0.0), "search": search, "empty": s(format!("No game matches \"{}\".", q.trim())), "sections": arr([]), "hints": arr([hint("rt", "Search")])};
     };
@@ -286,11 +290,43 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
             "chips": arr(chips),
             "line": s(format!("{} \u{b7} {} \u{b7} {}", l.game.store.label(), runs_with(&l.game), l.verdict.note)),
         },
-        "sections": arr(panel(ui, l, &tv)),
+        "sections": arr(panel(ui, l, &tv).into_iter().chain(unseen_section(ui))),
         "hints": arr(hints),
         "x": if playable { obj! {"act": s("game"), "arg": s(format!("play|{}", game_id(&l.game)))} } else { Json::Null },
         "y": obj! {"act": s("open"), "arg": s("library")},
     }
+}
+
+/// "Games missing?": one row per Steam library Turbine Hub isn't allowed to read, each with Allow, and the restart
+/// that follows for the ones allowed in this run. None when every library Steam lists can be seen.
+fn unseen_section(ui: &Ui) -> Option<Json> {
+    let mut rows: Vec<Json> = ui.unseen_libraries().iter().map(|p| with(with(with(row("allow-library", &p.to_string_lossy(), "button", "A Steam library can't be read", &format!("Turbine Hub isn't allowed to look in {}, so the games there are missing here.", p.display())), "button", s("Allow")), "icon", s("drive")), "tone", s("warn"))).collect();
+    if let Some(p) = ui.allowed.first() {
+        let (title, button) = if ui.window { ("Restart Turbine Hub to see its games", "Restart") } else { ("Close Turbine Hub, then start it again from Steam", "Close") };
+        rows.push(with(with(row("restart-app", "", "button", title, &format!("It may read {} from its next start.", p.display())), "button", s(button)), "icon", s("refresh")));
+    }
+    (!rows.is_empty()).then(|| section("Games missing?", rows))
+}
+
+/// The dialog that lets Turbine Hub read one Steam library's folder: shows the folder, runs flatpak's own override
+/// for this user on the host, then says to start Turbine Hub again (a Flatpak's folders are set when it starts).
+/// Only folders Steam itself lists as a library and Turbine Hub can't see are ever offered.
+fn allow_library(ui: &mut Ui, arg: &str) -> Json {
+    let unseen = ui.unseen_libraries();
+    let Some(folder) = unseen.iter().find(|p| arg.is_empty() || p.as_os_str() == arg).cloned() else {
+        return toast(if ui.allowed.is_empty() { "Turbine Hub can see every Steam library already." } else { "That folder is allowed already. Its games show after Turbine Hub starts again." });
+    };
+    let Some(line) = crate::steam::allow_line(&folder, super::selftile::FLATPAK_ID) else {
+        return toast("That folder can't be allowed from here. In Desktop Mode, Flatseal can give Turbine Hub a folder.");
+    };
+    let shown = folder.to_string_lossy().into_owned();
+    let mut p = Plan::new("Let Turbine Hub read this Steam library?", "Steam keeps games in this folder, and Turbine Hub isn't allowed to look in it yet, so those games are missing here. Allowing it changes nothing in the folder.", "Allow");
+    p.items.push(("The folder".into(), shown.clone()));
+    p.items.push(("Turbine Hub may read and use it".into(), if ui.veteran() { line[2..].join(" ") } else { "Like Steam's other libraries, for your user only. Flatseal can take it back any time.".into() }));
+    p.items.push(("Then start Turbine Hub again".into(), "The games there show after its next start.".into()));
+    p.steps.push(Step::Host(line));
+    p.done = if ui.window { format!("Turbine Hub may read {shown}. Restart Turbine Hub to see its games.") } else { format!("Turbine Hub may read {shown}. Close Turbine Hub, then start it again from Steam to see its games.") };
+    dialog(ui, p)
 }
 
 /// Works first, then not rated, needs a fix, won't run; by name inside each.
@@ -438,21 +474,42 @@ pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
     let st = ui.settings();
     let sw = Switches::load(&ui.folder());
     let games = find(ui, id).map(|l| vec![format!("{} ({id}): {}, {}, switches on: {}", l.game.name, runs_with(&l.game), l.verdict.label.words(), Some(sw.applied(id).iter().map(|x| x.key()).collect::<Vec<_>>().join(", ")).filter(|x| !x.is_empty()).unwrap_or_else(|| "none".into()))]).unwrap_or_default();
-    crate::report::build(&crate::report::ProblemReport {
+    let logs = crate::applog::dir(&ui.data);
+    let text = crate::report::build(&crate::report::ProblemReport {
+        app_log: crate::applog::last_lines(&logs, crate::applog::REPORT_LINES),
+        crash: crate::applog::crash_tail(&logs, crate::applog::REPORT_CRASH_BYTES),
         version: ui.ctx.version.clone(),
         when: when.into(),
         device: vec![format!("Machine: {}", super::top_name(&m)), format!("Processor: {}", m.cpu), format!("Memory: {} GB", m.memory_gb), format!("SteamOS: {}", m.steamos)],
-        screen: if id == super::lighting::REPORT { "Lighting" } else { "Games" }.into(),
+        screen: if id == super::lighting::REPORT { "Lighting" } else if id == APP_REPORT { "Settings" } else { "Games" }.into(),
         settings: vec![format!("mode: {:?}", st.mode), format!("game boost: {}", st.game_boost)],
         games,
         log: ui.ledger().entries.iter().map(|e| e.change.words()).collect(),
         launch: Vec::new(),
         lighting: super::lighting::report_lines(ui),
-    })
+    });
+    // The log's lines were cleaned when they were written; this covers the rest of the report the same way.
+    let user = std::env::var("USER").ok().filter(|_| !ui.sample);
+    let private = crate::applog::Private::new(&ui.ctx.home, user.as_deref());
+    text.lines().map(|l| private.scrub(l)).collect::<Vec<_>>().join("\n") + "\n"
+}
+
+/// The report's name for Turbine Hub itself (in place of a game's id): Settings, Help and reports.
+pub const APP_REPORT: &str = "app";
+
+/// The dialog for a report about Turbine Hub itself, with its own log and crash log in it.
+pub(crate) fn app_report(ui: &mut Ui) -> Json {
+    let mut p = Plan::new("Write a report?", "Turbine Hub writes what it knows about this machine and the last lines of its own log into a text file. Your home folder, user name, addresses and keys are hidden. Nothing is sent anywhere.", "Write it");
+    let at = reports_dir(ui);
+    p.items.push(("Where it goes".into(), at.to_string_lossy().into_owned()));
+    p.steps.push(Step::Report { game: APP_REPORT.into() });
+    p.done = format!("Report written. It's in {}", at.display());
+    dialog(ui, p)
 }
 
 pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<Json> {
     match action {
+        "allow-library" => Some(allow_library(ui, arg)),
         // What was typed into a page's search box.
         "search" => {
             if !["games", "store"].contains(&arg) {

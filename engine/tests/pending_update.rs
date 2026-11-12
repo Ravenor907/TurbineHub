@@ -68,3 +68,50 @@ fn a_steam_library_turbine_cant_read_is_named() {
     assert!(scan.problems[0].contains(steam::UNSEEN_WHY));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn unreadable_steam_libraries_are_listed_and_only_plain_folders_can_be_allowed() {
+    use std::path::{Path, PathBuf};
+    use turbinehub_engine::steam;
+    let home = std::env::temp_dir().join(format!("turbinehub-unseen-home-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let steam_dir = home.join(".local/share/Steam");
+    std::fs::create_dir_all(steam_dir.join("steamapps")).unwrap();
+    assert!(steam::unseen_libraries(&home).is_empty());
+    std::fs::write(
+        steam_dir.join("steamapps/libraryfolders.vdf"),
+        format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"/mnt/games-drive/SteamLibrary\"\n}}\n\"2\"\n{{\n\"path\" \"/run/media/deck/SD/SteamLibrary\"\n}}\n\"3\"\n{{\n\"path\" \"/mnt/games-drive/SteamLibrary\"\n}}\n}}\n", steam_dir.display()),
+    )
+    .unwrap();
+    // The drive outside the allowed folders, once; an SD card that isn't in is not a permission problem.
+    assert_eq!(steam::unseen_libraries(&home), vec![PathBuf::from("/mnt/games-drive/SteamLibrary")]);
+    let _ = std::fs::remove_dir_all(&home);
+
+    let id = "io.github.ravenor907.TurbineHub";
+    let line = steam::allow_line(Path::new("/mnt/games-drive/SteamLibrary"), id).unwrap();
+    assert_eq!(line, ["flatpak-spawn", "--host", "flatpak", "override", "--user", "--filesystem=/mnt/games-drive/SteamLibrary", id]);
+    assert_eq!(steam::allowed_by(&line, id), Some(PathBuf::from("/mnt/games-drive/SteamLibrary")));
+    // Another app's override (the Store's, for Chrome) is not Turbine Hub's folder.
+    let chrome: Vec<String> = ["flatpak-spawn", "--host", "flatpak", "override", "--user", "--filesystem=/run/udev:ro", "com.google.Chrome"].iter().map(|x| x.to_string()).collect();
+    assert_eq!(steam::allowed_by(&chrome, id), None);
+    assert_eq!(steam::allowed_by(&line[..5], id), None);
+    // A folder with spaces is one argument, no shell in between.
+    assert!(steam::allow_line(Path::new("/mnt/My Games/SteamLibrary"), id).unwrap().contains(&"--filesystem=/mnt/My Games/SteamLibrary".to_string()));
+    // Never a keyword, an option, a mode, a way out of the folder, the whole system or the whole home folder.
+    for bad in ["host", "home", "relative/path", "/", "/mnt", "/mnt/x:ro", "/mnt/x=y/z", "/mnt/a;b/c", "/mnt/a\nb/c", "/mnt/x/../../etc", "/mnt/x/..", "/mnt/a,b/c", "/mnt/a\\b/c", "--filesystem=host", ""] {
+        assert!(steam::allow_line(Path::new(bad), id).is_none(), "{bad:?}");
+    }
+    assert!(steam::allow_line(&turbinehub_engine::home_dir(), id).is_none());
+}
+
+#[test]
+fn downloaded_art_is_kept_in_turbine_hubs_own_cache_folder() {
+    use turbinehub_engine::steam;
+    assert_eq!(steam::ART_CACHE, "turbinehub/art");
+    // Under the cache folder everything else Turbine Hub fetched lives in, whatever the environment says it is.
+    if std::env::var_os("TURBINEHUB_ART").is_none() {
+        let dir = steam::art_cache().expect("a cache folder");
+        assert!(dir.ends_with("turbinehub/art"), "{}", dir.display());
+        assert!(!dir.to_string_lossy().contains("mod-manager"));
+    }
+}

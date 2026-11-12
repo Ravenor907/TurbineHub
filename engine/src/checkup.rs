@@ -28,6 +28,12 @@ pub struct Facts {
     pub controller_wake_on: bool,
     /// Lighting choices are saved but the lights aren't open to the background helper (`lighting::locked`).
     pub lights_locked: bool,
+    /// Steam libraries in folders Turbine Hub isn't allowed to read (`steam::unseen_libraries`), not allowed yet.
+    pub unseen_libraries: Vec<String>,
+    /// Folders the player allowed in this run: Turbine Hub reads them from its next start.
+    pub allowed_libraries: Vec<String>,
+    /// Turbine Hub runs in a Desktop Mode window (it can start itself again there).
+    pub window: bool,
     /// With `lights_locked` once the setup was done: what happened, in plain words. Empty before the setup.
     pub lights_note: String,
     /// With `lights_locked`: opening them again was tried and didn't hold, so the same fix isn't offered again.
@@ -149,6 +155,15 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     for d in m.drives.iter().filter(|d| d.role == DriveRole::Empty && !d.removable) {
         out.push(item("drive", Level::Look, "drive", "A drive isn't used for games".into(), format!("{}, empty. Add it to Steam as a game library?", if d.model.is_empty() { gb(d.bytes) } else { d.model.clone() }), ("Set up", "drives")));
+    }
+    if let Some(first) = f.unseen_libraries.first() {
+        let n = f.unseen_libraries.len();
+        let title = if n == 1 { "A Steam library can't be read".to_string() } else { format!("{n} Steam libraries can't be read") };
+        out.push(item("unseen", Level::Look, "drive", title, format!("Turbine Hub isn't allowed to look in {first}, so the games there are missing here."), ("Allow", "allow-library")));
+    }
+    if let Some(first) = f.allowed_libraries.first() {
+        let action = if f.window { ("Restart", "restart-app") } else { ("Close", "restart-app") };
+        out.push(item("allowed", Level::Look, "drive", "Start Turbine Hub again to see your games".into(), format!("It may read {first} from its next start."), action));
     }
     if f.lights_locked {
         out.push(if f.lights_stuck {

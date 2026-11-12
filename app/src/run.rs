@@ -11,6 +11,7 @@ use turbinehub_engine::agent::{self, Found};
 use turbinehub_engine::json::Json;
 use turbinehub_engine::net::Client;
 use turbinehub_engine::selfupdate::{self, Check};
+use turbinehub_engine::shortcuts::Steam;
 use turbinehub_engine::sources::{self, Origin};
 use turbinehub_engine::ui::{self, Step};
 use turbinehub_engine::{Store, helper};
@@ -32,7 +33,8 @@ pub struct Facts {
     pub installed: Option<Vec<String>>,
     pub updates: Option<Vec<String>>,
     pub has_password: Option<bool>,
-    pub steam_running: bool,
+    /// Is Steam running: yes, no, or the host couldn't say (then it counts as running).
+    pub steam: Option<Steam>,
     /// When the running Steam started, in seconds since 1970.
     pub steam_started: Option<u64>,
     pub sound: Vec<(String, String)>,
@@ -162,6 +164,11 @@ fn helper_in_flatpak() -> Option<PathBuf> {
     Some(Path::new(app.trim()).join("bin/turbinehub-helper"))
 }
 
+/// Where Turbine Hub's shared files are (fonts, pictures, the Steam art set).
+pub fn share_dir() -> PathBuf {
+    std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into()).into()
+}
+
 /// What the steps of a plan need besides themselves.
 pub struct Job {
     pub steps: Vec<Step>,
@@ -171,13 +178,54 @@ pub struct Job {
     pub folder: PathBuf,
     /// Turbine Hub's data folder (the save snapshots).
     pub data: PathBuf,
-    pub steam_running: bool,
     pub version: String,
     pub cache: PathBuf,
     pub test_builds: bool,
 }
 
+/// Is Steam running on the host, asked now. Every step that writes Steam's list of non-Steam games asks right
+/// before it writes: Steam may have been started since the dialog was shown, and a question that couldn't be asked
+/// counts as "running" (the engine refuses to write then).
+pub fn steam_now() -> Steam {
+    let ran = run(&Steam::question(), None).ok();
+    let steam = Steam::from_answer(ran.as_ref().map(|o| (o.code, o.stdout.as_str())));
+    if steam == Steam::Unknown {
+        crate::log::line("steam", &format!("Couldn't tell whether Steam is running ({}): treated as running", ran.map(|o| format!("pgrep ended with {}: {}", o.code, reason(&o))).unwrap_or_else(|| "pgrep couldn't be started".into())));
+    }
+    steam
+}
+
+/// A step's name for the log: what it is, never what was typed.
+fn step_name(st: &Step) -> String {
+    match st {
+        Step::Host(line) => format!("Host {}", line.iter().skip_while(|a| a.as_str() == "flatpak-spawn" || a.as_str() == "--host").cloned().collect::<Vec<_>>().join(" ")),
+        Step::HostWrite { path, .. } => format!("HostWrite {path}"),
+        Step::Tile { name, .. } => format!("Tile {name}"),
+        Step::TileRemove { url } => format!("TileRemove {url}"),
+        Step::CopyGame { name, .. } => format!("CopyGame {name}"),
+        Step::Report { game } => format!("Report {game}"),
+        Step::Nsl { tag, plugin } => format!("Nsl {tag} plugin={plugin}"),
+        Step::ResetPrefix { app_id, .. } => format!("ResetPrefix {app_id}"),
+        Step::ResetUndo { app_id, .. } => format!("ResetUndo {app_id}"),
+        Step::ProtonPick { app_id, .. } => format!("ProtonPick {app_id}"),
+        Step::ProtonUndo { app_id } => format!("ProtonUndo {app_id}"),
+        Step::Saves(_) => "Saves".into(),
+        other => format!("{other:?}"),
+    }
+}
+
+/// One step, with its start and how it ended in the log.
 fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
+    let name = step_name(st);
+    let result = step_inner(job, st, say);
+    match &result {
+        Ok(()) => crate::log::line("step", &format!("{name}: done")),
+        Err(why) => crate::log::line("step", &format!("{name}: failed: {why}")),
+    }
+    result
+}
+
+fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
     match st {
         Step::Host(line) => {
             let is_helper = line.iter().any(|a| a == helper::BIN);
@@ -209,7 +257,7 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
         }
         Step::Tile { name, url } => {
             let file = turbinehub_engine::shortcuts::tile_file(&job.home).ok_or("Steam's list of non-Steam games wasn't found. Start Steam once and sign in.")?;
-            turbinehub_engine::shortcuts::add_shortcut(&file, &ui::store::tile_shortcut(name, url), &ui::store::tile_marker(url), job.steam_running).map(|_| ())
+            turbinehub_engine::shortcuts::add_shortcut(&file, &ui::store::tile_shortcut(name, url), &ui::store::tile_marker(url), steam_now()).map(|_| ())
         }
         Step::CopyGame { name, pairs } => {
             say(format!("Copying {name}"));
@@ -226,12 +274,17 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             turbinehub_engine::saves::run(work, &places, turbinehub_engine::now(), say, &mut runner).map(|_| ())
         }
         Step::SelfTile { .. } | Step::SelfArt => {
-            let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
-            ui::selftile::run_step(st, &job.home, &job.folder, Path::new(&share), job.steam_running).unwrap_or(Ok(()))
+            // Only the entry itself is in Steam's list; the pictures go beside it and need no answer.
+            let steam = if matches!(st, Step::SelfTile { .. }) { steam_now() } else { Steam::Closed };
+            ui::selftile::run_step(st, &job.home, &job.folder, &share_dir(), steam).unwrap_or(Ok(()))
         }
         Step::TileRemove { url } => {
             let file = turbinehub_engine::shortcuts::tile_file(&job.home).ok_or("Steam's list of non-Steam games wasn't found.")?;
-            turbinehub_engine::shortcuts::remove_shortcut(&file, &ui::store::tile_marker(url), job.steam_running).map(|_| ())
+            // The tile is the browser's entry with this address: Turbine Hub's own entry never matches.
+            match turbinehub_engine::shortcuts::remove_app_tile(&file, ui::store::CHROME, &ui::store::tile_marker(url), steam_now())? {
+                turbinehub_engine::shortcuts::TileChange::NotThere => Err("That tile isn't in Steam's list any more. If it still shows, remove it in Steam: its options, Manage, Remove non-Steam game.".into()),
+                _ => Ok(()),
+            }
         }
         Step::SelfUpdate => {
             say("Getting the new version".into());
@@ -245,7 +298,18 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             let scope = selfupdate::install_scope(&std::fs::read_to_string("/.flatpak-info").unwrap_or_default());
             let o = run(&selfupdate::install_args_to(&got.path, scope), None)?;
             let _ = std::fs::remove_file(&got.path);
-            if o.code == 0 { Ok(()) } else { Err(reason(&o)) }
+            if o.code != 0 {
+                // Flatpak's own words go into the log; the player gets what to do.
+                crate::log::line("update", &format!("Installing {} failed ({}): {} {}", release.version, o.code, o.stderr.trim(), o.stdout.trim()));
+                return Err(selfupdate::install_problem(&format!("{}\n{}", o.stdout, o.stderr)));
+            }
+            crate::log::line("update", &format!("Installed Turbine Hub {} ({scope})", release.version));
+            // The desktop's menu keeps the entry and icon from before until its list is rebuilt (Desktop Mode's
+            // own tool; nothing happens where it isn't there).
+            if selfupdate::menu_refresh().iter().any(|line| run(line, None).is_ok_and(|o| o.code == 0)) {
+                crate::log::line("update", "The desktop's menu was asked to read Turbine Hub's entry and icon again");
+            }
+            Ok(())
         }
         Step::Nsl { tag, plugin } => {
             say("Getting NonSteamLaunchers".into());
@@ -321,17 +385,29 @@ pub fn verify() -> Option<Vec<String>> {
 }
 
 /// Looks for updates: a newer Turbine Hub, Flathub apps, Decky plugins. Each part that couldn't be checked stays
-/// None. Also answers whether the internet was reached (Some(false): tried and nothing answered).
-pub fn look_for_updates(home: &Path, cache: &Path, version: &str, test_builds: bool) -> (Found, Option<bool>) {
+/// None. Also answers whether the internet was reached (Some(false): tried and nothing answered). `ask_anyway`:
+/// the player pressed Check now, or the background helper's daily look; without it GitHub is asked about Turbine
+/// Hub itself at most once in six hours, and the answer from then is used in between.
+pub fn look_for_updates(home: &Path, cache: &Path, version: &str, test_builds: bool, ask_anyway: bool) -> (Found, Option<bool>) {
     let client = Client::new(version, cache);
     let mut found = Found { apps: lines(host_text(&["flatpak", "remote-ls", "--updates", "--app", "--columns=application"])), ..Found::default() };
     let (mut worked, mut failed) = (false, false);
-    match selfupdate::check(&client, version, test_builds) {
-        Ok(Check::Available(r)) => found.update = Some(r.version.clone()),
-        Ok(Check::UpToDate) => found.update = Some(String::new()),
-        Err(_) => failed = true,
+    let kept = selfupdate::remembered_file(cache);
+    match selfupdate::check_kept(&kept, version, test_builds, turbinehub_engine::now(), ask_anyway, &mut || selfupdate::newest(&client, test_builds)) {
+        Ok((check, asked)) => {
+            found.update = Some(match check {
+                Check::Available(r) => r.version.clone(),
+                Check::UpToDate => String::new(),
+            });
+            // Only an answer from GitHub itself says the internet is there.
+            worked |= asked;
+            crate::log::line("update", if asked { "Asked GitHub for the newest Turbine Hub" } else { "The newest Turbine Hub: the answer from the last six hours is used" });
+        }
+        Err(e) => {
+            failed = true;
+            crate::log::line("update", &format!("Couldn't ask for the newest Turbine Hub: {e}"));
+        }
     }
-    worked |= found.update.is_some();
     // Only with Decky there: the plugin store is asked for nothing otherwise.
     if home.join("homebrew/plugins").is_dir() {
         let got = sources::get(&sources::DECKY_PLUGINS, cache, turbinehub_engine::now(), &mut |u| client.get_text(u, &[]).map_err(|e| e.to_string()));
@@ -362,7 +438,7 @@ fn local_facts(home: &Path, cache: &Path, helper_there: bool) -> Facts {
         ui::store::remember_installed(cache, &text);
     }
     f.has_password = host_text(&["passwd", "-S"]).and_then(|t| t.split_whitespace().nth(1).map(|w| w != "NP"));
-    f.steam_running = run(&host(&["pgrep", "-x", "steam"]), None).is_ok_and(|o| o.code == 0);
+    f.steam = Some(steam_now());
     f.steam_started = steam_started();
     f.sound = host_text(&["pactl", "list", "sinks"]).map(|t| agent::sinks(&t)).unwrap_or_default();
     f.sound_now = host_text(&["pactl", "get-default-sink"]).map(|t| t.trim().to_string()).unwrap_or_default();
@@ -379,6 +455,7 @@ fn local_facts(home: &Path, cache: &Path, helper_there: bool) -> Facts {
     // word counts.
     f.agent_on = run(&agent::unit_question(), None).ok().map(|o| agent::unit_enabled(&o.stdout));
     f.lights = Some(host_lights(home));
+    crate::log::line("host", &format!("Steam {:?}, {} apps installed, password {:?}, background helper on {:?}, {} settings drifted", f.steam.unwrap_or(Steam::Unknown), f.installed.as_ref().map_or(0, Vec::len), f.has_password, f.agent_on, f.drift.as_ref().map_or(0, Vec::len)));
     f
 }
 
@@ -405,6 +482,8 @@ pub struct Gather {
     pub version: String,
     pub test_builds: bool,
     pub helper_there: bool,
+    /// The player pressed Check now: Turbine Hub's own update is asked for even within six hours of the last time.
+    pub check_now: bool,
 }
 
 /// Gathers the facts on a new thread: the host's first, then what needs the internet. Everything online goes
@@ -425,7 +504,7 @@ pub fn gather(g: Gather, tx: Sender<Event>) {
         let lists = sources::refresh(&g.cache, &ids, Some(&turbinehub_engine::cli::anticheat_cache(&g.config_home)), now, 40, &mut fetch);
         let decky = sources::get(&sources::DECKY_RELEASE, &g.cache, now, &mut fetch);
         let nsl = sources::get(&sources::NSL_RELEASE, &g.cache, now, &mut fetch);
-        let (found, updates_online) = look_for_updates(&g.home, &g.cache, &g.version, g.test_builds);
+        let (found, updates_online) = look_for_updates(&g.home, &g.cache, &g.version, g.test_builds, g.check_now);
         let answers = [lists.online, if decky.origin == Origin::Live { Some(true) } else if decky.offline { Some(false) } else { None }, updates_online];
         let f = Facts {
             updates: found.apps,

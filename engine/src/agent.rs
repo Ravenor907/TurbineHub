@@ -866,7 +866,7 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         let add = |name: &str, exe: &str, options: &str| {
             let s = NewShortcut { name: name.into(), exe: exe.into(), start_dir: "\"/usr/bin/\"".into(), launch_options: options.into(), flatpak_id: String::new(), icon: String::new() };
-            add_shortcut(&file, &s, "no marker", false).unwrap();
+            add_shortcut(&file, &s, "no marker", crate::shortcuts::Steam::Closed).unwrap();
             s.appid().to_string()
         };
         let hub = add("Turbine Hub", "\"/usr/bin/flatpak\"", "run io.github.ravenor907.TurbineHub");

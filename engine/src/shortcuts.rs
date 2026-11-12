@@ -301,6 +301,51 @@ pub fn original_file(file: &Path) -> PathBuf {
 }
 
 const STEAM_OPEN: &str = "Close Steam first: Steam writes its list of non-Steam games back over any change while it runs";
+const STEAM_UNSURE: &str = "Turbine Hub couldn't check whether Steam is running, so it left Steam's list of non-Steam games alone. Close Steam, then try again";
+
+/// Is Steam running? Asked right before every write of Steam's list of non-Steam games. Three answers, because a
+/// question that couldn't be asked is not a "no": when Turbine Hub can't tell, it treats Steam as running and
+/// writes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steam {
+    Closed,
+    Running,
+    /// The host couldn't be asked, or its answer made no sense.
+    Unknown,
+}
+
+impl Steam {
+    /// The question for the host: how many processes are named steam. `pgrep -c` prints the count either way, so
+    /// "none" is told apart from a question that never reached the host.
+    pub fn question() -> Vec<String> {
+        ["flatpak-spawn", "--host", "pgrep", "-c", "-x", "steam"].iter().map(|x| x.to_string()).collect()
+    }
+
+    /// What the question's answer means. `ran`: the exit code and what it printed, None when it couldn't be run.
+    /// Closed only when pgrep itself said so (exit code 1 and a count of 0): flatpak-spawn failing also ends
+    /// with 1, but prints no count.
+    pub fn from_answer(ran: Option<(i32, &str)>) -> Steam {
+        match ran.map(|(code, out)| (code, out.trim().parse::<u32>())) {
+            Some((0, Ok(n))) if n > 0 => Steam::Running,
+            Some((1, Ok(0))) => Steam::Closed,
+            _ => Steam::Unknown,
+        }
+    }
+
+    /// For what the screens offer: running, or not known (then it is treated as running).
+    pub fn in_the_way(self) -> bool {
+        self != Steam::Closed
+    }
+
+    /// May Steam's list be written now? Else why not, in plain words.
+    pub fn may_write(self) -> Result<(), String> {
+        match self {
+            Steam::Closed => Ok(()),
+            Steam::Running => Err(STEAM_OPEN.into()),
+            Steam::Unknown => Err(STEAM_UNSURE.into()),
+        }
+    }
+}
 
 fn entry_text(e: &vdf::BinItem, key: &str) -> String {
     e.children().iter().find(|i| i.key_is(key)).and_then(vdf::BinItem::as_text).unwrap_or_default()
@@ -361,17 +406,15 @@ fn save(file: &Path, before: Option<&[u8]>, doc: &vdf::BinDoc) -> Result<(), Str
 }
 
 /// Adds the shortcut unless one with the same marker (Turbine Hub's tile) or the same appid is there. Only while Steam
-/// is closed (`steam_running` from the app's own check); a backup first.
-pub fn add_shortcut(file: &Path, s: &NewShortcut, marker: &str, steam_running: bool) -> Result<TileChange, String> {
+/// is closed (`steam`: asked right before this call, see `Steam`); a backup first.
+pub fn add_shortcut(file: &Path, s: &NewShortcut, marker: &str, steam: Steam) -> Result<TileChange, String> {
     let (before, mut doc) = load(file)?;
     let appid = s.appid();
     let list = list_mut(&mut doc);
     if let Some(e) = list.iter().find(|e| is_tile(e, marker) || entry_appid(e) == appid) {
         return Ok(TileChange::Already(entry_appid(e)));
     }
-    if steam_running {
-        return Err(STEAM_OPEN.into());
-    }
+    steam.may_write()?;
     let next = list.iter().filter_map(|e| std::str::from_utf8(&e.key).ok()?.parse::<u32>().ok()).max().map_or(0, |m| m + 1).max(list.len() as u32);
     use vdf::BinItem as I;
     list.push(I::obj(
@@ -402,13 +445,25 @@ pub fn add_shortcut(file: &Path, s: &NewShortcut, marker: &str, steam_running: b
 
 /// Removes Turbine Hub's tile with this marker (and only that), renumbering the rest as Steam does. Only while Steam is
 /// closed; a backup first.
-pub fn remove_shortcut(file: &Path, marker: &str, steam_running: bool) -> Result<TileChange, String> {
+pub fn remove_shortcut(file: &Path, marker: &str, steam: Steam) -> Result<TileChange, String> {
+    remove_where(file, steam, &|e| is_tile(e, marker))
+}
+
+/// Removes a tile the Store added: an entry that starts this Flatpak (a browser) with this marker (the tile's own
+/// address) in its launch options. Turbine Hub's own entry never matches. Only while Steam is closed; a backup
+/// first.
+pub fn remove_app_tile(file: &Path, flatpak_id: &str, marker: &str, steam: Steam) -> Result<TileChange, String> {
+    remove_where(file, steam, &|e| {
+        let s = Shortcut { appid: 0, name: String::new(), exe: entry_text(e, "Exe"), launch_options: entry_text(e, "LaunchOptions") };
+        !is_self(&s) && !flatpak_id.is_empty() && !marker.is_empty() && s.launch_options.contains(flatpak_id) && s.launch_options.contains(marker)
+    })
+}
+
+fn remove_where(file: &Path, steam: Steam, ours: &dyn Fn(&vdf::BinItem) -> bool) -> Result<TileChange, String> {
     let (before, mut doc) = load(file)?;
     let list = list_mut(&mut doc);
-    let Some(at) = list.iter().position(|e| is_tile(e, marker)) else { return Ok(TileChange::NotThere) };
-    if steam_running {
-        return Err(STEAM_OPEN.into());
-    }
+    let Some(at) = list.iter().position(ours) else { return Ok(TileChange::NotThere) };
+    steam.may_write()?;
     let appid = entry_appid(&list[at]);
     list.remove(at);
     for (n, e) in list.iter_mut().enumerate() {
@@ -423,7 +478,7 @@ pub fn remove_shortcut(file: &Path, marker: &str, steam_running: bool) -> Result
 /// Adds the co-op tile with its art: the art (capsule, wide, hero, logo, icon from `art_dir`, see
 /// steam_art::COOP_PARTS) goes into the grid folder by the tile's appid first, never over the player's own, and the
 /// tile's icon is the icon there. `record`: Turbine Hub's art record.
-pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir: &Path, record: &Path, steam_running: bool) -> Result<TileChange, String> {
+pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir: &Path, record: &Path, steam: Steam) -> Result<TileChange, String> {
     let mut t = tile.clone();
     let appid = t.appid();
     let grid = crate::steam_art::grid_dir(file);
@@ -432,16 +487,16 @@ pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir:
     if let (true, Some(name)) = (art_dir.join("icon.png").is_file(), crate::steam_art::grid_name(appid, "icon")) {
         t.icon = grid.join(name).to_string_lossy().to_string();
     }
-    let r = add_shortcut(file, &t, marker, steam_running)?;
-    if !steam_running && matches!(r, TileChange::Added(_) | TileChange::Already(_)) {
+    let r = add_shortcut(file, &t, marker, steam)?;
+    if steam == Steam::Closed && matches!(r, TileChange::Added(_) | TileChange::Already(_)) {
         crate::steam_art::add_art_opts(art_dir, &grid, appid, crate::steam_art::COOP_PARTS, record, true).map_err(|e| format!("Couldn't add the tile's art ({e})"))?;
     }
     Ok(r)
 }
 
 /// Removes the co-op tile and Turbine Hub's own art for it.
-pub fn remove_tile_with_art(file: &Path, marker: &str, record: &Path, steam_running: bool) -> Result<TileChange, String> {
-    let r = remove_shortcut(file, marker, steam_running)?;
+pub fn remove_tile_with_art(file: &Path, marker: &str, record: &Path, steam: Steam) -> Result<TileChange, String> {
+    let r = remove_shortcut(file, marker, steam)?;
     if let TileChange::Removed(appid) = r {
         crate::steam_art::remove_art(&crate::steam_art::grid_dir(file), appid, record).map_err(|e| format!("Couldn't remove the tile's art ({e})"))?;
     }

@@ -96,7 +96,7 @@ fn finds_turbines_own_shortcut() {
     fs::write(&file, &bytes).unwrap();
     // The co-op tile next to it doesn't count as Turbine Hub itself.
     let tile = shortcuts::coop_tile("ELDEN RING", "steam:1245620", "io.github.ravenor907.TurbineHub");
-    shortcuts::add_shortcut(&file, &tile, &shortcuts::coop_marker("steam:1245620"), false).unwrap();
+    shortcuts::add_shortcut(&file, &tile, &shortcuts::coop_marker("steam:1245620"), turbinehub_engine::shortcuts::Steam::Closed).unwrap();
     let (f, appid) = shortcuts::find_self_file(&d).unwrap();
     assert_eq!(f, file);
     assert_eq!(appid, 0x9000_0042);

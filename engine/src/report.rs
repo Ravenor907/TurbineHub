@@ -81,6 +81,10 @@ pub struct ProblemReport {
     pub launch: Vec<String>,
     /// The machine's lights and how Turbine Hub drives them (`lights::diagnostics`).
     pub lighting: Vec<String>,
+    /// The last lines of Turbine Hub's own log (`applog`), private details already hidden.
+    pub app_log: Vec<String>,
+    /// The last lines of the crash log.
+    pub crash: Vec<String>,
 }
 
 /// The report's text, every line redacted.
@@ -113,6 +117,20 @@ pub fn build(r: &ProblemReport) -> String {
     if !r.launch.is_empty() {
         t.push_str("\nSteam launch logs (newest last):\n");
         for l in &r.launch {
+            t.push_str(l);
+            t.push('\n');
+        }
+    }
+    if !r.app_log.is_empty() {
+        t.push_str(&format!("\nTurbine Hub's log ({} lines, newest last):\n", r.app_log.len()));
+        for l in &r.app_log {
+            t.push_str(l);
+            t.push('\n');
+        }
+    }
+    if !r.crash.is_empty() {
+        t.push_str("\nCrash log (newest last):\n");
+        for l in &r.crash {
             t.push_str(l);
             t.push('\n');
         }
@@ -224,9 +242,11 @@ mod tests {
             log: vec!["a line".into()],
             launch: vec!["-- steam-launch.log (last 1 lines) --".into(), "me3 ended with exit code 1 after 2 s".into()],
             lighting: vec!["ally:rgb:joystick_rings: zones 4".into()],
+            app_log: vec!["2026-11-09 09:59:58.120 step    Tile Netflix: done".into()],
+            crash: vec!["2026-11-09 09:00:00.000 panic in thread main: boom".into()],
         };
         let t = build(&r);
-        for want in ["Turbine Hub: 0.58", "Screen: 1920 x 1080", "Interface size: 100%", "ELDEN RING (steam:1245620)", "a line", "nexusKey: (hidden)", "Steam launch logs", "Lighting:\n  ally:rgb:joystick_rings: zones 4", "me3 ended with exit code 1 after 2 s"] {
+        for want in ["Turbine Hub: 0.58", "Screen: 1920 x 1080", "Interface size: 100%", "ELDEN RING (steam:1245620)", "a line", "nexusKey: (hidden)", "Steam launch logs", "Lighting:\n  ally:rgb:joystick_rings: zones 4", "me3 ended with exit code 1 after 2 s", "Turbine Hub's log (1 lines, newest last):\n2026-11-09 09:59:58.120 step    Tile Netflix: done", "Crash log (newest last):\n2026-11-09 09:00:00.000 panic in thread main: boom"] {
             assert!(t.contains(want), "{want} in {t}");
         }
         assert!(!t.contains("secretsecret"));

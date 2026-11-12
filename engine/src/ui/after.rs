@@ -46,7 +46,18 @@ impl Ui {
                     super::plan::set_choice(&mut s, key, *on);
                     self.save(&s);
                 }
-                Step::Host(line) => self.took(line),
+                Step::Host(line) => {
+                    // A folder allowed for Turbine Hub's Flatpak: read from its next start.
+                    if let Some(folder) = crate::steam::allowed_by(line, super::selftile::FLATPAK_ID) {
+                        if !self.allowed.contains(&folder) {
+                            self.allowed.push(folder);
+                        }
+                    } else {
+                        self.took(line);
+                    }
+                }
+                // The new version is on the machine; this run is still the one from before.
+                Step::SelfUpdate => self.update_installed = self.update.clone(),
                 _ => {}
             }
         }

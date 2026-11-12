@@ -141,7 +141,7 @@ impl Worker {
                 let result = agent::take_snapshot(&self.data, &game, &steam_id, &name, now(), &mut |line: &[String]| host(line));
                 Some(Answer::Snapshot(name, result))
             }
-            Job::Updates { test_builds } => Some(Answer::Updates(run::look_for_updates(&self.home, &self.cache, crate::VERSION, test_builds).0)),
+            Job::Updates { test_builds } => Some(Answer::Updates(run::look_for_updates(&self.home, &self.cache, crate::VERSION, test_builds, true).0)),
         }
     }
 }

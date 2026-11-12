@@ -66,6 +66,7 @@ pub(crate) fn pick_lock(ui: &Ui) -> Option<&'static str> {
     if !missing(ui) {
         Some("In your library")
     } else if ui.steam_running {
+        // Also when the host couldn't say whether Steam runs: nothing is written then.
         Some("Later, with Steam closed")
     } else if shortcuts::tile_file(&ui.ctx.home).is_none() {
         Some("Sign in to Steam first")
@@ -90,11 +91,14 @@ pub(crate) fn rows(ui: &Ui) -> Vec<Json> {
     }
 }
 
-fn steam_open_guide(adding: bool) -> Json {
+/// The words when the host couldn't say whether Steam is running: nothing is written then either.
+pub(crate) const UNSURE: &str = "Turbine Hub couldn't check whether Steam is running just now, so it treats it as running and leaves Steam's list alone.";
+
+fn steam_open_guide(adding: bool, unsure: bool) -> Json {
     if adding {
         guide(
             "Steam has to be closed for this",
-            "Steam reads its list of non-Steam games only when it starts, and writes its own copy back when it closes. So Turbine Hub adds itself while Steam is closed.",
+            if unsure { "Turbine Hub couldn't check whether Steam is running just now, so it leaves Steam's list of non-Steam games alone. Steam reads that list only when it starts, and writes its own copy back when it closes." } else { "Steam reads its list of non-Steam games only when it starts, and writes its own copy back when it closes. So Turbine Hub adds itself while Steam is closed." },
             &[
                 ("1", "Switch to Desktop Mode: Steam button, Power, Switch to Desktop."),
                 ("2", "Quit Steam there: its icon by the clock, Exit Steam."),
@@ -104,7 +108,7 @@ fn steam_open_guide(adding: bool) -> Json {
             ],
         )
     } else {
-        guide("Remove it in Steam", "Steam is running, and it only lets go of a library entry from its own menu.", &[("1", "Find Turbine Hub in your library, under Non-Steam."), ("2", "Open its options, then Manage, then Remove non-Steam game.")])
+        guide("Remove it in Steam", if unsure { "Turbine Hub couldn't check whether Steam is running just now, so it leaves Steam's list alone. Steam lets go of a library entry from its own menu." } else { "Steam is running, and it only lets go of a library entry from its own menu." }, &[("1", "Find Turbine Hub in your library, under Non-Steam."), ("2", "Open its options, then Manage, then Remove non-Steam game.")])
     }
 }
 
@@ -117,7 +121,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
         ("add", State::Added { .. }) => toast("Turbine Hub is in your library already."),
         ("add", State::Missing) => {
             if ui.steam_running {
-                return Some(steam_open_guide(true));
+                return Some(steam_open_guide(true, ui.steam_unsure));
             }
             let Some(file) = shortcuts::tile_file(&ui.ctx.home) else { return Some(toast("Steam hasn't been signed in to on this machine yet. Start Steam once and sign in.")) };
             let mut p = Plan::new("Add Turbine Hub to your library?", "Turbine Hub adds itself to Steam's list of non-Steam games, with its own art, so it opens from Game Mode like a game. A backup of the list is kept first.", "Add");
@@ -140,7 +144,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
         ("remove", State::Missing) => toast("Turbine Hub isn't in your library."),
         ("remove", State::Added { ours, .. }) => {
             if ui.steam_running || !ours {
-                return Some(steam_open_guide(false));
+                return Some(steam_open_guide(false, ui.steam_unsure && ours));
             }
             let mut p = Plan::new("Take Turbine Hub out of your library?", "Only the library entry and the pictures Turbine Hub wrote for it go. Turbine Hub stays installed and opens from Desktop Mode. A backup of the list is kept first.", "Remove");
             p.danger = true;
@@ -159,9 +163,28 @@ fn write_art(home: &Path, folder: &Path, share: &Path) -> Result<(), String> {
     if steam_art::nothing_shown(&done) { Err(format!("No picture could be placed: {}.", steam_art::summary(&done))) } else { Ok(()) }
 }
 
+/// At every start (and so after every update): Turbine Hub's own pictures for its library entry are brought up to
+/// date, so new art arrives with a new version. Only where the entry exists and Turbine Hub placed pictures for it
+/// before (its record names them); never over a picture the player picked, and one the player cleared in Steam
+/// stays cleared. Steam's list itself is not touched, so this is safe while Steam runs. Answers a line for the
+/// log when something changed or went wrong, None when there was nothing to do.
+pub fn art_at_start(home: &Path, folder: &Path, share: &Path) -> Option<String> {
+    let (file, appid) = shortcuts::find_self_file(home)?;
+    let grid = steam_art::grid_dir(&file);
+    let rec = steam_art::ArtRecord::load(&record(folder));
+    if !rec.files.iter().any(|(p, _)| Path::new(p).starts_with(&grid)) {
+        return None;
+    }
+    match steam_art::add_art_opts(&art_dir(share), &grid, appid, parts(has_marker(home)), &record(folder), false) {
+        Ok(done) if done.iter().any(|(_, o)| *o == steam_art::ArtOutcome::Written) => Some(format!("Library art brought up to date: {}", steam_art::summary(&done))),
+        Ok(_) => None,
+        Err(e) => Some(format!("Library art couldn't be brought up to date: {e}")),
+    }
+}
+
 /// The library entry's own steps of a confirmed dialog. None for any other step. `share`: Turbine Hub's shared
 /// files (the art set is in them).
-pub fn run_step(step: &Step, home: &Path, folder: &Path, share: &Path, steam_running: bool) -> Option<Result<(), String>> {
+pub fn run_step(step: &Step, home: &Path, folder: &Path, share: &Path, steam: shortcuts::Steam) -> Option<Result<(), String>> {
     Some(match step {
         Step::SelfTile { add: true } => {
             // An entry the player added in Steam already: only its pictures are missing.
@@ -169,11 +192,11 @@ pub fn run_step(step: &Step, home: &Path, folder: &Path, share: &Path, steam_run
                 return Some(write_art(home, folder, share));
             }
             let Some(file) = shortcuts::tile_file(home) else { return Some(Err("Steam's list of non-Steam games wasn't found. Start Steam once and sign in.".into())) };
-            shortcuts::add_tile_with_art(&file, &tile(), MARKER, &art_dir(share), &record(folder), steam_running).map(|_| ())
+            shortcuts::add_tile_with_art(&file, &tile(), MARKER, &art_dir(share), &record(folder), steam).map(|_| ())
         }
         Step::SelfTile { add: false } => {
             let Some(file) = shortcuts::tile_file(home) else { return Some(Err("Steam's list of non-Steam games wasn't found.".into())) };
-            match shortcuts::remove_tile_with_art(&file, MARKER, &record(folder), steam_running) {
+            match shortcuts::remove_tile_with_art(&file, MARKER, &record(folder), steam) {
                 Ok(TileChange::NotThere) => Err("That entry wasn't added by Turbine Hub. Remove it in Steam: its options, Manage, Remove non-Steam game.".into()),
                 r => r.map(|_| ()),
             }

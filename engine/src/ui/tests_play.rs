@@ -524,7 +524,7 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     let d = parse(&u.act("self-tile", "add", "")).unwrap();
     assert_eq!((d.get("dialog").unwrap().str_at("title"), d.get("dialog").unwrap().str_at("confirm")), (Some("Steam has to be closed for this"), Some("")));
     assert!(u.confirm().is_none());
-    assert!(selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, true).unwrap().is_err());
+    assert!(selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, crate::shortcuts::Steam::Running).unwrap().is_err());
     assert!(!file.exists() && !grid.exists());
     // With Steam closed: one dialog, one step. A cover the player picked is there already and stays.
     u.steam_running = false;
@@ -535,7 +535,7 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some("Add"));
     let plan = u.confirm().unwrap();
     assert_eq!(plan.steps, vec![Step::SelfTile { add: true }]);
-    selftile::run_step(&plan.steps[0], &home, &folder, &share, false).unwrap().unwrap();
+    selftile::run_step(&plan.steps[0], &home, &folder, &share, crate::shortcuts::Steam::Closed).unwrap().unwrap();
     let list = crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!((list[0].name.as_str(), list[0].exe.as_str(), list[0].launch_options.as_str(), list[0].appid), ("Turbine Hub", "\"/usr/bin/flatpak\"", "run --branch=stable --arch=x86_64 --command=turbinehub io.github.ravenor907.TurbineHub", appid));
@@ -546,7 +546,7 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     }
     assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 0 });
     // Adding again adds no second entry; Settings now names it and offers Remove.
-    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, false).unwrap().unwrap();
+    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, crate::shortcuts::Steam::Closed).unwrap().unwrap();
     assert_eq!(crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap().len(), 1);
     assert_eq!(parse(&u.act("self-tile", "add", "")).unwrap().str_at("toast"), Some("Turbine Hub is in your library already."));
     let general = rows(&parse(&u.page("settings", "")).unwrap());
@@ -556,7 +556,7 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 1 });
     parse(&u.act("self-tile", "art", "")).unwrap();
     assert_eq!(u.confirm().unwrap().steps, vec![Step::SelfArt]);
-    selftile::run_step(&Step::SelfArt, &home, &folder, &share, true).unwrap().unwrap();
+    selftile::run_step(&Step::SelfArt, &home, &folder, &share, crate::shortcuts::Steam::Running).unwrap().unwrap();
     assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 0 });
     // Remove: the steps while Steam runs, else the entry and Turbine Hub's own pictures go; the player's stays.
     u.steam_running = true;
@@ -565,7 +565,7 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     let d = parse(&u.act("self-tile", "remove", "")).unwrap();
     assert_eq!(d.get("dialog").unwrap().get("danger").and_then(Json::as_bool), Some(true));
     let plan = u.confirm().unwrap();
-    selftile::run_step(&plan.steps[0], &home, &folder, &share, false).unwrap().unwrap();
+    selftile::run_step(&plan.steps[0], &home, &folder, &share, crate::shortcuts::Steam::Closed).unwrap().unwrap();
     assert_eq!(selftile::state(&home), State::Missing);
     assert!(grid.join(format!("{appid}p.png")).exists() && !grid.join(format!("{appid}.png")).exists());
     assert!(crate::shortcuts::backup_file(&file).exists());
@@ -573,13 +573,13 @@ fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
     let mut by_hand = selftile::tile();
     by_hand.name = "Hub".into();
     by_hand.launch_options = "run io.github.ravenor907.TurbineHub".into();
-    crate::shortcuts::add_shortcut(&file, &by_hand, "run io.github", false).unwrap();
+    crate::shortcuts::add_shortcut(&file, &by_hand, "run io.github", crate::shortcuts::Steam::Closed).unwrap();
     assert_eq!(selftile::state(&home), State::Added { ours: false, art_missing: 4 });
-    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, false).unwrap().unwrap();
+    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, crate::shortcuts::Steam::Closed).unwrap().unwrap();
     assert_eq!(selftile::state(&home), State::Added { ours: false, art_missing: 0 });
     assert!(!grid.join(format!("{}_icon.png", by_hand.appid())).exists());
     assert_eq!(parse(&u.act("self-tile", "remove", "")).unwrap().get("dialog").unwrap().str_at("title"), Some("Remove it in Steam"));
-    assert!(selftile::run_step(&Step::SelfTile { add: false }, &home, &folder, &share, false).unwrap().is_err());
+    assert!(selftile::run_step(&Step::SelfTile { add: false }, &home, &folder, &share, crate::shortcuts::Steam::Closed).unwrap().is_err());
     assert_eq!(crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap().len(), 1);
     // The made-up PC has it in the library without its pictures: Settings offers Fix art and Remove.
     let mut pc = ui("selftile-pc", Preset::Desktop);

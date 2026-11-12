@@ -231,3 +231,78 @@ fn the_game_id_steam_set_is_checked() {
         assert_eq!(shortcuts::rungameid_from_env(bad), None, "{bad}");
     }
 }
+
+#[test]
+fn steam_running_has_three_answers_and_only_a_sure_no_lets_the_list_be_written() {
+    use turbinehub_engine::shortcuts::{NewShortcut, Steam, TileChange, add_shortcut, remove_shortcut};
+    // pgrep's count on the host: found, none, and everything that isn't an answer.
+    assert_eq!(Steam::from_answer(Some((0, "2\n"))), Steam::Running);
+    assert_eq!(Steam::from_answer(Some((1, "0\n"))), Steam::Closed);
+    // flatpak-spawn that couldn't reach the host also ends with 1, but prints no count.
+    assert_eq!(Steam::from_answer(Some((1, ""))), Steam::Unknown);
+    assert_eq!(Steam::from_answer(Some((1, "Portal call failed"))), Steam::Unknown);
+    assert_eq!(Steam::from_answer(Some((127, ""))), Steam::Unknown);
+    assert_eq!(Steam::from_answer(Some((2, "0"))), Steam::Unknown);
+    assert_eq!(Steam::from_answer(Some((0, "0"))), Steam::Unknown);
+    assert_eq!(Steam::from_answer(None), Steam::Unknown);
+    assert!(Steam::Running.in_the_way() && Steam::Unknown.in_the_way() && !Steam::Closed.in_the_way());
+    assert_eq!(Steam::question(), ["flatpak-spawn", "--host", "pgrep", "-c", "-x", "steam"]);
+    assert!(Steam::Closed.may_write().is_ok());
+
+    let dir = std::env::temp_dir().join(format!("turbinehub-steam-three-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("userdata/1001/config/shortcuts.vdf");
+    let tile = NewShortcut { name: "Turbine Hub".into(), exe: "\"/usr/bin/flatpak\"".into(), start_dir: "\"/usr/bin/\"".into(), launch_options: "run io.github.ravenor907.TurbineHub marker-one".into(), flatpak_id: "io.github.ravenor907.TurbineHub".into(), icon: String::new() };
+    // Adding: refused while Steam runs and when Turbine Hub can't tell, each with its own plain words; no file,
+    // no backup, no temp file is left behind.
+    for (steam, starts) in [(Steam::Running, "Close Steam first"), (Steam::Unknown, "Turbine Hub couldn't check whether Steam is running")] {
+        let why = add_shortcut(&file, &tile, "marker-one", steam).unwrap_err();
+        assert!(why.starts_with(starts), "{why}");
+        assert!(!dir.exists() || std::fs::read_dir(file.parent().unwrap()).map(|d| d.count()).unwrap_or(0) == 0, "nothing written for {steam:?}");
+    }
+    assert!(matches!(add_shortcut(&file, &tile, "marker-one", Steam::Closed), Ok(TileChange::Added(_))));
+    let written = std::fs::read(&file).unwrap();
+    // Removing: the same two refusals, and the file stays byte for byte.
+    for steam in [Steam::Running, Steam::Unknown] {
+        assert!(remove_shortcut(&file, "marker-one", steam).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), written);
+    }
+    assert!(matches!(remove_shortcut(&file, "marker-one", Steam::Closed), Ok(TileChange::Removed(_))));
+    assert_ne!(std::fs::read(&file).unwrap(), written);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_store_tile_is_removed_by_its_browser_and_address_and_nothing_else_is() {
+    use turbinehub_engine::shortcuts::{NewShortcut, Steam, TileChange, add_shortcut, remove_app_tile, remove_shortcut};
+    let dir = std::env::temp_dir().join(format!("turbinehub-store-tile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let file = dir.join("userdata/1001/config/shortcuts.vdf");
+    let chrome = "com.google.Chrome";
+    let tile = |name: &str, url: &str| NewShortcut { name: name.into(), exe: "\"/usr/bin/flatpak\"".into(), start_dir: "\"/usr/bin/\"".into(), launch_options: format!("run --command=/app/bin/chrome {chrome} --kiosk \"{url}\""), flatpak_id: chrome.into(), icon: String::new() };
+    let own = NewShortcut { name: "Turbine Hub".into(), exe: "\"/usr/bin/flatpak\"".into(), start_dir: "\"/usr/bin/\"".into(), launch_options: "run --command=turbinehub io.github.ravenor907.TurbineHub".into(), flatpak_id: "io.github.ravenor907.TurbineHub".into(), icon: String::new() };
+    let (netflix, youtube) = ("--kiosk \"https://www.netflix.com\"", "--kiosk \"https://www.youtube.com/tv\"");
+    add_shortcut(&file, &tile("Netflix", "https://www.netflix.com"), netflix, Steam::Closed).unwrap();
+    add_shortcut(&file, &tile("YouTube", "https://www.youtube.com/tv"), youtube, Steam::Closed).unwrap();
+    add_shortcut(&file, &own, "--command=turbinehub", Steam::Closed).unwrap();
+    let names = |file: &Path| shortcuts::parse(&std::fs::read(file).unwrap()).unwrap().into_iter().map(|s| s.name).collect::<Vec<_>>();
+    assert_eq!(names(&file), ["Netflix", "YouTube", "Turbine Hub"]);
+    // The remover for Turbine Hub's own entry never takes a browser tile.
+    assert_eq!(remove_shortcut(&file, netflix, Steam::Closed), Ok(TileChange::NotThere));
+    // Refused while Steam runs or can't be asked; the file stays byte for byte.
+    let before = std::fs::read(&file).unwrap();
+    for steam in [Steam::Running, Steam::Unknown] {
+        assert!(remove_app_tile(&file, chrome, netflix, steam).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+    }
+    // With Steam closed exactly that tile goes; the other tile and Turbine Hub's own entry stay.
+    assert!(matches!(remove_app_tile(&file, chrome, netflix, Steam::Closed), Ok(TileChange::Removed(_))));
+    assert_eq!(names(&file), ["YouTube", "Turbine Hub"]);
+    assert_eq!(remove_app_tile(&file, chrome, netflix, Steam::Closed), Ok(TileChange::NotThere));
+    // Another browser's tile for the same address, an empty marker, and Turbine Hub's own entry never match.
+    assert_eq!(remove_app_tile(&file, "org.mozilla.firefox", youtube, Steam::Closed), Ok(TileChange::NotThere));
+    assert_eq!(remove_app_tile(&file, chrome, "", Steam::Closed), Ok(TileChange::NotThere));
+    assert_eq!(remove_app_tile(&file, "io.github.ravenor907.TurbineHub", "--command=turbinehub", Steam::Closed), Ok(TileChange::NotThere));
+    assert_eq!(names(&file), ["YouTube", "Turbine Hub"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

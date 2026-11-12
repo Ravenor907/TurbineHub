@@ -91,7 +91,13 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         ],
         "updates" => {
             let fresh = checked_words(crate::now(), checked_at(&ui.cache), ui.offline);
-            let mut rows = vec![match &ui.update {
+            let mut rows = vec![match &ui.update_ready() {
+                // Installed in this run: the running one keeps going until it is closed.
+                _ if ui.update_installed.is_some() => {
+                    let v = ui.update_installed.clone().unwrap_or_default();
+                    let (title, line, button) = if ui.window { ("Restart Turbine Hub", format!("Turbine Hub {v} is installed. A restart opens it."), "Restart") } else { ("Close Turbine Hub", format!("Turbine Hub {v} is installed. Close this one, then start it again from Steam."), "Close") };
+                    with(with(with(with(row("restart-app", "", "button", title, &line), "button", s(button)), "badge", s("Installed")), "tone", s("ok")), "icon", s("refresh"))
+                }
                 Some(v) => with(with(with(row("update-app", "", "button", &format!("Turbine Hub {v} is ready"), &fresh), "button", s("Update")), "badge", s("Update ready")), "tone", s("warn")),
                 None => with(with(row("update-check", "", "button", &format!("Turbine Hub {}", ui.ctx.version), &fresh), "button", s("Check now")), "icon", s("refresh")),
             }];
@@ -114,7 +120,9 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
         }
         "help" => vec![
             open_row("wheres", "Where's my...?", "Windows things and where they are on SteamOS", "Open"),
-            row("none", "", "info", "Problem reports", "Turbine Hub never sends anything. A report you write from a game's page stays on this machine for you to share if you want."),
+            row("none", "", "info", "Problem reports", "Turbine Hub never sends anything. A report you write here or from a game's page stays on this machine for you to share if you want."),
+            with(with(row("app-report", "", "button", "Write a report about Turbine Hub", "This machine and the last lines of Turbine Hub's own log, with private details hidden"), "button", s("Write")), "icon", s("log")),
+            row("none", "", "info", "Turbine Hub's own log", &if ui.veteran() { format!("{}: app.log and crash.log, kept small. No home folder, user name, address or key is ever written.", private_path(ui, &crate::applog::dir(&ui.data))) } else { "What the app did and any crash, kept small, on this machine only. Private details are never written.".to_string() }),
             open_row("pick", "Pick a mode again", "Shows the first screen", "Open"),
         ],
         _ => vec![
@@ -438,8 +446,22 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 // The background helper is the same program: it starts again as the new version.
                 p.steps.push(Step::Host(crate::agent::restart()));
             }
-            p.done = format!("Turbine Hub {v} installed. It starts next time.");
+            p.done = crate::selfupdate::after_install_words(&v, ui.window);
             return Some(dialog(ui, p));
+        }
+        "app-report" => return Some(super::games::app_report(ui)),
+        // After an update or a newly allowed folder. In a Desktop Mode window Turbine Hub starts itself again
+        // (the app does that when the answer says `restart` and the dialog is confirmed); in Game Mode only what
+        // Steam starts shows, so it closes and the player starts it from Steam.
+        "restart-app" => {
+            let why = match (&ui.update_installed, ui.allowed.first()) {
+                (Some(v), _) => format!("Turbine Hub {v} is installed. "),
+                (None, Some(p)) => format!("Turbine Hub may read {} from its next start. ", p.display()),
+                (None, None) => String::new(),
+            };
+            let (title, text, confirm) = if ui.window { ("Restart Turbine Hub?", format!("{why}It closes and opens again. Everything you set up stays as it is."), "Restart") } else { ("Close Turbine Hub?", format!("{why}Close it, then start it again from Steam: in Game Mode only what Steam starts shows. Everything you set up stays as it is."), "Close") };
+            let d = obj! {"title": s(title), "text": s(text), "items": arr([]), "confirm": s(confirm), "cancel": s("Not now"), "ask": s(""), "danger": b(false), "local": s("quit")};
+            return Some(if ui.window { obj! {"dialog": d, "restart": b(true)} } else { obj! {"dialog": d} });
         }
         "menu" => {
             let rows = [("Where's my...?", "open", "wheres"), ("Bring it over", "open", "bring"), ("Review changes", "open", "changes"), ("Settings", "tab", "settings"), ("Close Turbine Hub", "quit", "")];
@@ -449,4 +471,16 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
     };
     ui.save(&st);
     Some(out)
+}
+
+/// A folder as shown to the player: the home folder as "~". The made-up machine's folders have a new name at
+/// every run, so its pictures show where the folder is on a real one.
+fn private_path(ui: &Ui, p: &std::path::Path) -> String {
+    if ui.sample {
+        return "~/.var/app/io.github.ravenor907.TurbineHub/data/turbinehub/logs".into();
+    }
+    match p.strip_prefix(&ui.ctx.home) {
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => p.display().to_string(),
+    }
 }

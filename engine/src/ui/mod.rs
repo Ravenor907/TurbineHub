@@ -102,7 +102,14 @@ pub struct Ui {
     pub decky_tag: Option<String>,
     /// NonSteamLaunchers' newest release tag, the last one that was found.
     pub nsl_tag: Option<String>,
+    /// Steam is running, or the host couldn't say (then it counts as running: see `shortcuts::Steam`).
     pub steam_running: bool,
+    /// The host couldn't say whether Steam is running.
+    pub steam_unsure: bool,
+    /// The newer Turbine Hub this run installed: it is used once Turbine Hub starts again.
+    pub update_installed: Option<String>,
+    /// Steam library folders the player allowed in this run: read from Turbine Hub's next start.
+    pub allowed: Vec<PathBuf>,
     /// Free space where Steam's main library lives.
     pub free_bytes: Option<u64>,
     /// The last try to reach the internet failed: screens keep showing what was fetched before, and say so.
@@ -136,7 +143,7 @@ impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
         let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
-        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_unsure: false, update_installed: None, allowed: Vec::new(), steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -195,13 +202,25 @@ impl Ui {
         before != (self.facts.clone(), self.updates.clone(), self.update.clone())
     }
 
+    /// A newer Turbine Hub that isn't installed yet (one this run installed only waits for a restart).
+    pub(crate) fn update_ready(&self) -> Option<String> {
+        self.update.clone().filter(|v| self.update_installed.as_ref() != Some(v))
+    }
+
+    /// Steam libraries in folders Turbine Hub isn't allowed to read, without the ones allowed in this run (those
+    /// only wait for Turbine Hub's next start).
+    pub(crate) fn unseen_libraries(&self) -> Vec<PathBuf> {
+        crate::steam::unseen_libraries(&self.ctx.home).into_iter().filter(|p| !self.allowed.contains(p)).collect()
+    }
+
     /// The facts for the checkup, with the newer Turbine Hub and the state of the lights among them.
     pub(crate) fn facts_now(&self) -> Facts {
         let shut = lighting::locked(self, &self.machine());
+        let words = |v: &[PathBuf]| v.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
         let l = lighting::Lighting::load(&self.folder());
         // Another app setting the lights only matters once Turbine Hub drives them too.
         let rival = if lighting::Lighting::saved(&self.folder()) && l.left_to().is_none() { lighting::rivals(&self.host_lights, &self.ctx.home).first().map(|r| r.name.to_string()) } else { None };
-        Facts { app_update: self.update.clone(), lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, ..self.facts.clone() }
+        Facts { app_update: self.update_ready(), unseen_libraries: words(&self.unseen_libraries()), allowed_libraries: words(&self.allowed), window: self.window, lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, ..self.facts.clone() }
     }
 
     /// Is the helper on this machine older than the one this Turbine Hub came with? Its file differs then. The
@@ -406,3 +425,5 @@ mod tests_background;
 mod tests_lights;
 #[cfg(test)]
 mod tests_nsl;
+#[cfg(test)]
+mod tests_app;

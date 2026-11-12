@@ -13,6 +13,9 @@ use std::path::Path;
 /// NonSteamLaunchers' newest release on the made-up machine.
 pub const NSL_TAG: &str = "v4.2.94";
 
+/// The second Steam library of `sample_with_unseen_library`: a folder no made-up or real machine has.
+pub const UNSEEN_LIBRARY: &str = "/mnt/games-drive/SteamLibrary";
+
 /// The made-up handheld of the pictures and tests.
 pub const HANDHELD: Preset = Preset::Handheld;
 
@@ -97,10 +100,17 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("settings-pc", "--page=settings --machine=desktop --mode=guided"),
     ("dialog-library", "--page=settings --act=self-tile:add --machine=handheld --mode=guided"),
     ("dialog-library-steam", "--page=settings --act=self-tile:add --machine=handheld --mode=guided --steam-running"),
+    ("dialog-library-unsure", "--page=settings --act=self-tile:add --machine=handheld --mode=guided --steam-unsure"),
     ("dialog-library-remove", "--page=settings --act=self-tile:remove --machine=desktop --mode=guided"),
     ("dialog-panel", "--page=store --arg=decky --act=panel-guide: --machine=handheld --mode=guided"),
     ("settings-look", "--page=settings --arg=look --machine=handheld --mode=guided"),
     ("settings-updates", "--page=settings --arg=updates --machine=handheld --mode=veteran --offline"),
+    ("settings-updated", "--page=settings --arg=updates --machine=handheld --mode=guided --updated"),
+    ("dialog-restart", "--page=settings --arg=updates --act=restart-app: --machine=desktop --mode=guided --window --updated"),
+    ("settings-help", "--page=settings --arg=help --machine=handheld --mode=veteran"),
+    ("home-unseen-library", "--page=home --machine=desktop --mode=guided --unseen-library"),
+    ("games-unseen-library", "--page=games --machine=desktop --mode=guided --unseen-library"),
+    ("dialog-allow-library", "--page=home --act=checkup:allow-library --machine=desktop --mode=veteran --unseen-library"),
     ("changes", "--page=changes --machine=handheld --mode=guided"),
     ("bring", "--page=bring --machine=handheld --mode=guided"),
     ("windows-drive", "--page=windrive --machine=handheld --mode=guided"),
@@ -278,7 +288,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     };
     if preset == Preset::Desktop {
         // On the PC Turbine Hub is in the Steam library already, added by itself; its pictures aren't there yet.
-        let _ = crate::shortcuts::add_shortcut(&ui.ctx.home.join(".local/share/Steam/userdata/1001/config/shortcuts.vdf"), &super::selftile::tile(), super::selftile::MARKER, false);
+        let _ = crate::shortcuts::add_shortcut(&ui.ctx.home.join(".local/share/Steam/userdata/1001/config/shortcuts.vdf"), &super::selftile::tile(), super::selftile::MARKER, crate::shortcuts::Steam::Closed);
     }
     if preset != Preset::TvPc {
         let mount = dir.join("windows");
@@ -306,6 +316,21 @@ impl Ui {
         w(&cd, "NonSteamLaunchers/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe", "MZ");
         let _ = fs::create_dir_all(cd.join("TheEAappLauncher/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/13.1"));
         let _ = crate::nsl::remember(&self.folder(), NSL_TAG);
+    }
+    /// A sample run where Steam lists a second library on a drive Turbine Hub isn't allowed to read.
+    pub fn sample_with_unseen_library(&mut self) {
+        let steam = self.ctx.home.join(".local/share/Steam");
+        w(&steam, "steamapps/libraryfolders.vdf", &format!("\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{UNSEEN_LIBRARY}\"\n}}\n}}\n", steam.display()));
+    }
+    /// A sample run where the host couldn't say whether Steam is running.
+    pub fn sample_steam_unsure(&mut self) {
+        self.steam_running = true;
+        self.steam_unsure = true;
+    }
+    /// A sample run right after a newer Turbine Hub was installed.
+    pub fn sample_updated(&mut self) {
+        self.update = Some("0.9".into());
+        self.update_installed = Some("0.9".into());
     }
     /// A sample run with the lights in one of their states: "allyhub" (Ally Hub's agent is setting them too),
     /// "huesync" (the plugin is installed and Decky Loader runs), "closed" (set up before, closed again), "stuck"

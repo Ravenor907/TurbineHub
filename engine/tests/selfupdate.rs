@@ -259,3 +259,70 @@ fn the_update_goes_where_turbine_is_installed() {
     assert_eq!(a[4], "--system");
     assert_eq!(su::install_args_to(Path::new("/tmp/u.flatpak"), "anything")[4], "--user");
 }
+
+#[test]
+fn turbine_hub_asks_github_by_itself_at_most_every_six_hours() {
+    let dir = scratch("kept-check");
+    let kept = su::remembered_file(&dir);
+    let asked = std::cell::Cell::new(0);
+    let newest = |tag: &'static str| {
+        let asked = &asked;
+        move || {
+            asked.set(asked.get() + 1);
+            Ok(su::release_for_tag(tag, false))
+        }
+    };
+    let now = 1_800_000_000;
+    // The first start asks, and keeps the answer.
+    let (check, did) = su::check_kept(&kept, "0.3", false, now, false, &mut newest("v0.4")).unwrap();
+    assert!(did && matches!(&check, Check::Available(r) if r.version == "0.4"));
+    assert_eq!(asked.get(), 1);
+    // Every start and every finished job in the next six hours uses that answer: GitHub is not asked.
+    for later in [1, 60, 3600, su::CHECK_EVERY_SECS - 1] {
+        let (check, did) = su::check_kept(&kept, "0.3", false, now + later, false, &mut newest("v0.5")).unwrap();
+        assert!(!did && matches!(&check, Check::Available(r) if r.version == "0.4"), "{later}");
+    }
+    assert_eq!(asked.get(), 1);
+    // The kept answer is read for the version that runs now: after the update it says "newest".
+    assert!(matches!(su::check_kept(&kept, "0.4", false, now + 60, false, &mut newest("v0.5")).unwrap(), (Check::UpToDate, false)));
+    // Check now always asks, and its answer is the kept one from then on.
+    let (check, did) = su::check_kept(&kept, "0.3", false, now + 120, true, &mut newest("v0.5")).unwrap();
+    assert!(did && matches!(&check, Check::Available(r) if r.version == "0.5"));
+    assert_eq!(asked.get(), 2);
+    assert!(matches!(su::check_kept(&kept, "0.3", false, now + 180, false, &mut newest("v0.6")).unwrap(), (Check::Available(r), false) if r.version == "0.5"));
+    // Six hours on it asks again; so does a change of channel (test builds), and a clock that went backwards.
+    assert!(su::check_kept(&kept, "0.3", false, now + 120 + su::CHECK_EVERY_SECS, false, &mut newest("v0.6")).unwrap().1);
+    assert!(su::check_kept(&kept, "0.3", true, now + 130 + su::CHECK_EVERY_SECS, false, &mut newest("v0.6")).unwrap().1);
+    assert!(su::check_kept(&kept, "0.3", true, now - 10, false, &mut newest("v0.6")).unwrap().1);
+    assert_eq!(asked.get(), 5);
+    // No answer keeps nothing new: the next start asks again instead of trusting a failure.
+    fs::remove_file(&kept).unwrap();
+    assert!(su::check_kept(&kept, "0.3", false, now, false, &mut || Err(NetError::Offline)).is_err());
+    assert!(!kept.exists());
+    // "No release yet" is an answer too, and is kept like one.
+    assert!(matches!(su::check_kept(&kept, "0.3", false, now, false, &mut || Ok(None)).unwrap(), (Check::UpToDate, true)));
+    assert!(matches!(su::check_kept(&kept, "0.3", false, now + 5, false, &mut || panic!("not asked")).unwrap(), (Check::UpToDate, false)));
+    // A file that isn't an answer is not trusted.
+    fs::write(&kept, "junk").unwrap();
+    assert!(su::check_kept(&kept, "0.3", false, now + 6, false, &mut newest("v0.4")).unwrap().1);
+}
+
+#[test]
+fn a_failed_install_is_said_in_words_the_player_can_act_on() {
+    let internet = su::install_problem("error: Unable to load summary from remote flathub: Could not resolve host: dl.flathub.org");
+    assert_eq!(internet, "Turbine Hub's update needs the internet to fetch a part from Flathub. Connect, then try again.");
+    assert_eq!(su::install_problem("error: While pulling runtime/org.kde.Platform: Unable to connect to dl.flathub.org"), internet);
+    let space = su::install_problem("error: Failed to install bundle: No space left on device");
+    assert_eq!(space, "There isn't enough free space for the update. Free some space, then try again.");
+    // Free space is the reason even when the same lines name the remote.
+    assert_eq!(su::install_problem("Installing from remote flathub\nerror: Not enough disk space to complete this operation"), space);
+    let system = su::install_problem("error: Flatpak system operation Deploy not allowed for user");
+    assert!(system.contains("Desktop Mode") && system.contains("password"), "{system}");
+    assert_eq!(su::install_problem("Warning: something\nerror: The bundle is broken.\n\n"), "The update couldn't be installed (error: The bundle is broken). Nothing changed: this version keeps working.");
+    assert!(su::install_problem("").starts_with("The update couldn't be installed (it stopped with an error)"));
+    // What to do next, by where Turbine Hub runs; and the desktop menu's refresh, KDE's own tool, never a shell.
+    assert_eq!(su::after_install_words("0.4", true), "Turbine Hub 0.4 is installed. Restart Turbine Hub to use it.");
+    assert_eq!(su::after_install_words("0.4", false), "Turbine Hub 0.4 is installed. Close Turbine Hub, then start it again from Steam.");
+    assert_eq!(su::menu_refresh(), vec![vec!["flatpak-spawn", "--host", "kbuildsycoca6", "--noincremental"], vec!["flatpak-spawn", "--host", "kbuildsycoca5", "--noincremental"]]);
+    assert_eq!(su::start_again("io.github.ravenor907.TurbineHub"), ["flatpak-spawn", "--host", "flatpak", "run", "io.github.ravenor907.TurbineHub"]);
+}

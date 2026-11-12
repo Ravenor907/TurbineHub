@@ -2,10 +2,12 @@
 //! own: the app, the background agent and the `--json` command line call into it.
 
 pub mod agent;
+pub mod applog;
 pub mod bring;
 pub mod checkup;
 pub mod cli;
 pub mod compat_tool;
+pub mod drawing;
 pub mod fake;
 pub mod games;
 pub mod glossary;

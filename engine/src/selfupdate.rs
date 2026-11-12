@@ -312,6 +312,61 @@ impl Remembered {
     }
 }
 
+/// Where the last answer is kept: one small file in Turbine Hub's cache folder.
+pub fn remembered_file(cache: &Path) -> std::path::PathBuf {
+    cache.join("update-check")
+}
+
+/// Looks for a newer Turbine Hub without asking GitHub more than once in `CHECK_EVERY_SECS`: the checks Turbine
+/// Hub makes by itself (at its start, after every finished job) use the answer kept in `kept` while it is fresh.
+/// `ask_anyway`: the player pressed Check now, which always asks. `newest` is the question itself (`newest`
+/// through the internet). Answers the check and whether GitHub was asked for it.
+pub fn check_kept(kept: &Path, current: &str, labs: bool, now: u64, ask_anyway: bool, newest: &mut dyn FnMut() -> Result<Option<Release>, NetError>) -> Result<(Check, bool), NetError> {
+    if !ask_anyway && let Some(last) = std::fs::read_to_string(kept).ok().and_then(|t| Remembered::parse(&t)).filter(|r| r.fresh(labs, now)) {
+        return Ok((last.answer(current), false));
+    }
+    let found = newest()?;
+    let last = Remembered::of(found.as_ref(), labs, now);
+    // An answer that couldn't be kept only means the next start asks again.
+    let _ = crate::write_atomic(kept, last.to_text().as_bytes());
+    Ok((last.answer(current), true))
+}
+
+/// Why installing the downloaded bundle failed, in words the player can act on. `said`: what flatpak printed.
+/// Flatpak's own words are for the log.
+pub fn install_problem(said: &str) -> String {
+    let low = said.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| low.contains(w));
+    if has(&["no space", "not enough disk space", "disk full"]) {
+        "There isn't enough free space for the update. Free some space, then try again.".into()
+    } else if has(&["not allowed", "authoriz", "polkit", "permission denied", "requires root"]) {
+        "Turbine Hub is installed for every user, so the system has to allow its update. In Desktop Mode, open Turbine Hub and update again: the system asks for your password there.".into()
+    } else if has(&["summary", "remote", "could not resolve", "couldn't resolve", "unable to connect", "network", "timed out", "connection"]) {
+        "Turbine Hub's update needs the internet to fetch a part from Flathub. Connect, then try again.".into()
+    } else {
+        let line = said.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("it stopped with an error");
+        format!("The update couldn't be installed ({}). Nothing changed: this version keeps working.", line.trim_end_matches('.'))
+    }
+}
+
+/// After an update the desktop's menu keeps the entry and icon from before until its list of programs is rebuilt.
+/// These are KDE's own tool for that (the first one there is enough); where neither is there nothing happens.
+pub fn menu_refresh() -> Vec<Vec<String>> {
+    ["kbuildsycoca6", "kbuildsycoca5"].iter().map(|tool| ["flatpak-spawn", "--host", tool, "--noincremental"].iter().map(|s| s.to_string()).collect()).collect()
+}
+
+/// What to do once the new version is installed: the running one keeps going until it is closed. In a Desktop
+/// Mode window Turbine Hub can start itself again; in Game Mode only what Steam starts shows, so the player
+/// closes it and starts it from Steam.
+pub fn after_install_words(version: &str, window: bool) -> String {
+    if window { format!("Turbine Hub {version} is installed. Restart Turbine Hub to use it.") } else { format!("Turbine Hub {version} is installed. Close Turbine Hub, then start it again from Steam.") }
+}
+
+/// The host command that starts Turbine Hub again (Desktop Mode, after an update).
+pub fn start_again(flatpak_id: &str) -> Vec<String> {
+    ["flatpak-spawn", "--host", "flatpak", "run", flatpak_id].iter().map(|s| s.to_string()).collect()
+}
+
 /// Downloads the bundle to a temp file and checks it: size when the release gave one, SHA-256 from the release
 /// (GitHub's asset digest or the notes), the checksum file beside the bundle, or, for a release without that file,
 /// GitHub's digest for the bundle. A release without any published SHA-256 is refused, so nothing unchecked is

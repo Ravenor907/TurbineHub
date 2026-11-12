@@ -175,6 +175,8 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "reapply" => return super::settings::act(ui, "reapply", "", value),
         "update-all" => return super::store::act(ui, "update-all", "", value),
         "update-app" => return super::settings::act(ui, "update-app", "", value),
+        "allow-library" => return super::games::act(ui, "allow-library", "", value),
+        "restart-app" => return super::settings::act(ui, "restart-app", "", value),
         "help:plugins" => guide("Updating Decky plugins", "Plugins update from Decky's own store, in Steam's quick menu.", &[("1", "Open Steam's quick menu and pick the plug icon."), ("2", "Open the store icon at the top, then Updates."), ("3", "Update each plugin, or all of them.")]),
         "bring" => open("bring"),
         "light-test" | "light-report" => return super::lighting::act(ui, arg, "", value),

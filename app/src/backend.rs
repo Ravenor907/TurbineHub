@@ -193,6 +193,16 @@ fn make_ui() -> Ui {
     if option("steam-running").is_some() {
         ui.steam_running = true;
     }
+    // The host couldn't say whether Steam runs, a Steam library Turbine Hub may not read, a fresh update.
+    if option("steam-unsure").is_some() {
+        ui.sample_steam_unsure();
+    }
+    if option("unseen-library").is_some() {
+        ui.sample_with_unseen_library();
+    }
+    if option("updated").is_some() {
+        ui.sample_updated();
+    }
     // The lights in one of their states: another app setting them, closed again, open and ready for the test.
     if let Some(state) = option("lights") {
         ui.sample_lights(&state);
@@ -231,19 +241,19 @@ impl Default for HubRust {
         let (tx, rx) = mpsc::channel();
         let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
         let hub = HubRust { state: QString::from(ui.state().as_str()), gamemode: (run::in_game_mode() && option("screenshot").is_none()) || option("gamemode").is_some(), busy: false, busy_words: QString::default(), share: QString::from(share.as_str()), ui, pads: None, tx, rx, running: None, looked: std::time::Instant::now() };
-        hub.gather();
+        hub.gather(false);
         hub
     }
 }
 
 impl HubRust {
     /// Asks the host and the internet again (never in a sample run).
-    fn gather(&self) {
+    fn gather(&self, check_now: bool) {
         if self.ui.sample {
             return;
         }
         let st = self.ui.settings();
-        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root) };
+        let g = run::Gather { home: self.ui.ctx.home.clone(), config_home: self.ui.ctx.config_home.clone(), cache: self.ui.cache.clone(), version: self.ui.ctx.version.clone(), test_builds: st.test_builds, helper_there: turbinehub_engine::helper::installed(&self.ui.ctx.root), check_now };
         run::gather(g, self.tx.clone());
     }
 
@@ -262,7 +272,10 @@ impl HubRust {
         }
         if f.local {
             ui.facts.has_password = f.has_password;
-            ui.steam_running = f.steam_running;
+            // No answer counts as running: nothing is written to Steam's list then.
+            let steam = f.steam.unwrap_or(turbinehub_engine::shortcuts::Steam::Unknown);
+            ui.steam_running = steam.in_the_way();
+            ui.steam_unsure = steam == turbinehub_engine::shortcuts::Steam::Unknown;
             ui.steam_started = f.steam_started;
             ui.sound = f.sound;
             ui.sound_now = f.sound_now;
@@ -331,12 +344,21 @@ impl qobject::Hub {
 
     pub fn act(mut self: Pin<&mut Self>, action: &QString, arg: &QString, value: &QString) -> QString {
         let action = action.to_string();
+        // What was typed (a search, a name) stays out of the log: only that something was.
+        crate::log::line("act", &format!("{action} {arg}{}", if value.is_empty() { "" } else { " (with a value)" }));
+        // A restart that was offered and not confirmed is forgotten with the next press.
+        crate::RESTART.store(false, std::sync::atomic::Ordering::Relaxed);
         if action == "update-check" {
-            self.rust().gather();
+            // The player's own press always asks, also within six hours of the last answer.
+            self.rust().gather(true);
             return answer(&[("toast", quote("Checking for updates"))]);
         }
         let text = self.as_mut().rust_mut().ui.act(&action, &arg.to_string(), &value.to_string());
         if let Ok(j) = turbinehub_engine::json::parse(&text) {
+            // The dialog that closes Turbine Hub to start it again: main starts the new one once the window is gone.
+            if j.get("restart").and_then(Json::as_bool) == Some(true) && !self.rust().ui.sample {
+                crate::RESTART.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             if j.get("state").is_some() {
                 self.as_mut().refresh_state();
             }
@@ -378,7 +400,8 @@ impl qobject::Hub {
             };
         }
         let st = self.rust().ui.settings();
-        let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), folder: self.rust().ui.folder(), data: self.rust().ui.data.clone(), steam_running: self.rust().ui.steam_running, version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };
+        let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), folder: self.rust().ui.folder(), data: self.rust().ui.data.clone(), version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };
+        crate::log::line("plan", &format!("Confirmed: {} ({} steps)", plan.title, plan.steps.len()));
         run::start(job, self.rust().tx.clone());
         self.as_mut().rust_mut().running = Some(plan);
         self.as_mut().set_busy_words(QString::from("Working"));
@@ -387,6 +410,7 @@ impl qobject::Hub {
     }
 
     pub fn cancel(mut self: Pin<&mut Self>) {
+        crate::RESTART.store(false, std::sync::atomic::Ordering::Relaxed);
         self.as_mut().rust_mut().ui.cancel();
     }
 
@@ -425,9 +449,13 @@ impl qobject::Hub {
                         (Some(p), Ok(())) => self.as_mut().rust_mut().finish(p),
                         (_, r) => r,
                     };
+                    crate::log::line("plan", &match &result {
+                        Ok(()) => "Done".to_string(),
+                        Err(why) => format!("Stopped: {why}"),
+                    });
                     self.as_mut().set_busy(false);
                     self.as_mut().refresh_state();
-                    self.rust().gather();
+                    self.rust().gather(false);
                     let (done, open) = plan.map(|p| (p.done, p.then_open)).unwrap_or_default();
                     out.push(("done", match result {
                         Ok(()) => format!("{{\"ok\":true,\"toast\":{},\"open\":{}}}", quote(&done), quote(&open)),

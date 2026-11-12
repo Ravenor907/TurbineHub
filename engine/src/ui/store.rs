@@ -525,7 +525,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 return Some(toast("It isn't in your library."));
             }
             if ui.steam_running {
-                return Some(guide(&format!("Remove {} in Steam", t.name), "Steam is running, and it only lets go of a tile from its own menu.", &[("1", "Find the tile in your library, under Non-Steam."), ("2", "Open its options, then Manage, then Remove non-Steam game.")]));
+                return Some(guide(&format!("Remove {} in Steam", t.name), if ui.steam_unsure { "Turbine Hub couldn't check whether Steam is running just now, so it leaves Steam's list alone. Steam lets go of a tile from its own menu." } else { "Steam is running, and it only lets go of a tile from its own menu." }, &[("1", "Find the tile in your library, under Non-Steam."), ("2", "Open its options, then Manage, then Remove non-Steam game.")]));
             }
             let mut p = Plan::new(&format!("Remove {} from your library?", t.name), "The tile goes from Steam's library. Chrome and your sign-in there stay.", "Remove");
             p.danger = true;
@@ -552,7 +552,9 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 p.items.push(("Chrome".into(), "The tile opens in it. Installed from Flathub first.".into()));
             }
             p.items.push((t.name.to_string(), t.url.to_string()));
-            if ui.steam_running {
+            if ui.steam_unsure {
+                p.items.push(("Close Steam first".into(), super::selftile::UNSURE.into()));
+            } else if ui.steam_running {
                 p.items.push(("Steam is running".into(), "Steam only reads new tiles when it starts. Quit Steam in Desktop Mode first, or the tile can't be added.".into()));
             }
             p.steps = tile_steps(ui, t);

@@ -64,6 +64,47 @@ pub fn outside_allowed(p: &Path) -> bool {
     !allowed.iter().any(|a| p.starts_with(a))
 }
 
+/// The Steam libraries Steam lists that Turbine Hub can't see because it isn't allowed to read their folder. Only
+/// Steam's list of libraries is read for this, so it is quick enough for every screen.
+pub fn unseen_libraries(home: &Path) -> Vec<PathBuf> {
+    let mut scan = Scan::default();
+    for root in steam_roots(home) {
+        libraries(&root, &mut scan);
+    }
+    let mut out: Vec<PathBuf> = Vec::new();
+    for p in scan.problems.iter().filter_map(|p| p.strip_prefix(UNSEEN_LIBRARY)?.strip_suffix(&format!(" ({UNSEEN_WHY})"))) {
+        let p = PathBuf::from(p);
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// May this folder be handed to `flatpak override --filesystem=`? Only a plain absolute folder: nothing flatpak
+/// would read as a keyword, an option or a mode (":ro"), and never the whole system or the whole home folder.
+pub fn allowable(folder: &Path) -> bool {
+    let text = folder.to_string_lossy();
+    let plain = folder.is_absolute() && text.len() < 1024 && !text.contains(['\n', '\r', '\0', ';', '=', ':', '\\', ',']) && !text.contains("/../") && !text.ends_with("/..");
+    let depth = folder.components().filter(|c| matches!(c, std::path::Component::Normal(_))).count();
+    plain && depth >= 2 && folder != crate::home_dir()
+}
+
+/// The host command that lets Turbine Hub's Flatpak read one more folder from its next start, for this user only.
+/// None for a folder that isn't `allowable`.
+pub fn allow_line(folder: &Path, flatpak_id: &str) -> Option<Vec<String>> {
+    allowable(folder).then(|| vec!["flatpak-spawn".into(), "--host".into(), "flatpak".into(), "override".into(), "--user".into(), format!("--filesystem={}", folder.display()), flatpak_id.into()])
+}
+
+/// The folder a command made by `allow_line` allows, when `line` is one for this Flatpak.
+pub fn allowed_by(line: &[String], flatpak_id: &str) -> Option<PathBuf> {
+    let rest = line.strip_prefix(&["flatpak-spawn".to_string(), "--host".into(), "flatpak".into(), "override".into(), "--user".into()][..])?;
+    match rest {
+        [fs, id] if id == flatpak_id => fs.strip_prefix("--filesystem=").map(PathBuf::from),
+        _ => None,
+    }
+}
+
 pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
     let mut out = vec![root.to_path_buf()];
     let file = root.join("steamapps/libraryfolders.vdf");
@@ -91,14 +132,17 @@ pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
     out
 }
 
-/// Turbine Hub's own folder for art it downloaded from Steam's store: <XDG_CACHE_HOME>/turbine-mod-manager/art (TURBINE_ART
-/// overrides it; tests). None when no cache folder is known.
+/// Turbine Hub's own folder for art it downloaded from Steam's store: <XDG_CACHE_HOME>/turbinehub/art, inside the
+/// cache folder everything else Turbine Hub fetched is kept in (TURBINEHUB_ART overrides it; tests). None when no
+/// cache folder is known.
+pub const ART_CACHE: &str = "turbinehub/art";
+
 pub fn art_cache() -> Option<PathBuf> {
-    if let Some(v) = std::env::var_os("TURBINE_ART").filter(|v| !v.is_empty()) {
+    if let Some(v) = std::env::var_os("TURBINEHUB_ART").filter(|v| !v.is_empty()) {
         return Some(v.into());
     }
     let base = std::env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("turbinehub-mod-manager").join("art"))
+    Some(base.join(ART_CACHE))
 }
 
 /// A Steam game's portrait cover, looked for in this order: the player's own grid art in Steam

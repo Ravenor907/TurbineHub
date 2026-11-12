@@ -130,7 +130,7 @@ fn sha256_pieces_match_one_shot() {
 
 #[test]
 fn curl_gets_fixed_safe_arguments() {
-    let req = Request::get("https://thunderstore.io/x").header("Accept", "application/json").max_bytes(1234);
+    let req = Request::get("https://store.steampowered.com/x").header("Accept", "application/json").max_bytes(1234);
     let a = net::curl_args(&req, "TurbineHub/0.3", Path::new("/t/out"), Path::new("/t/hdr"));
     let has = |pair: [&str; 2]| a.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
     assert!(a.contains(&"--fail".to_string()));
@@ -142,10 +142,10 @@ fn curl_gets_fixed_safe_arguments() {
     assert!(has(["--header", "Accept: application/json"]));
     assert!(has(["--output", "/t/out"]));
     assert!(has(["--max-time", "60"]));
-    assert_eq!(&a[a.len() - 2..], &["--".to_string(), "https://thunderstore.io/x".to_string()]);
+    assert_eq!(&a[a.len() - 2..], &["--".to_string(), "https://store.steampowered.com/x".to_string()]);
     assert!(!a.iter().any(|x| x == "--data-binary"));
 
-    let post = Request::get("https://thunderstore.io/y").post_file(Path::new("/t/body"), "application/octet-stream").max_time(0);
+    let post = Request::get("https://store.steampowered.com/y").post_file(Path::new("/t/body"), "application/octet-stream").max_time(0);
     assert_eq!(post.body, Body::File("/t/body".into(), "application/octet-stream".into()));
     let a = net::curl_args(&post, "UA", Path::new("/o"), Path::new("/h"));
     assert!(a.windows(2).any(|w| w[0] == "--data-binary" && w[1] == "@/t/body"));
@@ -157,43 +157,38 @@ fn curl_gets_fixed_safe_arguments() {
 #[test]
 fn only_https_from_known_hosts() {
     for ok in [
-        "https://thunderstore.io/c/valheim/api/v1/package/",
-        "https://gcdn.thunderstore.io/live/x.zip",
-        "https://api.nexusmods.com/v1/users/validate.json",
-        "https://supporter-files.nexus-cdn.com/1704/x.7z",
-        "https://skse.silverlock.org/beta/x.7z",
+        "https://store.steampowered.com/saleaction/ajaxgetdeckappcompatibilityreport?nAppID=1086940",
+        "https://plugins.deckbrew.xyz/plugins",
+        "https://cdn.tzatzikiweeb.moe/file/steam-deck-homebrew/versions/x.zip",
+        "https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/com.discordapp.Discord.png",
         "https://api.github.com/repos/a/b",
         "https://objects.githubusercontent.com/x",
         "https://release-assets.githubusercontent.com/github-production-release-asset/1/2",
-        "https://raw.githubusercontent.com/loot/skyrimse/v0.21/masterlist.yaml",
+        "https://raw.githubusercontent.com/AreWeAntiCheatYet/AreWeAntiCheatYet/master/games.json",
         "https://github.com/Ravenor907/TurbineHub/releases/download/v0.3/x.flatpak",
         "https://codeload.github.com/a/b/zip/refs/heads/main",
-        "https://cf-files.nexusmods.com/cdn/1704/12604/x.7z?md5=a&expires=1&user_id=1",
-        "https://premium-files.nexus-cdn.com/1704/12604/x.7z",
-        "https://supporter-files.nexus-cdn.com/1704/x.7z",
-        "https://www.nexusmods.com/skyrimspecialedition/mods/12604",
-        "HTTPS://Thunderstore.IO/x",
-        "https://thunderstore.io:443/x",
+        "HTTPS://Store.SteamPowered.COM/x",
+        "https://store.steampowered.com:443/x",
     ] {
         assert!(net::allowed_url(ok), "{ok}");
     }
     for bad in [
-        "http://thunderstore.io/x",
+        "http://store.steampowered.com/x",
         "https://evil.example.com/",
-        "https://thunderstore.io.evil.com/",
-        "https://evilthunderstore.io/",
-        "https://thunderstore.io@evil.com/",
-        "https://.thunderstore.io/",
+        "https://store.steampowered.com.evil.com/",
+        "https://evilstore.steampowered.com/",
+        "https://store.steampowered.com@evil.com/",
+        "https://.flathub.org/",
         "file:///etc/passwd",
         "https://",
-        "ftp://thunderstore.io/",
-        "https://thunder store.io/",
+        "ftp://store.steampowered.com/",
+        "https://store steampowered.com/",
         "https://evil.githubusercontent.com/x",
         "https://someone.github.io/x",
         "https://githubusercontent.com/x",
-        "https://nexusmods.com.evil.com/x",
-        "https://evilnexusmods.com/x",
-        "https://nexus-cdn.com.evil.org/x",
+        "https://flathub.org.evil.com/x",
+        "https://evilflathub.org/x",
+        "https://thunderstore.io/x",
         "https://evil-github.com/x",
     ] {
         assert!(!net::allowed_url(bad), "{bad}");
@@ -296,9 +291,9 @@ fn failures_become_net_errors_and_leave_no_files() {
     let h = |k: &str, v: &str| vec![(k.to_string(), v.to_string())];
     assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.github.com/x", &h("x-ratelimit-reset", "1600"), 1000), Some(10));
     assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.github.com/x", &h("x-ratelimit-reset", "900000"), 1000), Some(60));
-    assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.nexusmods.com/x", &[], 1000), None);
+    assert_eq!(net::github_limit(&NetError::Denied(403), "https://store.steampowered.com/x", &[], 1000), None);
     assert_eq!(net::github_limit(&NetError::NotFound, "https://github.com/x", &[], 1000), None);
-    let other = "https://thunderstore.io/limited";
+    let other = "https://store.steampowered.com/limited";
     f.serve(other, b"slow down");
     f.extra(other, "status", "429");
     assert_eq!(f.client.get_text(other, &[]), Err(NetError::RateLimited));
@@ -322,7 +317,7 @@ fn failures_become_net_errors_and_leave_no_files() {
     // A host that isn't allowed is never asked.
     let before = f.requests().len();
     assert!(matches!(f.client.get_text("https://evil.example.com/x", &[]), Err(NetError::NotAllowed(_))));
-    assert!(matches!(f.client.get_text("http://thunderstore.io/x", &[]), Err(NetError::NotAllowed(_))));
+    assert!(matches!(f.client.get_text("http://store.steampowered.com/x", &[]), Err(NetError::NotAllowed(_))));
     assert_eq!(f.requests().len(), before);
     assert_eq!(f.temp_files(), 0);
 }
@@ -340,7 +335,7 @@ fn bodies_over_the_cap_are_stopped() {
 #[test]
 fn downloads_are_checked() {
     let f = Fake::new("dl");
-    let u = "https://gcdn.thunderstore.io/file.zip";
+    let u = "https://dl.flathub.org/file.zip";
     let body = b"PK\x03\x04 pretend zip".to_vec();
     f.serve(u, &body);
     let sha = sha256::digest_hex(&body);
@@ -373,7 +368,7 @@ fn downloads_are_checked() {
 #[test]
 fn posts_send_the_file() {
     let f = Fake::new("post");
-    let u = "https://thunderstore.io/api/experimental/legacyprofile/create/";
+    let u = "https://store.steampowered.com/upload/";
     f.serve(u, b"{\"key\":\"k\"}");
     let body = f.dir.join("body.txt");
     fs::write(&body, "hello upload").unwrap();

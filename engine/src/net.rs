@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 /// Where an installed mod came from. Shared with the store, which records it next to each mod.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SourceInfo {
-    /// "thunderstore", "nexus", "zip" or "loader".
+    /// "github", "steam", "decky", "flathub" or "update".
     pub kind: String,
     pub id: String,
     pub version: Option<String>,
@@ -96,26 +96,24 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Hosts Turbine Hub may talk to (plan: downloads only from an allowed list). A leading dot allows every subdomain of a
-/// site's own domain (Thunderstore's CDNs, Nexus's API and its download servers such as cf-files.nexusmods.com or
-/// supporter-files.nexus-cdn.com, GitHub's API and codeload). A leading dot is never put on a domain where anyone
-/// can have a subdomain (githubusercontent.com and github.io are such domains), so those hosts are listed one by
-/// one: raw files (the LOOT masterlist) and the two hosts GitHub sends release downloads to.
+/// Hosts Turbine Hub may talk to. A leading dot allows every subdomain of a site's own domain (GitHub's API and
+/// codeload, Flathub's download and icon servers). A leading dot is never put on a domain where anyone can have a
+/// subdomain (githubusercontent.com and github.io are such domains), so those hosts are listed one by one: raw files
+/// (the fixes file, the anti-cheat list) and the two hosts GitHub sends release downloads to.
 pub const ALLOWED_HOSTS: &[&str] = &[
-    "thunderstore.io",
-    ".thunderstore.io",
-    ".nexusmods.com",
-    ".nexus-cdn.com",
-    "skse.silverlock.org",
     "github.com",
     ".github.com",
     "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
-    // Microsoft's Visual C++ runtime installer (its short link and its download server), for Cyberpunk's
-    // frameworks under Proton (vcrun.rs).
-    "aka.ms",
-    "download.visualstudio.microsoft.com",
+    // Valve's SteamOS rating for each game.
+    "store.steampowered.com",
+    // The Decky plugin store and the server its plugin files come from.
+    "plugins.deckbrew.xyz",
+    "cdn.tzatzikiweeb.moe",
+    // App details and icons for the Store tab.
+    "flathub.org",
+    ".flathub.org",
 ];
 
 /// Domains where anyone can get a subdomain of their own, so a leading-dot entry for them would let in sites run by

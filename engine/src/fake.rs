@@ -185,3 +185,23 @@ pub fn machine(root: &Path, preset: Preset) {
         }
     }
 }
+
+/// A mounted Windows drive with two Steam libraries, a half-downloaded game, some apps and a user folder.
+pub fn windows_drive(mount: &Path) {
+    let _ = fs::remove_dir_all(mount);
+    let acf = |lib: &str, id: &str, name: &str, dir: &str, flags: &str, size: &str| {
+        w(mount, &format!("{lib}/appmanifest_{id}.acf"), &format!("\"AppState\"\n{{\n\t\"appid\"\t\t\"{id}\"\n\t\"name\"\t\t\"{name}\"\n\t\"StateFlags\"\t\t\"{flags}\"\n\t\"installdir\"\t\t\"{dir}\"\n\t\"SizeOnDisk\"\t\t\"{size}\"\n}}\n"));
+        w(mount, &format!("{lib}/common/{dir}/game.exe"), "MZ");
+    };
+    acf("Program Files (x86)/Steam/steamapps", "1086940", "Baldur's Gate 3", "Baldurs Gate 3", "4", "120000000000");
+    acf("Program Files (x86)/Steam/steamapps", "1145360", "Hades II", "Hades II", "4", "11000000000");
+    acf("SteamLibrary/steamapps", "632470", "Disco Elysium", "Disco Elysium", "4", "21000000000");
+    acf("SteamLibrary/steamapps", "1172470", "Apex Legends", "Apex Legends", "1026", "68000000000");
+    acf("SteamLibrary/steamapps", "999", "Sneaky", "../../Windows", "4", "1");
+    w(mount, "Users/Public/Desktop/x.lnk", "");
+    w(mount, "Users/Sam/AppData/Local/Discord/Update.exe", "MZ");
+    w(mount, "Users/Sam/AppData/Roaming/Spotify/Spotify.exe", "MZ");
+    w(mount, "Program Files (x86)/MSI Afterburner/MSIAfterburner.exe", "MZ");
+    w(mount, "Program Files (x86)/Battle.net/Battle.net.exe", "MZ");
+    w(mount, "Windows/System32/ntoskrnl.exe", "MZ");
+}

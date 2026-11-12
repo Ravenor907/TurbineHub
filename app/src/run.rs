@@ -87,7 +87,10 @@ pub struct Output {
 /// How long a command may take before it is stopped: installs and downloads get half an hour, everything else two
 /// minutes. Nothing the app runs can leave it waiting for ever.
 fn time_limit(line: &[String]) -> Duration {
-    let long = line.iter().any(|a| ["flathub", "install", "update", "decky-install", "uninstall"].contains(&a.as_str()));
+    let has = |w: &str| line.iter().any(|a| a == w);
+    // Downloads only: Flathub installs and updates, removing an app, Decky Loader. Setting up Turbine Hub's own
+    // helper downloads nothing, so it gets the short limit like every other system change.
+    let long = (has("flatpak") && (has("install") || has("update") || has("uninstall"))) || has("decky-install");
     Duration::from_secs(if long { 30 * 60 } else { 120 })
 }
 

@@ -302,7 +302,9 @@ fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
     assert_eq!(led_mode(&sys, "multi_intensity"), 0o644);
     sys.apply(set(r#"{"kind":"access","what":"lighting"}"#)).unwrap();
     assert!(read(&sys, policy::ACCESS_FILE).contains("hid-access %k"));
-    assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --settle --action=add --subsystem-match=hidraw"));
+    assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --action=add --subsystem-match=hidraw"));
+    // The helper never waits for udev to finish: the rule starts the helper again, and that would wait on itself.
+    assert!(!sys.run.calls.iter().any(|c| c.contains("--settle")));
     // Open at once, without waiting for udev; nothing outside /sys changes.
     assert_eq!([led_mode(&sys, "multi_intensity"), led_mode(&sys, "brightness")], [0o666, 0o666]);
     // A light's own effect file is opened with them (so it can be set back to plain colors), other files never.

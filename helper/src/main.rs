@@ -114,8 +114,9 @@ fn main() {
     let verb = args.get(1).map(String::as_str).unwrap_or("");
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let mut sys = Sys { root: PathBuf::from("/"), run: Host, now };
-    // One job at a time.
-    let _lock = (euid() == 0 && Path::new(ops::STATE_DIR).is_dir())
+    // One job at a time. The lighting rule's own start (hid-access, run by udev while another job may be telling
+    // udev to look again) never waits: it only reads the record and opens one device.
+    let _lock = (verb != "hid-access" && euid() == 0 && Path::new(ops::STATE_DIR).is_dir())
         .then(|| fs::OpenOptions::new().create(true).truncate(false).write(true).open(Path::new(ops::STATE_DIR).join("lock")).ok())
         .flatten()
         .inspect(|f| {

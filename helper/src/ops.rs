@@ -278,7 +278,9 @@ impl<R: Run> Sys<R> {
         if changed.iter().any(|f| f.starts_with("/etc/udev/")) {
             self.run.run(UDEVADM, &["control", "--reload"])?;
             for sub in ["usb", "leds", "hidraw", "misc"] {
-                let _ = self.run.run(UDEVADM, &["trigger", "--settle", "--action=add", &format!("--subsystem-match={sub}")]);
+                // Never --settle here: the lighting rule starts this helper again for each device, and a job that
+                // waited for those to finish would wait on itself.
+                let _ = self.run.run(UDEVADM, &["trigger", "--action=add", &format!("--subsystem-match={sub}")]);
             }
         }
         Ok(changed)

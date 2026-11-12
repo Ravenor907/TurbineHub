@@ -144,7 +144,7 @@ pub(crate) fn proton_page(ui: &mut Ui, arg: &str) -> Json {
     let title = format!("Proton for {}", l.game.name);
     let plain = |intro: &str, rows: Vec<Json>| obj! {"crumb": s("Games"), "title": s(&title), "intro": s(intro), "sections": arr([section("", rows)]), "hints": arr([])};
     if l.locked() {
-        return plain("", vec![with(row("none", "", "info", "Locked", "Its anti-cheat runs online. Turbine Hub never changes how this game starts."), "icon", s("lock"))]);
+        return plain("", vec![with(row("none", "", "info", "Plays as it is", "Its anti-cheat runs online, so Turbine Hub never changes how this game starts, Proton included."), "icon", s("shield"))]);
     }
     if l.game.store != Store::Steam {
         return plain("Heroic keeps this choice.", vec![row("none", "", "info", "In Heroic", "Open the game's settings there and pick another Wine or Proton version under Wine."), row("none", "", "info", "Tip", "Heroic's own Wine Manager installs more versions.")]);

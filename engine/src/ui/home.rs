@@ -129,7 +129,7 @@ pub(crate) fn page(ui: &mut Ui) -> Json {
     let tip = if ui.window {
         ("Mouse and keyboard", "Everything works with a mouse too. Q and E switch tabs, Esc goes back.")
     } else {
-        ("New here?", "Looking for Task Manager or the C: drive? Press View for \"Where's my...?\"")
+        ("New here?", "Press View on any page for what it does. Looking for Task Manager or the C: drive? Help has \"Where's my...?\"")
     };
     obj! {
         "view": s("guided"),

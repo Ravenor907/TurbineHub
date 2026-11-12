@@ -90,7 +90,7 @@ Focusable {
             }
             Chip { app: r.app; text: r.m.badge || ""; tone: r.m.tone || "" }
             Toggle { app: r.app; visible: r.kind === "toggle"; on: r.m.on === true }
-            ActionButton { app: r.app; visible: r.kind === "button" && (r.m.button || "") !== ""; plain: true; label: r.m.button || ""; cap: r.focused ? "a" : "" }
+            ActionButton { app: r.app; visible: r.kind === "button" && (r.m.button || "") !== ""; plain: true; primary: r.m.primary === true; label: r.m.button || ""; cap: r.focused ? "a" : "" }
             Icon { app: r.app; visible: r.kind === "button" && (r.m.button || "") === ""; d: r.app.icons.chevron; size: 20 }
         }
         // The slider's track, with its ends named when the row names them.

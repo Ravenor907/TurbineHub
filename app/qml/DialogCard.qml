@@ -106,7 +106,8 @@ Item {
                             required property var modelData
                             width: listCol.width
                             spacing: dlg.app.px(10)
-                            Icon { app: dlg.app; d: dlg.app.icons.check; size: 18; tint: dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
+                            // A tick for a change the dialog makes; a plain marker for a step of a how-to (nothing is done yet).
+                            Icon { app: dlg.app; d: dlg.d && dlg.d.guide === true ? dlg.app.icons.chevron : dlg.app.icons.check; size: 18; tint: dlg.d && dlg.d.guide === true ? dlg.app.colors.muted : dlg.app.colors.accent; Layout.alignment: Qt.AlignTop; Layout.topMargin: dlg.app.px(3) }
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 0

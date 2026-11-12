@@ -18,7 +18,7 @@ fn done(tag: &str) {
     let _ = std::fs::remove_dir_all(dir(tag));
 }
 
-const PAGES: &[&str] = &["home", "machine", "games", "library", "store", "store-item", "tool", "proton", "saves", "settings", "bring", "windrive", "winapps", "wheres", "changes", "pick", "setup", "quick", "module:power", "module:cpu", "module:display", "module:lighting", "module:battery", "module:sleep", "module:tuneup", "module:dock", "module:gpu", "module:monitors", "module:drives", "module:sound", "module:windows"];
+const PAGES: &[&str] = &["home", "machine", "games", "library", "store", "store-item", "tool", "proton", "saves", "settings", "bring", "windrive", "winapps", "wheres", "help", "changes", "pick", "setup", "quick", "module:power", "module:cpu", "module:display", "module:lighting", "module:battery", "module:sleep", "module:tuneup", "module:dock", "module:gpu", "module:monitors", "module:drives", "module:sound", "module:windows"];
 
 /// Every string anywhere in a page.
 fn strings(j: &Json, out: &mut Vec<String>) {
@@ -48,7 +48,8 @@ fn every_page_is_valid_and_plainly_worded() {
                 strings(&j, &mut all);
                 for t in &all {
                     assert!(!t.contains(['\u{2013}', '\u{2014}']), "{p}: dash in {t:?}");
-                    if mode == Mode::Guided && !t.contains('/') && !t.contains("com.") {
+                    // The glossary on Where's my...? names the technical words to explain them.
+                    if mode == Mode::Guided && *p != "wheres" && !t.contains('/') && !t.contains("com.") {
                         assert!(crate::glossary::jargon(t).is_empty(), "{p}: jargon in {t:?}");
                     }
                 }
@@ -163,7 +164,10 @@ fn locked_games_get_no_switches_and_no_changes() {
     assert!(all.iter().all(|r| !r.str_at("arg").unwrap_or("").starts_with("reset|") && !r.str_at("arg").unwrap_or("").starts_with("mods|")));
     let side = j.get("side").unwrap().as_array();
     let elden = side.iter().find(|x| x.str_at("id") == Some("steam:1245620")).unwrap();
-    assert_eq!((elden.str_at("chip"), elden.get("lock").and_then(Json::as_bool)), (Some("Online anti-cheat"), Some(true)));
+    // It plays: the list says Works, with no lock that would read as "can't play".
+    assert_eq!((elden.str_at("chip"), elden.get("lock").and_then(Json::as_bool)), (Some("Works"), Some(false)));
+    assert!(!j.to_text().contains("Locked"));
+    assert_eq!(all[0].str_at("title"), Some("Play"));
     // Asking anyway is refused and nothing is written.
     let before = Switches::load(&u.folder());
     let answer = parse(&u.act("switch", "steam:1245620|fsr4", "")).unwrap();
@@ -411,7 +415,8 @@ fn settings_change_the_file_and_stay_in_range() {
     assert!(parse(&u.act("theme", "", "9")).unwrap().entries().is_empty());
     // Review changes lists the record newest first, and each row undoes its own entry.
     let page = parse(&u.page("changes", "")).unwrap();
-    let all = rows(&page);
+    let secs = page.get("sections").unwrap().as_array();
+    let all: Vec<Json> = secs[0].get("rows").unwrap().as_array().to_vec();
     assert_eq!(all.len(), 4);
     assert_eq!((all[0].str_at("arg"), all[0].str_at("title")), (Some("4"), Some("Battery stops charging at 80%")));
     parse(&u.act("undo", "4", "")).unwrap();
@@ -477,5 +482,29 @@ fn help_search_matches_windows_words_and_the_glossary() {
     let j = parse(&u.page("wheres", "zzzz")).unwrap();
     assert_eq!(rows(&j).len(), 1);
     assert!(parse(&u.page("wheres", "GAME BAR")).unwrap().to_text().contains("Quick panel"));
+    // Saves have their own entry, and every word a newcomer meets on Picks and the tune-up is explained.
+    assert!(rows(&parse(&u.page("wheres", "save")).unwrap()).iter().any(|r| r.str_at("title").unwrap_or("").starts_with("Game saves")));
+    for word in ["zram", "swap", "huge pages", "split lock", "ntsync", "kernel", "fsr 4", "frame generation", "proton", "compatibility tool", "flatpak", "flathub", "flatseal", "ludusavi", "protonplus", "decky", "vrr", "hdr", "tdp", "bazzite", "cachyos"] {
+        let found = rows(&parse(&u.page("wheres", word)).unwrap());
+        assert!(found.iter().any(|r| r.str_at("title").unwrap_or("").to_lowercase().contains(word)), "{word}");
+    }
     done("help");
+}
+
+#[test]
+fn help_is_about_the_page_it_was_asked_on() {
+    let mut u = ui("pagehelp", HANDHELD, Mode::Guided);
+    let games = parse(&u.page("help", "games@steam:1086940")).unwrap();
+    let saves = parse(&u.page("help", "saves@steam:1086940")).unwrap();
+    assert_eq!(games.str_at("title"), Some("Games"));
+    assert_eq!(saves.str_at("title"), Some("Saves of Baldur's Gate 3"));
+    assert_ne!(games.str_at("intro"), saves.str_at("intro"));
+    // The page's own buttons are explained, and Where's my...? is one press away.
+    let text = games.to_text();
+    assert!(text.contains("Play.") && text.contains("Library check.") && text.contains("Search."));
+    assert!(rows(&games).iter().any(|r| r.str_at("act") == Some("open") && r.str_at("arg") == Some("wheres")));
+    // At a desk the keys are named.
+    u.window = true;
+    assert!(rows(&parse(&u.page("help", "games@")).unwrap()).iter().any(|r| r.str_at("title") == Some("Enter")));
+    done("pagehelp");
 }

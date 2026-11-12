@@ -243,7 +243,7 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
     ui.sound_now = "headset".into();
     ui.facts = match preset {
         HANDHELD => Facts { updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
-        Preset::Desktop => Facts { current_hz: Some(60), updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
+        Preset::Desktop => Facts { current_hz: Some(60), screens: vec![crate::checkup::ScreenNow { name: "DP-4".into(), hz: Some(60), vrr: "automatic".into(), hdr: Some(false) }], updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
         Preset::TvPc => Facts { updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), ..Facts::default() },
     };
     if preset == Preset::Desktop {

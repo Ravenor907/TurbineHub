@@ -126,6 +126,8 @@ pub(crate) fn guide(title: &str, text: &str, items: &[(&str, &str)]) -> Json {
         "cancel": s("Close"),
         "ask": s(""),
         "danger": b(false),
+        // Steps for the player to follow: nothing in them is done yet, so they get no ticks.
+        "guide": b(true),
     }}
 }
 

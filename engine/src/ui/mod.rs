@@ -4,6 +4,7 @@
 //! itself: the app runs the commands of a confirmed dialog.
 
 mod activity;
+mod after;
 pub mod bring;
 pub mod games;
 mod help;
@@ -225,6 +226,7 @@ impl Ui {
             "windrive" => bring::drive(self),
             "winapps" => bring::apps(self),
             "wheres" => help::page(self, arg),
+            "help" => help::page_help(self, arg),
             "changes" => settings::changes(self),
             "pick" => setup::pick(),
             "setup" => setup::page(self, arg),

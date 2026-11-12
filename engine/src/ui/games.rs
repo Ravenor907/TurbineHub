@@ -59,7 +59,6 @@ fn tone(v: &Verdict) -> &'static str {
 /// The short label beside a game in the list.
 fn chip(v: &Verdict) -> &'static str {
     match v.label {
-        _ if v.online_anticheat => "Online anti-cheat",
         Label::Works => "Works",
         Label::NeedsFix => "Fix",
         Label::WontRun => "Blocked",
@@ -133,11 +132,10 @@ fn switch_line(ui: &Ui, sw: Switch) -> &'static str {
 }
 
 /// The ways to play a game that won't run here.
+/// The cloud services come first: Restart to Windows is a bigger step, so it is never where the highlight lands. It
+/// is offered only when Windows is really on this machine (`windows_boot` needs its partition to be there).
 fn alternatives(ui: &Ui) -> Vec<Json> {
     let mut out = Vec::new();
-    if ui.machine().windows_boot.is_some() {
-        out.push(with(with(row("open", "module:windows", "button", "Restart to Windows", "It runs there. The next start only, then SteamOS again."), "icon", s("reboot")), "button", s("Open")));
-    }
     for id in ["geforcenow", "xcloud"] {
         let Some(t) = super::store::tile(id) else { continue };
         let line = if id == "geforcenow" { "Streams the game from a PC in the cloud, when the game is offered there" } else { "Streams it when it is part of Game Pass" };
@@ -147,7 +145,16 @@ fn alternatives(ui: &Ui) -> Vec<Json> {
             with(with(row("tile", t.id, "button", t.name, line), "icon", s("cloud")), "button", s("Add tile"))
         });
     }
+    if ui.machine().windows_boot.is_some() {
+        out.push(with(with(row("open", "module:windows", "button", "Restart to Windows", "It runs there. The next start only, then SteamOS again."), "icon", s("reboot")), "button", s("Open")));
+    }
     out
+}
+
+/// The first row of a game that runs: Play, where the highlight lands when the game is opened.
+fn play_row(l: &Listed) -> Json {
+    let line = if l.game.store == Store::Steam { "Steam starts it" } else { "It starts from Heroic, or from its tile in your Steam library" };
+    with(with(with(row("game", &format!("play|{}", game_id(&l.game)), "button", "Play", line), "icon", s("play")), "button", s("Play")), "primary", b(true))
 }
 
 fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
@@ -158,10 +165,11 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
         out.push(section("Play it another way", alternatives(ui)));
         return out;
     }
+    out.push(section("", vec![play_row(l)]));
     if l.locked() {
-        let mut r = row("none", "", "info", "Locked", "Its anti-cheat runs online. Turbine Hub never changes how this game starts.");
-        r = with(r, "icon", s("lock"));
-        out.push(section("Online anti-cheat", vec![r]));
+        // It plays fine: only Turbine Hub keeps its hands off it.
+        let r = row("none", "", "info", "Plays as it is", "Its anti-cheat runs online, so Turbine Hub never changes how this game starts. No switches, nothing to set up.");
+        out.push(section("Online anti-cheat", vec![with(r, "icon", s("shield"))]));
     } else {
         let uses = tv.uses(&l.game);
         if l.game.runtime == Runtime::Native {
@@ -169,13 +177,14 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
         } else if l.game.store != Store::Steam {
             out.push(section("Switches", vec![row("none", "", "info", "Set in Heroic", "The switches reach games that Steam starts. For this one, open its settings in Heroic.")]));
         } else if uses == Uses::Mods {
-            out.push(section(
-                "Switches",
-                vec![
-                    with(with(with(row("none", "", "info", "Uses Turbine Mod Manager in Steam", "Steam allows one tool per game, so this game's switches come with Turbine Mod Manager."), "icon", s("external")), "badge", s("Mods")), "tone", s("muted")),
-                    with(row("game", &format!("mods|{id}"), "button", "Open Turbine Mod Manager", "Its settings for this game"), "icon", s("external")),
-                ],
-            ));
+            let mut rows = vec![with(with(with(row("none", "", "info", "Uses Turbine Mod Manager in Steam", "Steam allows one tool per game, so this game's switches come with Turbine Mod Manager."), "icon", s("external")), "badge", s("Mods")), "tone", s("muted"))];
+            rows.push(if mod_manager(ui) {
+                with(row("game", &format!("mods|{id}"), "button", "Open Turbine Mod Manager", "Its settings for this game"), "icon", s("external"))
+            } else {
+                // Its tool is still picked in Steam, but the app itself isn't here: say how to switch back.
+                with(row("none", "", "info", "Turbine Mod Manager isn't installed", "To use Turbine Hub's switches instead: in Steam, the game's Properties, Compatibility, pick \"Turbine Hub\"."), "icon", s("info"))
+            });
+            out.push(section("Switches", rows));
         } else {
             let sw = Switches::load(&ui.folder());
             let mut rows = vec![launch::game_row(tv, &l.game, uses)];
@@ -199,10 +208,22 @@ fn panel(ui: &Ui, l: &Listed, tv: &launch::ToolView) -> Vec<Json> {
         c => format!("{c} snapshots. Restoring one keeps the current saves first"),
     };
     out.push(section("Saves", vec![with(row("open", &format!("saves|{id}"), "button", "Saves and snapshots", &line), "icon", s("save"))]));
-    if !l.locked() {
-        out.push(section("Mods", vec![with(row("game", &format!("mods|{id}"), "button", "Mods: open Turbine", "Turbine Mod Manager handles mods"), "icon", s("external"))]));
+    // Mods live in Turbine Mod Manager: the row is there only when that app is (the switches above say the rest
+    // for a game that uses its tool).
+    if !l.locked() && mod_manager(ui) && tv.uses(&l.game) != Uses::Mods {
+        out.push(section("Mods", vec![with(row("game", &format!("mods|{id}"), "button", "Mods: open Turbine Mod Manager", "Turbine Mod Manager handles mods"), "icon", s("external"))]));
     }
     out
+}
+
+/// Is Turbine Mod Manager installed?
+fn mod_manager(ui: &Ui) -> bool {
+    ui.installed.iter().any(|a| a == super::store::TURBINE)
+}
+
+/// The order of the list: games that run first, the ones that won't run here at the end; by name inside each.
+fn play_order(l: &Listed) -> (bool, String) {
+    (l.verdict.label == Label::WontRun, l.game.name.to_lowercase())
 }
 
 /// The Games tab: every installed game on the left, the picked one's panel on the right. `arg` is the picked game.
@@ -216,10 +237,11 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
     if q.is_empty() {
         launch::keep_files(ui, &tv, &everything);
     }
-    let all: Vec<Listed> = everything.into_iter().filter(|l| matches(&q, &l.game.name)).collect();
+    let mut all: Vec<Listed> = everything.into_iter().filter(|l| matches(&q, &l.game.name)).collect();
+    all.sort_by_key(play_order);
     let search = search_box(ui, "games", "Search games");
     let picked = all.iter().position(|l| game_id(&l.game) == arg).unwrap_or(0);
-    let side = arr(all.iter().map(|l| obj! {"id": s(game_id(&l.game)), "title": s(&l.game.name), "chip": s(chip(&l.verdict)), "tone": s(if l.verdict.online_anticheat { "muted" } else { tone(&l.verdict) }), "lock": b(l.verdict.online_anticheat)}));
+    let side = arr(all.iter().map(|l| obj! {"id": s(game_id(&l.game)), "title": s(&l.game.name), "chip": s(chip(&l.verdict)), "tone": s(tone(&l.verdict)), "lock": b(false)}));
     let Some(l) = all.get(picked) else {
         if total == 0 {
             return obj! {"side": arr([]), "sideTitle": s("No games yet"), "index": n(0.0), "empty": s("No games found. Install one in Steam or Heroic and it shows up here."), "sections": arr([]), "hints": arr([])};
@@ -327,6 +349,11 @@ pub fn reset_windows_files(pfx: &Path, now: u64) -> Result<String, String> {
     Ok(name)
 }
 
+/// Where reports are written: a folder in Turbine Hub's own folder.
+pub fn reports_dir(ui: &Ui) -> PathBuf {
+    ui.folder().join("reports")
+}
+
 /// The report for one game: what Turbine Hub knows about it and the machine, private details removed.
 pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
     let m = ui.machine();
@@ -408,14 +435,16 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 }
                 "report" => {
                     let mut p = Plan::new("Write a report?", &format!("Turbine Hub writes what it knows about {name} and this machine into a text file. Names, addresses and keys are removed. Nothing is sent anywhere."), "Write it");
+                    let at = reports_dir(ui);
+                    p.items.push(("Where it goes".into(), at.to_string_lossy().into_owned()));
                     p.steps.push(Step::Report { game: id.to_string() });
-                    p.done = "Report written".into();
+                    p.done = format!("Report written. It's in {}", at.display());
                     dialog(ui, p)
                 }
                 "mods" if locked => toast("Its anti-cheat runs online, so mods stay off."),
                 "mods" => {
-                    if !ui.installed.iter().any(|a| a == super::store::TURBINE) {
-                        return Some(toast("Turbine Mod Manager isn't installed."));
+                    if !mod_manager(ui) {
+                        return Some(toast("Turbine Mod Manager isn't installed here. It comes from github.com/Ravenor907/Turbine-Mod-Manager."));
                     }
                     let mut p = Plan::new("Open Turbine Mod Manager?", "Mods live in Turbine Mod Manager. It opens on top of Turbine Hub.", "Open");
                     p.steps.push(Step::Host(["flatpak-spawn", "--host", "flatpak", "run", super::store::TURBINE].iter().map(|x| x.to_string()).collect()));

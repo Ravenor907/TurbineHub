@@ -138,6 +138,7 @@ Window {
         refresh: "M20 11a8 8 0 0 0-14.900-3.900L4 9 M4 4v5h5 M4 13a8 8 0 0 0 14.900 3.900L20 15 M20 20v-5h-5",
         remove: "M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13",
         chevron: "M9 5l7 7-7 7",
+        play: "M8 5v14l11-7z",
         warn: "M12 4l9 16H3z M12 10v4 M12 17v.3",
         turbine: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 12C12 8 14 6.5 16 7 M12 12C15.5 12 17 14 16.5 16 M12 12C12 16 10 17.5 8 17 M12 12C8.5 12 7 10 7.5 8"
     })
@@ -331,7 +332,8 @@ Window {
         if (k === "lb") switchTab(-1)
         else if (k === "rb") switchTab(1)
         else if (k === "b") { if (!back() && current.page === "pick") Qt.quit() }
-        else if (k === "view") { if (current.page !== "wheres") open("wheres") }
+        // Help: what this page is and what its buttons do, with Where's my...? one press further.
+        else if (k === "view") { if (current.page === "help") open("wheres"); else if (current.page !== "wheres") open("help|" + current.page + "@" + pageArg) }
         else if (k === "start") doAct("menu", "", "")
     }
     // A page's own keys: X and Y from its model, and the primary button's key.

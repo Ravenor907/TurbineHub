@@ -23,6 +23,9 @@ pub(crate) fn pick() -> Json {
     }
 }
 
+/// The quick panel isn't installed and installs only through Decky Loader's own steps.
+const PANEL_STEPS: &str = "Steps in Decky";
+
 /// One thing the quick setup can do.
 struct Pick {
     id: String,
@@ -44,12 +47,17 @@ fn picks_for(ui: &Ui, guided: bool) -> Vec<Pick> {
     let mut add = |id: &str, group: &'static str, title: &str, note: &str, default: bool, locked: Option<&'static str>, settings: Vec<Setting>, app: Option<&'static str>| out.push(Pick { id: id.into(), group, title: title.into(), note: note.into(), default: default && locked.is_none(), locked, settings, app });
     let has_decky = ui.ctx.home.join("homebrew/services/PluginLoader").exists();
     add("library", "Essentials", super::selftile::TITLE, "Opens from Game Mode like a game, with its own art", true, super::selftile::pick_lock(ui), Vec::new(), None);
-    add("decky", "Essentials", "Decky Loader", "Plugins for Steam's quick menu", ui.decky_tag.is_some(), if has_decky { Some("Installed") } else if ui.decky_tag.is_none() { Some("Needs the internet once") } else { None }, Vec::new(), None);
-    // The quick panel installs through Decky Loader itself, so Guided only says where it is.
+    add("decky", "Essentials", "Decky Loader", if guided { "Add-ons for the menu Steam's button with three dots opens while you play" } else { "Plugins for Steam's quick menu" }, ui.decky_tag.is_some(), if has_decky { Some("Installed") } else if ui.decky_tag.is_none() { Some("Needs the internet once") } else { None }, Vec::new(), None);
+    // The quick panel installs through Decky Loader itself, so Guided only shows the steps (its How button).
     if guided && has_decky {
-        add("panel", "Essentials", store::PANEL_TITLE, "Turbine Hub in Steam's quick menu while you play", false, Some(if store::panel_installed(ui) { "Installed" } else { "In Store, Decky plugins" }), Vec::new(), None);
+        add("panel", "Essentials", store::PANEL_TITLE, "Turbine Hub in Steam's quick menu while you play. Not installed yet: a few steps in Decky Loader's settings.", false, Some(if store::panel_installed(ui) { "Installed" } else { PANEL_STEPS }), Vec::new(), None);
     }
-    for (id, title, note, default) in [(LUDUSAVI, "Ludusavi save backups", "Back up and restore saves", true), ("com.vysp3r.ProtonPlus", "ProtonPlus", "Extra Proton versions", true)] {
+    let apps = if guided {
+        [(LUDUSAVI, "Save backups (Ludusavi)", "Backs up your game saves, so you can go back to an earlier one", true), ("com.vysp3r.ProtonPlus", "More Proton versions (ProtonPlus)", "Proton is what runs Windows games here. Other versions fix games that won't start", true)]
+    } else {
+        [(LUDUSAVI, "Ludusavi save backups", "Back up and restore saves", true), ("com.vysp3r.ProtonPlus", "ProtonPlus", "Extra Proton versions", true)]
+    };
+    for (id, title, note, default) in apps {
         add(id, "Essentials", title, note, default, store::is_installed(ui, id).then_some("Installed"), Vec::new(), Some(id));
     }
     add("boost", "Performance", "Game Boost while playing", "Full processor speed in games", true, st.game_boost.then_some("On already"), Vec::new(), None);
@@ -59,9 +67,10 @@ fn picks_for(ui: &Ui, guided: bool) -> Vec<Pick> {
             State::SteamOsDoes => Some("SteamOS does it"),
             State::Off => None,
         };
-        add(&format!("tune:{}", i.id), "Performance", i.title, i.why, true, locked, i.settings.clone(), None);
+        let (title, why) = if guided { (i.plain_title, i.plain_why) } else { (i.title, i.why) };
+        add(&format!("tune:{}", i.id), "Performance", title, why, true, locked, i.settings.clone(), None);
     }
-    for (id, title, note, default) in [(HEROIC, "Heroic Games Launcher", "Epic, GOG and Amazon games", true), ("com.discordapp.Discord", "Discord", "Voice chat and friends", false), ("com.moonlight_stream.Moonlight", "Moonlight", "Stream games from your PC", false), ("com.obsproject.Studio", "OBS Studio", "Record and stream", false), ("io.github.radiolamp.mangojuice", "MangoJuice", "FPS and temps overlay", false)] {
+    for (id, title, note, default) in [(HEROIC, "Heroic Games Launcher", "Epic, GOG and Amazon games", true), ("com.discordapp.Discord", "Discord", "Voice chat and friends", false), ("com.moonlight_stream.Moonlight", "Moonlight", "Stream games from your PC", false), ("com.obsproject.Studio", "OBS Studio", "Record and stream", false), ("io.github.radiolamp.mangojuice", "MangoJuice", "Shows frame rate and temperatures over a game", false)] {
         add(id, "Apps", title, note, default, store::is_installed(ui, id).then_some("Installed"), Vec::new(), Some(id));
     }
     let group = match m.kind {
@@ -110,6 +119,8 @@ fn pick_sections(all: &[Pick], picked: &BTreeSet<String>) -> (Vec<Json>, usize) 
                 all.iter()
                     .filter(|p| p.group == *g)
                     .map(|p| match p.locked {
+                        // Not done and not something a tick can do: the steps, never a badge that looks done.
+                        Some(PANEL_STEPS) => with(with(row("panel-guide", "", "button", &p.title, &p.note), "button", s("How")), "icon", s("help")),
                         Some(why) => with(with(row("none", "", "info", &p.title, &p.note), "badge", s(why)), "tone", s("ok")),
                         None => with(row("tick", &format!("quick|{}", p.id), "check", &p.title, &p.note), "on", b(picked.contains(&p.id))),
                     })

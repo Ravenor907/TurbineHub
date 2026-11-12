@@ -205,11 +205,13 @@ fn drive_row(d: &crate::hardware::Drive) -> Json {
 fn tuneup_rows(ui: &Ui) -> (Vec<Json>, usize) {
     let plan = tuneup::plan(&ui.ctx.root, &ui.ledger());
     let off = plan.iter().filter(|i| i.state == State::Off).count();
+    let guided = !ui.veteran();
     let rows = plan
         .iter()
-        .map(|i| match i.state {
-            State::SteamOsDoes => with(with(row("none", "", "info", i.title, i.why), "badge", s("SteamOS does it")), "tone", s("ok")),
-            st => with(with(row("tuneup", i.id, "toggle", i.title, i.why), "on", b(st == State::On)), "badge", s(if i.restart && st == State::Off { "Next restart" } else { "" })),
+        .map(|i| (i, if guided { (i.plain_title, i.plain_why) } else { (i.title, i.why) }))
+        .map(|(i, (title, why))| match i.state {
+            State::SteamOsDoes => with(with(row("none", "", "info", title, why), "badge", s("SteamOS does it")), "tone", s("ok")),
+            st => with(with(row("tuneup", i.id, "toggle", title, why), "on", b(st == State::On)), "badge", s(if i.restart && st == State::Off { "Next restart" } else { "" })),
         })
         .collect();
     (rows, off)
@@ -364,21 +366,29 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
         }
         "monitors" => {
             let mut out = Vec::new();
+            // In Game Mode Steam sets the screen: say so before the controls, which are for Desktop Mode.
+            if !ui.window {
+                out.push(section("", vec![with(row("checkup", "refresh-rate", "button", "In Game Mode, Steam sets the screen", "Steam's Settings, Display. These controls set the screens for Desktop Mode."), "button", s("How"))]));
+            }
             for (i, d) in m.connected_displays().enumerate() {
                 let Some(e) = &d.edid else { continue };
                 let name = output_name(&d.connector).to_string();
+                // What Desktop Mode has this screen set to now, when it could be asked.
+                let now = ui.facts.screens.iter().find(|x| x.name == name);
                 let mut rows = vec![with(row("none", "", "info", &format!("{} \u{b7} {}x{}", inches(d), e.best_mode.0, e.best_mode.1), if d.hdmi { "Connected over HDMI" } else { "Connected over DisplayPort" }), "value", s(format!("up to {} Hz", e.max_hz)))];
                 let list = rates(d);
                 if list.len() > 1 {
-                    rows.push(with(with(with(row("monitor", &format!("hz|{name}"), "choice", "Refresh rate", &format!("This screen goes up to {} Hz", e.max_hz)), "options", arr(list.iter().map(|r| s(r.to_string())))), "index", n(ui.facts.current_hz.filter(|_| i == 0).and_then(|h| list.iter().position(|r| *r == h)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
+                    rows.push(with(with(with(row("monitor", &format!("hz|{name}"), "choice", "Refresh rate", &format!("This screen goes up to {} Hz", e.max_hz)), "options", arr(list.iter().map(|r| s(r.to_string())))), "index", n(now.and_then(|x| x.hz).or(ui.facts.current_hz.filter(|_| i == 0)).and_then(|h| list.iter().position(|r| *r == h)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
                 }
                 if e.range_hz.is_some() {
-                    rows.push(with(with(with(row("monitor", &format!("vrr|{name}"), "choice", "Variable refresh (VRR)", "Smooth motion when fps drops"), "options", arr(VRR.iter().map(|(t, _)| s(*t)))), "index", n(-1.0)), "apply", b(true)));
+                    rows.push(with(with(with(row("monitor", &format!("vrr|{name}"), "choice", "Variable refresh (VRR)", "Smooth motion when fps drops"), "options", arr(VRR.iter().map(|(t, _)| s(*t)))), "index", n(now.and_then(|x| VRR.iter().position(|(_, k)| *k == x.vrr)).map(|p| p as f64).unwrap_or(-1.0))), "apply", b(true)));
                 }
-                rows.push(with(with(with(row("monitor", &format!("hdr|{name}"), "choice", "HDR", "For HDR games, on screens that have it"), "options", arr([s("Off"), s("On")])), "index", n(-1.0)), "apply", b(true)));
+                rows.push(with(with(with(row("monitor", &format!("hdr|{name}"), "choice", "HDR", "For HDR games, on screens that have it"), "options", arr([s("Off"), s("On")])), "index", n(now.and_then(|x| x.hdr).map(|on| if on { 1.0 } else { 0.0 }).unwrap_or(-1.0))), "apply", b(true)));
                 out.push(section(&format!("{} {}", if m.on_tv() { "TV" } else { "Monitor" }, i + 1), rows));
             }
-            out.push(section("Game Mode", vec![row("none", "", "info", "Game Mode shows one screen at a time", "Steam picks it: Settings, Display. These controls set the screens for Desktop Mode.")]));
+            if ui.window {
+                out.push(section("Game Mode", vec![row("none", "", "info", "Game Mode shows one screen at a time", "Steam picks it: Settings, Display. These controls set the screens for Desktop Mode.")]));
+            }
             (if m.on_tv() { "TV" } else { "Monitors" }.into(), String::new(), out)
         }
         "drives" => ("Drives".into(), "Steam can install games on any drive marked Game library.".into(), vec![section("", m.drives.iter().map(drive_row).collect())]),

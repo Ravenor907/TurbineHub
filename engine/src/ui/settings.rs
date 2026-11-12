@@ -77,7 +77,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
                 agent_row(ui),
                 with(with(with(row("snapshots", "", "toggle", "Save time machine", &format!("A snapshot of a game's saves each time it starts. The newest {} are kept.", crate::snapshots::KEEP)), "on", b(st.save_snapshots)), "badge", s(if st.save_snapshots && !ui.agent_running() { "Needs the background helper" } else { "" })), "tone", s("warn")),
                 open_row("bring", "Bring it over", "Run the Windows steps again", "Open"),
-                open_row("changes", "Review changes", &match changes { 0 => "Nothing changed yet".to_string(), 1 => "1 system change, with Undo".into(), c => format!("{c} system changes, each with Undo") }, "Review"),
+                open_row("changes", "Review changes", &match changes { 0 => "Everything Turbine Hub changed, with Undo".to_string(), 1 => "1 system change and what's in your own folders, with Undo".into(), c => format!("{c} system changes and what's in your own folders, with Undo") }, "Review"),
             ];
             rows.extend(super::selftile::rows(ui));
             rows
@@ -160,17 +160,71 @@ pub fn change_words(c: &Change) -> String {
     c.words()
 }
 
-/// Review changes: every system change, newest first, each with Undo.
+/// The changes Turbine Hub makes in the player's own folders, without the password: the launch tool, Proton picks,
+/// game switches, library tiles, the background helper's start-up entry and the apps its Store installed. Each row
+/// undoes it, or opens the page where it is undone.
+fn own_changes(ui: &Ui) -> Vec<Json> {
+    let mut out = Vec::new();
+    let button = |r: Json, label: &str, icon: &str| with(with(r, "button", s(label)), "icon", s(icon));
+    let tv = super::launch::tool_view(ui);
+    if tv.state != crate::compat_tool::State::Missing {
+        out.push(button(row("tool", "remove", "button", "Turbine Hub's launch tool in Steam", "Three small files in Steam's folder for tools. Games that use it need another tool picked first."), "Remove", "remove"));
+    }
+    let all = super::games::listed(ui);
+    let sw = super::games::Switches::load(&ui.folder());
+    if sw.fsr4_all {
+        out.push(button(row("fsr4all", "", "button", "FSR 4 for every game", "The sharper upscaling, on for all games that use the launch tool"), "Turn off", "spark"));
+    }
+    for l in &all {
+        let id = super::games::game_id(&l.game);
+        if l.game.store == crate::Store::Steam
+            && let Some(dir) = crate::compat_tool::proton_pick(&ui.folder(), &l.game.store_id)
+        {
+            let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            out.push(button(row("proton-pick", &format!("{id}|"), "button", &format!("{}: starts with {name}", l.game.name), "Your Proton pick. Undo goes back to Automatic."), "Undo", "swap"));
+        }
+        let on = sw.of(&id);
+        if !on.is_empty() {
+            let names: Vec<&str> = on.iter().map(|x| x.title()).collect();
+            out.push(button(row("open", &format!("games|{id}"), "button", &format!("{}: {}", l.game.name, names.join(", ")), "Game switches. Turn them off on the game's page."), "Open", "games"));
+        }
+    }
+    if matches!(super::selftile::state(&ui.ctx.home), super::selftile::State::Added { ours: true, .. }) {
+        out.push(button(row("self-tile", "remove", "button", super::selftile::TITLE, "An entry among Steam's non-Steam games, with its art"), "Remove", "remove"));
+    }
+    for t in super::store::TILES.iter().filter(|t| super::store::tile_added(ui, t)) {
+        out.push(button(row("tile-remove", t.id, "button", &format!("{} in your library", t.name), "A tile among Steam's non-Steam games"), "Remove", "remove"));
+    }
+    if ui.agent_running() {
+        out.push(button(row("agent", "", "button", "Background helper", "A start-up entry in your own folder, so it runs while you play"), "Turn off", "remove"));
+    }
+    for id in super::store::made_by_hub(&ui.folder()).iter().filter(|id| super::store::is_installed(ui, id)) {
+        let Some(a) = super::store::APPS.iter().find(|a| a.id == id) else { continue };
+        out.push(button(row("store-remove", a.id, "button", a.name, "Installed from the Store. Its own settings and files stay when it goes."), "Remove", "remove"));
+    }
+    out
+}
+
+/// Review changes: every system change, newest first, each with Undo; then what Turbine Hub changed in the
+/// player's own folders, each with its Undo or the page where it is undone.
 pub(crate) fn changes(ui: &mut Ui) -> Json {
     let ledger = ui.ledger();
     let now = crate::now();
     let rows: Vec<Json> = ledger.entries.iter().rev().map(|e| with(with(row("undo", &e.id.to_string(), "button", &change_words(&e.change), &format!("{} ago, on SteamOS {}", ago(now, e.applied), e.steamos)), "button", s("Undo")), "icon", s("restore"))).collect();
     let any = !rows.is_empty();
+    let own = own_changes(ui);
+    let mut sections = Vec::new();
+    if any || own.is_empty() {
+        sections.push(with(section(if own.is_empty() { "" } else { "System changes, made with your password" }, rows), "empty", s(if any || !own.is_empty() { "" } else { "Turbine Hub hasn't changed anything on this machine." })));
+    }
+    if !own.is_empty() {
+        sections.push(section("In your own folders, no password", own));
+    }
     obj! {
         "crumb": s("Settings"),
         "title": s("Review changes"),
-        "intro": s("Every system change Turbine Hub made, newest first. Undo puts back what was there before."),
-        "sections": arr([with(section("", rows), "empty", s(if any { "" } else { "Turbine Hub hasn't changed anything on this machine." }))]),
+        "intro": s("Everything Turbine Hub changed, system changes newest first. Undo puts back what was there before."),
+        "sections": arr(sections),
         "hints": arr(if any { vec![super::hint("y", "Undo all")] } else { vec![] }),
         "y": if any { obj! {"act": s("undo-all"), "arg": s("")} } else { Json::Null },
     }

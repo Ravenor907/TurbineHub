@@ -95,8 +95,9 @@ fn a_game_that_wont_run_here_shows_only_the_other_ways_to_play() {
     let j = parse(&u.page("games", APEX)).unwrap();
     let secs = sections(&j);
     assert_eq!(secs.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["Play it another way"]);
-    // Windows is on this machine, so restarting to it comes first; then the two cloud services.
-    assert_eq!(titles(&secs[0].1), vec!["Restart to Windows", "GeForce NOW", "Xbox Cloud"]);
+    // The two cloud services first; Windows is on this machine, so restarting to it comes last, away from where
+    // the highlight lands.
+    assert_eq!(titles(&secs[0].1), vec!["GeForce NOW", "Xbox Cloud", "Restart to Windows"]);
     assert!(rows(&j).iter().all(|r| r.str_at("act") != Some("switch") && r.str_at("kind") != Some("toggle")));
     assert!(!hints(&j).contains(&"Play") && j.get("x") == Some(&Json::Null));
     // Asking anyway changes nothing.
@@ -119,17 +120,20 @@ fn switches_say_how_they_reach_each_game() {
     let j = parse(&u.page("games", BG3)).unwrap();
     let chips: Vec<&str> = j.get("header").unwrap().get("chips").unwrap().as_array().iter().filter_map(|c| c.str_at("text")).collect();
     assert_eq!(chips, vec!["Works", "Uses Turbine Hub"]);
-    let sw = &sections(&j)[0].1;
+    // Play comes first, where the highlight lands.
+    let play = &sections(&j)[0].1[0];
+    assert_eq!((play.str_at("title"), play.str_at("arg"), play.get("primary").and_then(Json::as_bool)), (Some("Play"), Some("play|steam:1086940"), Some(true)));
+    let sw = &sections(&j)[1].1;
     assert_eq!(titles(sw), vec!["On for this game", "FSR 4 upgrade", "Frame generation", "Handheld mode", "Proton log"]);
     assert_eq!(sw[1].get("on").and_then(Json::as_bool), Some(true));
     assert_eq!(parse(&u.act("switch", &format!("{BG3}|log"), "")).unwrap().str_at("toast"), Some("Applies the next time the game starts."));
     // Frame generation says what it needs until the plugin's wrapper is there.
     assert!(sw[2].str_at("line").unwrap().starts_with("Needs the Lossless Scaling plugin"));
     std::fs::write(tool::framegen_wrapper(&u.ctx.home), "#!/bin/sh\nexec \"$@\"\n").unwrap();
-    assert_eq!(sections(&parse(&u.page("games", BG3)).unwrap())[0].1[2].str_at("line"), Some("Lossless Scaling, set the multiplier in Decky"));
+    assert_eq!(sections(&parse(&u.page("games", BG3)).unwrap())[1].1[2].str_at("line"), Some("Lossless Scaling, set the multiplier in Decky"));
     // Cyberpunk doesn't use the tool yet: the first row leads to the three steps, and a switch is kept for later.
     let j = parse(&u.page("games", CYBERPUNK)).unwrap();
-    let first = &sections(&j)[0].1[0];
+    let first = &sections(&j)[1].1[0];
     assert_eq!((first.str_at("act"), first.str_at("arg"), first.str_at("button")), (Some("tool-how"), Some(CYBERPUNK), Some("How")));
     assert!(first.str_at("line").unwrap().starts_with("In Steam:"));
     assert_eq!(parse(&u.act("switch", &format!("{CYBERPUNK}|fsr4"), "")).unwrap().str_at("toast"), Some("Saved. It applies once this game uses Turbine Hub in Steam."));
@@ -141,13 +145,20 @@ fn switches_say_how_they_reach_each_game() {
     assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some(""));
     // Before Steam has started again, the restart comes first, on the row and in the steps.
     u.steam_started = None;
-    assert!(sections(&parse(&u.page("games", CYBERPUNK)).unwrap())[0].1[0].str_at("line").unwrap().starts_with("Restart Steam once"));
+    assert!(sections(&parse(&u.page("games", CYBERPUNK)).unwrap())[1].1[0].str_at("line").unwrap().starts_with("Restart Steam once"));
     let d = parse(&u.act("tool-how", CYBERPUNK, "")).unwrap();
     assert!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("line").unwrap().starts_with("Restart Steam once"));
     // Hollow Knight uses Turbine Mod Manager's tool: no switches here, and it says where they are.
+    // Turbine Mod Manager isn't installed here: no button that leads nowhere, and no Mods row at all.
     let j = parse(&u.page("games", HOLLOW)).unwrap();
-    let sw = &sections(&j)[0].1;
-    assert_eq!(titles(sw), vec!["Uses Turbine Mod Manager in Steam", "Open Turbine Mod Manager"]);
+    let sw = &sections(&j)[1].1;
+    assert_eq!(titles(sw), vec!["Uses Turbine Mod Manager in Steam", "Turbine Mod Manager isn't installed"]);
+    assert!(rows(&j).iter().all(|r| !r.str_at("arg").unwrap_or("").starts_with("mods|")));
+    u.installed.push(store::TURBINE.into());
+    let j = parse(&u.page("games", HOLLOW)).unwrap();
+    assert_eq!(titles(&sections(&j)[1].1), vec!["Uses Turbine Mod Manager in Steam", "Open Turbine Mod Manager"]);
+    assert!(parse(&u.page("games", BG3)).unwrap().to_text().contains("Mods: open Turbine Mod Manager"));
+    u.installed.retain(|a| a != store::TURBINE);
     assert!(rows(&j).iter().all(|r| r.str_at("act") != Some("switch")));
     let before = Switches::load(&u.folder());
     assert!(parse(&u.act("switch", &format!("{HOLLOW}|fsr4"), "")).unwrap().str_at("toast").unwrap().contains("Turbine Mod Manager"));
@@ -187,7 +198,7 @@ fn the_launch_tool_is_set_up_kept_and_removed_through_the_dialog() {
     std::fs::write(tool::tool_dir(&steam).join(tool::SCRIPT), "old").unwrap();
     let j = parse(&u.page("tool", "")).unwrap();
     assert_eq!((rows(&j)[0].str_at("title"), rows(&j)[0].str_at("arg")), (Some("An update is ready"), Some("update")));
-    assert_eq!(sections(&parse(&u.page("games", CYBERPUNK)).unwrap())[0].1[0].str_at("title"), Some("Update the launch tool"));
+    assert_eq!(sections(&parse(&u.page("games", CYBERPUNK)).unwrap())[1].1[0].str_at("title"), Some("Update the launch tool"));
     let d = parse(&u.act("tool", "update", "")).unwrap();
     assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some("Update"));
     let plan = u.confirm().unwrap();
@@ -203,7 +214,7 @@ fn the_launch_tool_is_set_up_kept_and_removed_through_the_dialog() {
     launch::run_step(&plan.steps[0], &u.ctx.home, &u.folder()).unwrap().unwrap();
     assert!(!tool::tool_dir(&steam).exists() && steam.join("compatibilitytools.d/GE-Proton10-4/proton").exists());
     // Never set up: every Proton game's page leads to the tool's page, which offers the one press.
-    let first = sections(&parse(&u.page("games", BG3)).unwrap())[0].1[0].clone();
+    let first = sections(&parse(&u.page("games", BG3)).unwrap())[1].1[0].clone();
     assert_eq!((first.str_at("act"), first.str_at("arg"), first.str_at("button")), (Some("open"), Some("tool"), Some("Set up")));
     assert_eq!(parse(&u.act("tool-how", BG3, "")).unwrap().str_at("open"), Some("tool"));
     let j = parse(&u.page("tool", "")).unwrap();
@@ -277,7 +288,7 @@ fn another_proton_is_a_pick_of_turbine_hubs_own_with_undo() {
     u.cancel();
     assert_eq!(sections(&parse(&u.page("proton", CYBERPUNK)).unwrap())[0].1[1].str_at("act"), Some("tool-how"));
     assert!(parse(&u.act("proton-pick", &format!("{ELDEN}|GE-Proton10-4"), "")).unwrap().str_at("toast").unwrap().contains("anti-cheat"));
-    assert_eq!(titles(&rows(&parse(&u.page("proton", ELDEN)).unwrap())), vec!["Locked"]);
+    assert_eq!(titles(&rows(&parse(&u.page("proton", ELDEN)).unwrap())), vec!["Plays as it is"]);
     assert_eq!(parse(&u.page("proton", "steam:1")).unwrap().str_at("title"), Some("Not found"));
     // A Proton whose runtime is missing is listed, but can't be picked.
     std::fs::remove_file(steam.join("steamapps/appmanifest_4183110.acf")).unwrap();
@@ -383,7 +394,7 @@ fn each_store_item_has_a_page_with_what_is_known_and_what_can_be_done() {
     let j = parse(&u.page("store-item", "com.discordapp.Discord")).unwrap();
     assert_eq!((j.str_at("crumb"), j.str_at("title")), (Some("Store"), Some("Discord")));
     assert!(j.str_at("intro").unwrap().starts_with("Voice, video and text chat"));
-    assert!(sections(&j)[0].1.is_empty());
+    assert_eq!(titles(&sections(&j)[0].1), vec!["Open Discord"]);
     assert_eq!((sections(&j)[2].0.as_str(), titles(&sections(&j)[2].1)), ("Remove", vec!["Remove"]));
     assert_eq!(find(&j, "Installed").unwrap().str_at("line"), Some("Version 0.0.98"));
     assert_eq!(find(&j, "Size").unwrap().str_at("line"), Some("318.4 MB on the drive"));
@@ -399,7 +410,7 @@ fn each_store_item_has_a_page_with_what_is_known_and_what_can_be_done() {
     assert_eq!(parse(&u.act("store-remove", "com.spotify.Client", "")).unwrap().str_at("toast"), Some("Spotify isn't installed."));
     // An update: both Update and Remove, each asking for its own thing.
     let j = parse(&u.page("store-item", store::HEROIC)).unwrap();
-    assert_eq!((titles(&sections(&j)[0].1), titles(&sections(&j)[2].1)), (vec!["Update"], vec!["Remove"]));
+    assert_eq!((titles(&sections(&j)[0].1), titles(&sections(&j)[2].1)), (vec!["Update", "Open Heroic Games Launcher"], vec!["Remove"]));
     assert_eq!(sections(&j)[0].1[0].str_at("line"), Some("Version 2.18.0 is ready"));
     assert_eq!(parse(&u.act("store-update", store::HEROIC, "")).unwrap().get("dialog").unwrap().str_at("confirm"), Some("Update"));
     u.cancel();
@@ -594,10 +605,13 @@ fn the_first_run_offers_the_library_entry_and_the_checkup_tips_it() {
     assert_eq!((pick.str_at("kind"), pick.str_at("badge")), (Some("info"), Some("Later, with Steam closed")));
     parse(&r.act("quick-apply", "", "")).unwrap();
     assert!(r.confirm().unwrap().steps.iter().all(|x| !matches!(x, Step::SelfTile { .. })));
-    // Guided's picks say where the quick panel is, since Decky Loader is here.
+    // Guided's picks offer the quick panel's steps, since Decky Loader is here: a How button, never a badge that
+    // looks done.
     assert!(all.iter().all(|x| x.str_at("title") != Some(store::PANEL_TITLE)));
-    let guided = r.page("setup", "picks");
-    assert!(guided.contains(store::PANEL_TITLE) && guided.contains("In Store, Decky plugins") && guided.contains(selftile::TITLE));
+    let guided = parse(&r.page("setup", "picks")).unwrap();
+    let panel = rows(&guided).into_iter().find(|x| x.str_at("title") == Some(store::PANEL_TITLE)).unwrap();
+    assert_eq!((panel.str_at("act"), panel.str_at("button"), panel.get("badge")), (Some("panel-guide"), Some("How"), None));
+    assert!(guided.to_text().contains(selftile::TITLE));
     // The checkup tips it while it is missing, and the tip's button is the same Add.
     let m = r.machine();
     let facts = crate::checkup::Facts { not_in_library: true, ..crate::checkup::Facts::default() };
@@ -616,7 +630,8 @@ fn the_quick_panel_is_found_by_its_package_name_and_installed_through_decky() {
     assert_eq!((row.str_at("act"), row.str_at("button")), (Some("panel-guide"), Some("How")));
     let d = parse(&u.act("panel-guide", "", "")).unwrap();
     let items = d.get("dialog").unwrap().get("items").unwrap().as_array().to_vec();
-    assert_eq!(items.len(), 5);
+    assert_eq!(items.len(), 6);
+    assert_eq!(d.get("dialog").unwrap().get("guide").and_then(Json::as_bool), Some(true));
     assert!(items.iter().any(|i| i.str_at("line") == Some("https://github.com/Ravenor907/TurbineHub/releases/latest/download/TurbineHub-Decky.zip")));
     assert!(items[2].str_at("line").unwrap().contains("Install Plugin from URL"));
     assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some(""));
@@ -640,4 +655,132 @@ fn the_quick_panel_is_found_by_its_package_name_and_installed_through_decky() {
     let package = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../decky/package.json")).unwrap();
     assert_eq!(parse(&package).unwrap().str_at("name"), Some(store::PANEL_PACKAGE));
     done("panel");
+}
+
+#[test]
+fn games_that_run_come_first_and_a_game_opens_on_play() {
+    let mut u = ui("order", HANDHELD);
+    let j = parse(&u.page("games", "")).unwrap();
+    // Apex won't run here: it goes to the end, so the list's first highlight is a game that plays.
+    let list = side(&j);
+    assert_eq!(list.last(), Some(&"Apex Legends"));
+    assert_eq!(list[..2], ["Balatro", "Baldur's Gate 3"]);
+    assert_eq!(j.get("index").and_then(Json::as_f64), Some(0.0));
+    let first = &rows(&j)[0];
+    assert_eq!((first.str_at("title"), first.str_at("act"), first.str_at("arg")), (Some("Play"), Some("game"), Some("play|steam:2379780")));
+    // Pressing it asks Steam to start the game: never anything that restarts the machine.
+    let d = parse(&u.act("game", "play|steam:1086940", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().str_at("title"), Some("Play Baldur's Gate 3?"));
+    assert!(u.confirm().unwrap().steps.iter().all(|s| matches!(s, Step::Host(c) if c.iter().any(|a| a.starts_with("steam://rungameid/")))));
+    // Without Windows the page of a game that won't run never mentions restarting to it.
+    let mut tv = ui("order-tv", Preset::TvPc);
+    assert!(!tv.page("games", APEX).contains("Restart to Windows"));
+    done("order");
+    done("order-tv");
+}
+
+#[test]
+fn a_report_says_where_it_is() {
+    let mut u = ui("report", HANDHELD);
+    parse(&u.act("game", &format!("report|{BG3}"), "")).unwrap();
+    let plan = u.confirm().unwrap();
+    let dir = super::games::reports_dir(&u);
+    assert!(plan.done.contains(&dir.display().to_string()));
+    u.play_sample(&plan).unwrap();
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    done("report");
+}
+
+#[test]
+fn pages_show_what_a_confirmed_dialog_did() {
+    let mut u = ui("after", HANDHELD);
+    // A Proton pick: the page shows it in use, with Undo.
+    parse(&u.act("proton-pick", &format!("{BG3}|GE-Proton10-4"), "")).unwrap();
+    let plan = u.confirm().unwrap();
+    u.play_sample(&plan).unwrap();
+    let j = parse(&u.page("proton", BG3)).unwrap();
+    assert_eq!(rows(&j)[0].str_at("title"), Some("Starts with GE-Proton10-4"));
+    assert!(rows(&j).iter().any(|r| r.str_at("title") == Some("GE-Proton10-4") && r.str_at("badge") == Some("In use")));
+    assert!(rows(&j).iter().any(|r| r.str_at("act") == Some("proton-undo")));
+    // Back up now adds a snapshot; a restore leaves the Undo row.
+    u.installed.push(store::LUDUSAVI.into());
+    parse(&u.act("saves", &format!("backup|{BG3}"), "")).unwrap();
+    let plan = u.confirm().unwrap();
+    u.play_sample(&plan).unwrap();
+    let secs = sections(&parse(&u.page("saves", BG3)).unwrap());
+    assert_eq!(secs[1].0, "Snapshots \u{b7} 4");
+    let oldest = secs[1].1.last().unwrap().str_at("arg").unwrap().to_string();
+    parse(&u.act("saves", &oldest, "")).unwrap();
+    let plan = u.confirm().unwrap();
+    assert_eq!(plan.done, "Save restored. Undo is on this page.");
+    u.play_sample(&plan).unwrap();
+    assert!(titles(&sections(&parse(&u.page("saves", BG3)).unwrap())[0].1).contains(&"Undo the last restore"));
+    // An app updated: no "Update ready" any more, on its page, in the Store and on Home.
+    assert!(u.page("store-item", store::HEROIC).contains("Update ready"));
+    parse(&u.act("store-update", store::HEROIC, "")).unwrap();
+    let plan = u.confirm().unwrap();
+    u.play_sample(&plan).unwrap();
+    assert!(!u.page("store-item", store::HEROIC).contains("Update ready"));
+    assert!(u.updates.is_empty() && u.facts.updates.is_empty());
+    // An install is remembered as Turbine Hub's own, and Review changes offers to remove it.
+    parse(&u.act("store", "com.spotify.Client", "")).unwrap();
+    let plan = u.confirm().unwrap();
+    u.play_sample(&plan).unwrap();
+    assert!(store::is_installed(&u, "com.spotify.Client"));
+    assert!(rows(&parse(&u.page("changes", "")).unwrap()).iter().any(|r| r.str_at("act") == Some("store-remove") && r.str_at("arg") == Some("com.spotify.Client")));
+    done("after");
+}
+
+#[test]
+fn review_changes_lists_what_turbine_hub_did_in_the_players_folders() {
+    let mut u = ui("review", HANDHELD);
+    tool::set_proton_pick(&u.folder(), "1086940", Some(&u.ctx.home.join(".local/share/Steam/compatibilitytools.d/GE-Proton10-4"))).unwrap();
+    let j = parse(&u.page("changes", "")).unwrap();
+    let secs = sections(&j);
+    assert_eq!(secs.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["System changes, made with your password", "In your own folders, no password"]);
+    let own = &secs[1].1;
+    let acts: Vec<(&str, &str)> = own.iter().map(|r| (r.str_at("act").unwrap(), r.str_at("arg").unwrap())).collect();
+    assert!(acts.contains(&("tool", "remove")));
+    assert!(acts.contains(&("proton-pick", "steam:1086940|")));
+    assert!(acts.contains(&("open", "games|steam:1086940")));
+    assert!(acts.contains(&("agent", "")));
+    // Undo of a Proton pick goes back to Automatic, through the usual dialog.
+    let d = parse(&u.act("proton-pick", "steam:1086940|", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().str_at("title"), Some("Use Automatic for Baldur's Gate 3?"));
+    done("review");
+}
+
+#[test]
+fn installed_apps_open_from_their_page() {
+    let mut u = ui("open", HANDHELD);
+    let j = parse(&u.page("store-item", "com.discordapp.Discord")).unwrap();
+    let first = &rows(&j)[0];
+    assert_eq!((first.str_at("act"), first.str_at("button")), (Some("store-open"), Some("Open")));
+    let a = parse(&u.act("store-open", "com.discordapp.Discord", "")).unwrap();
+    let line: Vec<&str> = a.get("run").unwrap().as_array().iter().filter_map(Json::as_str).collect();
+    assert_eq!(line, vec!["flatpak-spawn", "--host", "flatpak", "run", "com.discordapp.Discord"]);
+    assert!(parse(&u.page("store-item", "com.spotify.Client")).unwrap().to_text().find("store-open").is_none());
+    assert!(parse(&u.act("store-open", "com.spotify.Client", "")).unwrap().get("run").is_none());
+    done("open");
+}
+
+#[test]
+fn screens_are_read_from_desktop_modes_settings_and_game_mode_is_told_where_to_go() {
+    let text = "\u{1b}[01;32mOutput: \u{1b}[0;0m1 eDP-1\n\tenabled\n\tModes:  0:1280x800@90*!  1:1280x800@60\n\tVrr: incapable\n\tHDR: incapable\nOutput: 2 DP-4\n\tenabled\n\tModes:  0:2560x1440@239.97!  1:2560x1440@59.95*\n\tVrr: Automatic\n\tHDR: disabled\n";
+    let s = crate::checkup::screens_from_kscreen(text);
+    assert_eq!(s.len(), 2);
+    assert_eq!((s[0].name.as_str(), s[0].hz, s[0].vrr.as_str(), s[0].hdr), ("eDP-1", Some(90), "", None));
+    assert_eq!((s[1].name.as_str(), s[1].hz, s[1].vrr.as_str(), s[1].hdr), ("DP-4", Some(60), "automatic", Some(false)));
+    // The PC's monitor page marks what is set now.
+    let mut u = ui("screens", Preset::Desktop);
+    let j = parse(&u.page("module:monitors", "")).unwrap();
+    let pick = |t: &str| rows(&j).into_iter().find(|r| r.str_at("title") == Some(t)).unwrap().get("index").and_then(Json::as_f64);
+    assert_eq!((pick("Variable refresh (VRR)"), pick("HDR")), (Some(1.0), Some(0.0)));
+    // Home's Switch leads to Steam's own settings in Game Mode, and to Monitors in Desktop Mode.
+    let item = crate::checkup::items(&u.machine(), &u.facts).into_iter().find(|i| i.id == "refresh").unwrap();
+    assert_eq!(item.action, ("Switch", "refresh-rate"));
+    assert!(parse(&u.act("checkup", "refresh-rate", "")).unwrap().get("dialog").is_some());
+    u.window = true;
+    assert_eq!(parse(&u.act("checkup", "refresh-rate", "")).unwrap().str_at("open"), Some("module:monitors"));
+    done("screens");
 }

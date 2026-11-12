@@ -69,7 +69,7 @@ use turbinehub_engine::json::{Json, quote};
 use turbinehub_engine::settings::Mode;
 use turbinehub_engine::sources;
 use turbinehub_engine::ui::plan::Ask;
-use turbinehub_engine::ui::{self, Plan, Step, Ui};
+use turbinehub_engine::ui::{self, Plan, Ui};
 
 pub struct HubRust {
     state: QString,
@@ -231,6 +231,11 @@ impl HubRust {
             if let Some(e) = f.efibootmgr {
                 ui.ctx.efibootmgr = e;
             }
+            if let Some(screens) = f.screens {
+                // The main outside screen's refresh now, for the checkup's "runs below what it can" tip.
+                ui.facts.current_hz = screens.iter().find(|x| !x.name.starts_with("eDP")).and_then(|x| x.hz);
+                ui.facts.screens = screens;
+            }
             let windows_here = ui.machine().drives.iter().any(|d| d.role == turbinehub_engine::hardware::DriveRole::Windows);
             ui.facts.not_in_library = ui::selftile::missing(ui);
             ui.facts.windows_not_brought = windows_here && !ui.settings().brought.iter().any(|b| b == "windows");
@@ -247,44 +252,10 @@ impl HubRust {
         }
     }
 
-    /// The steps that need the engine's own state, done here once everything else worked.
+    /// The steps that need the engine's own state, done once everything else worked, and what the screens know
+    /// about the host brought up to date (the engine decides both).
     fn finish(&mut self, plan: &Plan) -> Result<(), String> {
-        let now = turbinehub_engine::now();
-        for st in &plan.steps {
-            match st {
-                Step::Report { game } => {
-                    let name = turbinehub_engine::report::file_name(&now.to_string());
-                    let text = ui::games::report_text(&self.ui, game, &now.to_string());
-                    let file = self.ui.folder().join("reports").join(name);
-                    std::fs::create_dir_all(self.ui.folder().join("reports")).and_then(|_| std::fs::write(&file, text)).map_err(|e| format!("Couldn't write the report: {e}"))?;
-                }
-                Step::SaveSetup => {
-                    let file = ui::settings::setup_file(&self.ui);
-                    std::fs::create_dir_all(self.ui.folder()).and_then(|_| std::fs::write(&file, ui::settings::setup_json(&self.ui))).map_err(|e| format!("Couldn't save the setup: {e}"))?;
-                }
-                Step::Done { setup, brought } => {
-                    let mut s = self.ui.settings();
-                    if let Some(x) = setup.filter(|x| !s.setup_done.iter().any(|d| d == x)) {
-                        s.setup_done.push(x.to_string());
-                    }
-                    if let Some(x) = brought.filter(|x| !s.brought.iter().any(|d| d == x)) {
-                        s.brought.push(x.to_string());
-                    }
-                    let _ = s.save(&self.ui.ctx.config_home);
-                }
-                Step::SetupFinished { boost } => {
-                    let mut s = self.ui.settings();
-                    s.setup_done = turbinehub_engine::settings::SETUP_STEPS.iter().map(|x| x.to_string()).collect();
-                    s.game_boost = s.game_boost || *boost;
-                    let _ = s.save(&self.ui.ctx.config_home);
-                }
-                _ => {}
-            }
-        }
-        if !plan.done.is_empty() {
-            ui::note_activity(&self.ui.folder(), now, &plan.done);
-        }
-        Ok(())
+        self.ui.finish(plan)
     }
 }
 
@@ -344,8 +315,13 @@ impl qobject::Hub {
             return answer(&[("error", quote(p))]);
         }
         if self.rust().ui.sample {
-            // A made-up machine: nothing runs, the screens just carry on.
-            return answer(&[("toast", quote(&plan.done)), ("open", quote(&plan.then_open)), ("refresh", "true".into())]);
+            // A made-up machine: only what touches its own folders runs, and the screens carry on from there.
+            let result = self.as_mut().rust_mut().ui.play_sample(&plan);
+            self.as_mut().refresh_state();
+            return match result {
+                Ok(()) => answer(&[("toast", quote(&plan.done)), ("open", quote(&plan.then_open)), ("refresh", "true".into())]),
+                Err(why) => answer(&[("toast", quote(&why)), ("refresh", "true".into())]),
+            };
         }
         let st = self.rust().ui.settings();
         let job = Job { steps: plan.steps.clone(), password, home: self.rust().ui.ctx.home.clone(), folder: self.rust().ui.folder(), data: self.rust().ui.data.clone(), steam_running: self.rust().ui.steam_running, version: self.rust().ui.ctx.version.clone(), cache: self.rust().ui.cache.clone(), test_builds: st.test_builds };

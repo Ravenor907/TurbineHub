@@ -42,7 +42,7 @@ Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pas
 - Your Windows drive: found automatically, read only, never written. Copies Steam games into a SteamOS library (no re-download) and saves into the right Proton prefixes. Saves use Ludusavi's CLI with the Windows drive added as an "other Windows" root.
 - Your Windows apps: pick the Windows apps you use, get the SteamOS version of each in one install (Discord, MangoHud and MangoJuice for MSI Afterburner, Steam Input for DS4Windows, Xbox Cloud for the Xbox app, and so on).
 - TV and streaming: Netflix, YouTube, Disney+, Twitch, Plex as controller-ready tiles.
-- "Where's my...?": Windows things and where they are on SteamOS.
+- "Where's my...?": Windows things and where they are on SteamOS, and the glossary. VIEW (Help) on any page first explains that page and its buttons, with "Where's my...?" one press further.
 
 ### Games
 Per-game switches (FSR 4 upgrade, frame generation, Handheld mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, send a report), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
@@ -224,7 +224,7 @@ One JSON file, one entry per setting (a second change to the same setting update
 
 - The files under /etc are always written from the ledger, so the ledger and the files can't disagree, and a tampered ledger with an unlisted setting is refused when read.
 - Decky's entry keeps backups of any loader and unit that were there before, in `/var/lib/turbinehub/backup/`.
-- The app shows the ledger as **Settings, Review changes**: every change in plain words, with Undo.
+- The app shows the ledger as **Settings, Review changes**: every change in plain words, with Undo. Under it, the changes made in the player's own folders without the password (the launch tool, Proton picks, game switches, library tiles, the background helper's start-up entry, apps the Store installed), each with its Undo or its page.
 
 ### 4.6 SteamOS updates
 - Files in `/etc` and everything in `/var` survive.

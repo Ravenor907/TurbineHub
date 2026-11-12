@@ -24,11 +24,26 @@ impl State {
     }
 }
 
+/// Each item's title and line in Guided's words, by id: (title, line). The technical word stays in brackets where
+/// the player may meet it elsewhere, and Help's glossary explains it.
+const PLAIN: &[(&str, &str, &str)] = &[
+    ("zram", "More memory room for big games", "Squeezes what's in memory so big games have more room before they stutter, up to the size of your memory (zram)."),
+    ("swap", "Use that room sooner", "Moves what games don't need right now into the squeezed memory earlier and in small pieces, so games stay smooth."),
+    ("memory", "Smoother loading", "Fewer hitches while games load: files are written in smaller bursts and recently used ones stay ready."),
+    ("hugepages", "Faster memory for games", "Games reach their memory a little faster, without the short pauses of tidying it up in the background (huge pages)."),
+    ("splitlock", "No slowdowns for older games", "Some older games trip a safety check that slows them down on purpose (split lock). This turns the slowdown off."),
+    ("mapcount", "Room for very large games", "Lets a game keep more pieces of memory open. Some large games crash without it."),
+    ("ntsync", "Smoother Windows games (NTSync)", "A faster way for Windows games to keep their parts in step, used by the newest Proton versions."),
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub id: &'static str,
     pub title: &'static str,
     pub why: &'static str,
+    /// The same in Guided's words: what it does for the player, readable without the glossary.
+    pub plain_title: &'static str,
+    pub plain_why: &'static str,
     pub settings: Vec<Setting>,
     pub state: State,
     /// Takes effect at the next restart.
@@ -92,7 +107,8 @@ pub fn plan(root: &Path, ledger: &Ledger) -> Vec<Item> {
             } else {
                 State::Off
             };
-            Item { id, title, why, settings, state, restart }
+            let (plain_title, plain_why) = PLAIN.iter().find(|p| p.0 == id).map(|p| (p.1, p.2)).unwrap_or((title, why));
+            Item { id, title, why, plain_title, plain_why, settings, state, restart }
         })
         .collect()
 }

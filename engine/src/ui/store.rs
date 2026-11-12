@@ -72,7 +72,7 @@ fn panel_row(ui: &Ui) -> Json {
     if panel_installed(ui) {
         with(with(row("none", "", "info", PANEL_TITLE, "Readings and this game's switches in Steam's quick menu"), "badge", s("Installed")), "tone", s("ok"))
     } else {
-        let line = if decky_installed(ui) { "Readings and this game's switches in Steam's quick menu. Decky Loader installs it." } else { "Readings and this game's switches in Steam's quick menu. Needs Decky Loader." };
+        let line = if decky_installed(ui) { "Readings and this game's switches in Steam's quick menu. Not installed yet: a few steps in Decky Loader's settings." } else { "Readings and this game's switches in Steam's quick menu. Not installed yet: needs Decky Loader first." };
         with(row("panel-guide", "", "button", PANEL_TITLE, line), "button", s("How"))
     }
 }
@@ -125,6 +125,28 @@ pub fn tile_marker(url: &str) -> String {
 pub(crate) fn tile_added(ui: &Ui, t: &Tile) -> bool {
     let marker = tile_marker(t.url);
     crate::shortcuts::shortcut_files(&ui.ctx.home).iter().any(|f| std::fs::read(f).ok().and_then(|bytes| crate::shortcuts::parse(&bytes).ok()).is_some_and(|list| list.iter().any(|x| x.launch_options.contains(&marker))))
+}
+
+/// The apps Turbine Hub's Store installed itself: one id per line in Turbine Hub's folder. Review changes lists the
+/// ones still there.
+fn made_file(folder: &Path) -> std::path::PathBuf {
+    folder.join("store-installs")
+}
+
+pub fn made_by_hub(folder: &Path) -> Vec<String> {
+    std::fs::read_to_string(made_file(folder)).unwrap_or_default().lines().map(str::trim).filter(|l| APPS.iter().any(|a| a.id == *l)).map(String::from).collect()
+}
+
+/// Notes an install (`add`) or a removal of one of the Store's apps.
+pub fn note_made(folder: &Path, id: &str, add: bool) {
+    let mut list = made_by_hub(folder);
+    list.retain(|x| x != id);
+    if add {
+        list.push(id.to_string());
+    }
+    let text: String = list.iter().map(|x| format!("{x}\n")).collect();
+    let _ = std::fs::create_dir_all(folder);
+    let _ = crate::write_atomic(&made_file(folder), text.as_bytes());
 }
 
 pub(crate) fn is_installed(ui: &Ui, id: &str) -> bool {
@@ -402,6 +424,10 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
     if update {
         actions.push(with(with(with(with(row("store-update", a.id, "button", "Update", &if f.newest.is_empty() { "A newer version is ready".to_string() } else { format!("Version {} is ready", f.newest) }), "icon", s("refresh")), "button", s("Update")), "badge", s("Update ready")), "tone", s("warn")));
     }
+    // An update ready comes first; then the app itself.
+    if installed {
+        actions.push(with(with(row("store-open", a.id, "button", &format!("Open {}", a.name), "It opens on top of Turbine Hub"), "icon", s("external")), "button", s("Open")));
+    }
     // Remove sits under what the page says about the app, never where the highlight starts.
     let remove = if installed { vec![with(with(row("store-remove", a.id, "button", "Remove", "The app goes. Its own settings and files stay."), "icon", s("remove")), "button", s("Remove"))] } else { vec![] };
     let state = match (installed, f.version.is_empty()) {
@@ -437,8 +463,21 @@ pub(crate) fn item(ui: &mut Ui, arg: &str) -> Json {
     }
 }
 
+/// The command that starts an installed app on the host.
+pub fn open_line(id: &str) -> Vec<String> {
+    flatpak(&["run", id])
+}
+
 pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<Json> {
     match action {
+        // Starting an app changes nothing, so it needs no dialog: the app runs the line at once.
+        "store-open" => {
+            let a = APPS.iter().find(|a| a.id == arg)?;
+            if !is_installed(ui, a.id) {
+                return Some(toast(&format!("{} isn't installed.", a.name)));
+            }
+            Some(obj! {"toast": s(format!("Opening {}", a.name)), "run": super::arr(open_line(a.id).into_iter().map(s))})
+        }
         // "store" does what the app's state calls for; an app's own page asks for one thing by name.
         "store" | "store-update" | "store-remove" => {
             let a = APPS.iter().find(|a| a.id == arg)?;
@@ -520,16 +559,17 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 return Some(toast("The quick panel is installed already."));
             }
             let mut items = vec![
-                ("1", "Open Steam's quick menu, the plug icon, then the gear: Decky Loader's settings."),
-                ("2", "Under General, turn on Developer mode. A Developer page appears."),
-                ("3", "On the Developer page, pick Install Plugin from URL and type the address below."),
+                ("1", "Press the button with three dots (Steam's quick menu), pick the plug icon, then the gear at the top: Decky Loader's settings."),
+                ("2", "Under General, turn on Developer mode. It only adds a Developer page to Decky's settings; SteamOS doesn't change."),
+                ("3", "On the Developer page, pick Install Plugin from URL. Steam button and X brings up the keyboard."),
                 ("Address", PANEL_URL),
-                ("4", "Confirm. Turbine Hub shows under the plug icon."),
+                ("4", "Type the address, pick Install and confirm. Turbine Hub shows under the plug icon."),
+                ("Afterwards", "Turn Developer mode off again if you like. The quick panel stays."),
             ];
             if !decky_installed(ui) {
                 items.insert(0, ("First", "Install Decky Loader: its row here in Store, Decky plugins."));
             }
-            Some(guide("Get the Turbine Hub quick panel", "The quick panel puts Turbine Hub's readings and the running game's switches into Steam's quick menu. Decky Loader installs it itself, from Turbine Hub's newest release.", &items))
+            Some(guide("Get the Turbine Hub quick panel", "The quick panel puts Turbine Hub's readings and the running game's switches into Steam's quick menu. It isn't in Decky's own store, so Decky Loader installs it from an address: Turbine Hub's newest release. That takes a switch in Decky's settings and typing one address, a few minutes once.", &items))
         }
         "launcher-guide" => {
             let (_, name) = NSL.iter().find(|(id, _)| *id == arg)?;

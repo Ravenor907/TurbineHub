@@ -50,6 +50,8 @@ pub struct Facts {
     pub update: Option<String>,
     /// Decky plugins with a newer version, when the plugin store's list could be read.
     pub plugins: Option<Vec<String>>,
+    /// What Desktop Mode has each screen set to, when it could be asked (not in Game Mode).
+    pub screens: Option<Vec<turbinehub_engine::checkup::ScreenNow>>,
 }
 
 pub fn in_flatpak() -> bool {
@@ -323,6 +325,10 @@ fn local_facts(home: &Path, cache: &Path, helper_there: bool) -> Facts {
     f.sound = host_text(&["pactl", "list", "sinks"]).map(|t| agent::sinks(&t)).unwrap_or_default();
     f.sound_now = host_text(&["pactl", "get-default-sink"]).map(|t| t.trim().to_string()).unwrap_or_default();
     f.efibootmgr = host_text(&["efibootmgr"]);
+    // Desktop Mode's display settings know each screen's refresh, VRR and HDR; Game Mode has no such settings.
+    if !in_game_mode() {
+        f.screens = host_text(&["kscreen-doctor", "-o"]).map(|t| turbinehub_engine::checkup::screens_from_kscreen(&t)).filter(|v| !v.is_empty());
+    }
     let steam = home.join(".local/share/Steam");
     f.free_bytes = Command::new("df").args(["-B1", "--output=avail"]).arg(if steam.is_dir() { &steam } else { home }).output().ok().and_then(|o| String::from_utf8_lossy(&o.stdout).lines().nth(1).and_then(|l| l.trim().parse().ok()));
     // Without the helper there is no record, so nothing can have drifted.

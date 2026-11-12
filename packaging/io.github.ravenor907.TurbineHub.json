@@ -32,7 +32,7 @@
                 "env": {
                     "CARGO_HOME": "/run/build/turbinehub/cargo",
                     "CARGO_NET_OFFLINE": "true",
-                    "TURBINEHUB_VERSION": "0.2.1"
+                    "TURBINEHUB_VERSION": "0.3"
                 }
             },
             "build-commands": [

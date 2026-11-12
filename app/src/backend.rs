@@ -163,6 +163,8 @@ fn make_ui() -> Ui {
     let Some(preset) = preset else {
         let mut ui = Ui::new(real_ctx(), dir_from("XDG_CACHE_HOME", ".cache").join("turbinehub"));
         ui.data = data_dir();
+        // The helper this Turbine Hub came with, to tell when the one installed on the machine is older.
+        ui.helper_bundled = Some(PathBuf::from("/app/bin/turbinehub-helper")).filter(|p| p.is_file());
         // The lists that came with the app stand in until the first fetch, and what the background helper found
         // shows before the app has asked anything itself.
         for list in [&sources::ANTICHEAT, &sources::FIXES] {
@@ -190,6 +192,10 @@ fn make_ui() -> Ui {
     }
     if option("steam-running").is_some() {
         ui.steam_running = true;
+    }
+    // The lights in one of their states: another app setting them, closed again, open and ready for the test.
+    if let Some(state) = option("lights") {
+        ui.sample_lights(&state);
     }
     if option("no-tool").is_some() {
         ui.sample_without_tool();
@@ -269,6 +275,9 @@ impl HubRust {
             }
             if f.agent_on.is_some() {
                 ui.agent_on = f.agent_on;
+            }
+            if let Some(lights) = f.lights {
+                ui.set_host_lights(lights);
             }
             if let Some(e) = f.efibootmgr {
                 ui.ctx.efibootmgr = e;

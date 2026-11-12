@@ -73,6 +73,18 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("lighting-scrolled", "--page=module:lighting --keys=down,down,down,down,down,down,down,down,a --machine=handheld --mode=guided"),
     ("lighting-cards", "--page=module:lighting --keys=down,right,right,down --machine=handheld --mode=guided"),
     ("dialog-lighting", "--page=module:lighting --act=light-test: --machine=handheld --mode=guided"),
+    ("lighting-other-app", "--page=module:lighting --machine=handheld --mode=guided --lights=allyhub"),
+    ("lighting-other-huesync", "--page=module:lighting --machine=handheld --mode=guided --lights=huesync"),
+    ("dialog-lighting-other", "--page=module:lighting --act=light-rival:allyhub --machine=handheld --mode=guided --lights=allyhub"),
+    ("lighting-left-to-other", "--page=module:lighting --act=light:allyhub --machine=handheld --mode=guided --lights=allyhub"),
+    ("lighting-closed", "--page=module:lighting --machine=handheld --mode=veteran --lights=closed"),
+    ("dialog-lighting-open", "--page=module:lighting --act=light-test: --machine=handheld --mode=veteran --lights=closed"),
+    ("lighting-stuck", "--page=module:lighting --machine=handheld --mode=guided --lights=stuck"),
+    ("lighting-test", "--page=module:lighting --act=light-test: --machine=handheld --mode=guided --lights=open"),
+    ("lighting-test-veteran", "--page=module:lighting --act=light-test: --machine=handheld --mode=veteran --lights=open"),
+    ("dialog-lighting-check", "--page=module:lighting --act=light-report: --machine=handheld --mode=guided"),
+    ("home-lights-other", "--page=home --machine=handheld --mode=guided --lights=allyhub"),
+    ("home-lights-stuck", "--page=home --machine=handheld --mode=guided --lights=stuck"),
     ("power", "--page=module:power --machine=handheld --mode=veteran"),
     ("tuneup", "--page=module:tuneup --machine=handheld --mode=guided"),
     ("sleep", "--page=module:sleep --machine=handheld --mode=guided"),
@@ -294,6 +306,58 @@ impl Ui {
         w(&cd, "NonSteamLaunchers/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe", "MZ");
         let _ = fs::create_dir_all(cd.join("TheEAappLauncher/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/13.1"));
         let _ = crate::nsl::remember(&self.folder(), NSL_TAG);
+    }
+    /// A sample run with the lights in one of their states: "allyhub" (Ally Hub's agent is setting them too),
+    /// "huesync" (the plugin is installed and Decky Loader runs), "closed" (set up before, closed again), "stuck"
+    /// (opening them again didn't hold), "open" (set up and open, ready for the light test).
+    pub fn sample_lights(&mut self, state: &str) {
+        use super::lighting::{AllyHub, HostLights, Lighting};
+        use std::os::unix::fs::PermissionsExt;
+        let m = self.machine();
+        let folder = self.folder();
+        Lighting::load(&folder).save(&folder);
+        let rule = turbinehub_helper::policy::Access::Lighting.rule().to_string();
+        let mut host = HostLights { asked: true, rule: Some(rule), reapply: "enabled".into(), ..HostLights::default() };
+        let setup = |ui: &Ui| {
+            let mut l = ui.ledger();
+            l.record(Change::Set(crate::modules::lighting_access()), Vec::new(), crate::now() - 3600, "3.9.5");
+            w(&ui.ctx.root, crate::helper::LEDGER, &l.to_text());
+        };
+        let files = |ui: &Ui, mode: u32| {
+            for led in &m.rgb_leds {
+                for f in ["multi_intensity", "brightness"] {
+                    let _ = fs::set_permissions(ui.ctx.root.join("sys/class/leds").join(led).join(f), fs::Permissions::from_mode(mode));
+                }
+            }
+        };
+        match state {
+            "allyhub" => {
+                host.allyhub = Some(AllyHub { controller: "allyhub".into(), hid_method: "m6".into(), encoding: "hid".into() });
+                host.allyhub_agent = true;
+                setup(self);
+                files(self, 0o666);
+            }
+            "huesync" => {
+                w(&self.ctx.home, "homebrew/plugins/HueSync/plugin.json", "{\"name\":\"HueSync\"}");
+                host.decky_running = true;
+                setup(self);
+                files(self, 0o666);
+            }
+            "closed" | "stuck" => {
+                setup(self);
+                files(self, 0o644);
+                if state == "stuck" {
+                    let need: Vec<String> = crate::lights::driven(&self.ctx.root, &m.rgb_leds, "").iter().flat_map(crate::lights::needs).collect();
+                    let _ = super::lighting::check_open(&self.ctx.root, &folder, &need, false);
+                }
+            }
+            "open" => {
+                setup(self);
+                files(self, 0o666);
+            }
+            _ => {}
+        }
+        self.host_lights = host;
     }
     /// A sample run as if the internet were gone: the lists were fetched three days ago.
     pub fn sample_offline(&mut self) {

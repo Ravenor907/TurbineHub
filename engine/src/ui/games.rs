@@ -447,7 +447,7 @@ pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
         games,
         log: ui.ledger().entries.iter().map(|e| e.change.words()).collect(),
         launch: Vec::new(),
-        lighting: crate::lights::diagnostics(&ui.ctx.root).into_iter().chain(Some(format!("choices: {}", super::lighting::Lighting::load(&ui.folder()).to_json().trim()))).collect(),
+        lighting: super::lighting::report_lines(ui),
     })
 }
 

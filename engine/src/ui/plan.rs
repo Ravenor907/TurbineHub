@@ -26,6 +26,9 @@ pub enum Step {
     ResetUndo { pfx: PathBuf, app_id: String },
     /// Writes a report about one game into Turbine Hub's folder.
     Report { game: String },
+    /// Looks again after the helper opened the lights: these paths have to be open to the player now. Fails with
+    /// what is still closed and why, in plain words (`exact`: with the paths, for Veteran mode).
+    LightsCheck { need: Vec<String>, exact: bool },
     /// Saves the player's setup to the setup file.
     SaveSetup,
     /// Marks a first-run step or a Bring it over step as done once everything before it worked.
@@ -180,7 +183,12 @@ pub(crate) fn helper_plan(ui: &mut Ui, mut plan: Plan, settings: &[Setting]) -> 
 /// Puts the helper's install in front of a plan that needs it. A machine without a password gets one in the same
 /// dialog: it is typed twice, set first, then used once for the helper.
 pub(crate) fn with_helper(ui: &mut Ui, mut plan: Plan) -> Json {
-    if !helper::installed(&ui.ctx.root) {
+    if ui.helper_outdated() {
+        // The helper on the machine is from an older Turbine Hub: a new one only ever arrives with the password.
+        plan.steps.insert(0, Step::HelperInstall);
+        plan.ask = Ask::Current;
+        plan.items.push(("Your SteamOS password, asked once more".into(), "Turbine Hub's helper on this machine is from an older version and this needs the new one. Updating it takes the password, which is never stored.".into()));
+    } else if !helper::installed(&ui.ctx.root) {
         plan.steps.insert(0, Step::HelperInstall);
         if ui.facts.has_password == Some(false) {
             plan.steps.insert(0, Step::Done { setup: Some("password"), brought: None });

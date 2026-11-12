@@ -382,8 +382,11 @@ impl<R: Run> Sys<R> {
     /// Opens one hidraw interface for writing by everyone, when it is an ASUS lighting interface (see `hid`) and
     /// the player asked for the lighting access rule. Run by that rule's udev line for each ASUS hidraw device as it
     /// appears (at start, and again after a sleep that brings the controller back), and by `reapply`. Only the write
-    /// bit is added: nobody but root can read from the interface, so nothing typed or pressed can be seen through
-    /// it. Answers whether the interface was one of them.
+    /// bit is added, which is all the lighting commands need (output reports are written, feature reports go
+    /// through an ioctl that works on a node opened for writing): Turbine Hub never makes the interface readable,
+    /// so nothing typed or pressed can be seen through it because of this. Every other bit stays as it was: another
+    /// lighting app on the same machine (Ally Hub opens these interfaces for reading too) keeps what it set.
+    /// Answers whether the interface was one of them.
     pub fn hid_access(&self, name: &str) -> Result<bool, String> {
         if !hid::node_name_ok(name) {
             return Err("Not a hidraw device".into());
@@ -402,7 +405,7 @@ impl<R: Run> Sys<R> {
         if meta.file_type().is_symlink() || meta.is_dir() {
             return Err(format!("/dev/{name} isn't a device"));
         }
-        let mode = (meta.permissions().mode() & 0o7777 & !0o004) | 0o002;
+        let mode = (meta.permissions().mode() & 0o7777) | 0o002;
         fs::set_permissions(&node, fs::Permissions::from_mode(mode)).map_err(|e| io_err(&format!("open /dev/{name} for lighting"), e))?;
         Ok(true)
     }
@@ -412,7 +415,9 @@ impl<R: Run> Sys<R> {
     /// for the lighting access rule. The udev rule does the same as lights appear, but udev can be slow, and on some
     /// handhelds the controller service puts the files back as they were after a boot or a sleep; this runs when the
     /// rule is set, at every boot and after every wake. Only lights (folders under /sys/class/leds with a
-    /// multi_intensity file) and only those two files; links pointing out of /sys are refused.
+    /// multi_intensity file) and only those two files, plus the light's own "effect" and "mode" files where it has
+    /// them (a light left in an effect of its own ignores the colors written to it, so that has to be set back to
+    /// plain colors); links pointing out of /sys are refused.
     pub fn open_lights(&self) {
         if !matches!(self.ledger().map(|l| l.find_key(&Setting::Access { what: policy::Access::Lighting }.key()).is_some()), Ok(true)) {
             return;
@@ -424,7 +429,7 @@ impl<R: Run> Sys<R> {
             if !dir.join("multi_intensity").exists() {
                 continue;
             }
-            for f in ["multi_intensity", "brightness"] {
+            for f in ["multi_intensity", "brightness", "effect", "mode"] {
                 let Ok(real) = fs::canonicalize(dir.join(f)) else { continue };
                 if !real.starts_with(&sys) || !real.is_file() {
                     continue;

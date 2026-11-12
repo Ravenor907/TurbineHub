@@ -133,9 +133,11 @@ marked as such. Turn on all, or one at a time; Undo all puts it back.
 Any RGB light SteamOS shows (joystick rings, side lights, logos): Static, Breathe, Heartbeat, Color cycle, Wave,
 Strobe, Candle, Twinkle and Spiral, with twelve presets, speed, brightness, two colors, battery level colors that
 breathe while charging, a low battery flash, and a color or preset per game. The background helper plays the
-effects and brings them back after sleep. **Test lights** lights each zone and tells you what happened. On ASUS
-handhelds whose kernel can't drive the rings fully, Turbine Hub talks to the lighting chip directly. Prefer
-[HueSync](https://github.com/honjow/HueSync)? Turbine Hub steps aside.
+effects and brings them back after sleep. **Test lights** turns the lights red one way after another and asks what
+you see, then keeps the way that works. On ASUS handhelds whose kernel can't drive the rings fully, Turbine Hub
+talks to the lighting chip directly. Prefer [HueSync](https://github.com/honjow/HueSync) or Ally Hub? Turbine Hub
+says when one of them is setting the lights and steps aside if you like. **Lighting check** writes everything it
+sees of the lights into one text file to send with a problem.
 
 </details>
 

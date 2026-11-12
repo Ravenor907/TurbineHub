@@ -12,7 +12,7 @@
 //! give out light (`gamma`), the brightness slider follows how eyes see it (`dim`), and a one-color frame for the
 //! chip is a single message.
 
-use crate::lights_hid::{self, Chip};
+use crate::lights_hid::{self, Chip, Method, Mode, Show};
 use crate::ui::lighting::{self, Lighting, Look};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -21,6 +21,49 @@ pub type Rgb = (u8, u8, u8);
 
 /// Names of a color-file number that carries a whole color packed as 0xRRGGBB.
 const PACKED: &[&str] = &["rgb", "color", "colour"];
+
+/// How a packed color is written to the color file (Ally Hub's `LIGHT_ENCODINGS`). The guided test finds the one
+/// the real light shows right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Encoding {
+    /// 0xRRGGBB as a plain number, whatever `multi_max_intensity` says.
+    #[default]
+    Packed,
+    /// 0xBBGGRR as a plain number.
+    PackedBgr,
+    /// 0xRRGGBB written as hex text ("0xff0000"), the way HueSync writes these parts.
+    Hex,
+    /// 0xRRGGBB cut down to `multi_max_intensity` (known wrong on the Ally X; kept so Ally Hub's old choice loads).
+    Clamped,
+}
+
+impl Encoding {
+    pub fn key(self) -> &'static str {
+        match self {
+            Encoding::Packed => "packed",
+            Encoding::PackedBgr => "packed_bgr",
+            Encoding::Hex => "hex",
+            Encoding::Clamped => "clamped",
+        }
+    }
+    pub fn from_key(key: &str) -> Option<Encoding> {
+        [Encoding::Packed, Encoding::PackedBgr, Encoding::Hex, Encoding::Clamped].into_iter().find(|e| e.key() == key)
+    }
+}
+
+/// The encodings the guided test tries, in Ally Hub's order.
+pub const TEST_ENCODINGS: &[Encoding] = &[Encoding::Hex, Encoding::Packed, Encoding::PackedBgr];
+
+/// Is this a way to drive a light that Turbine Hub knows? "" (decide from the light's own files), "files",
+/// "files:<encoding>" or "chip:<route>".
+pub fn route_ok(route: &str) -> bool {
+    match route.split_once(':') {
+        None => route.is_empty() || route == "files",
+        Some(("files", enc)) => Encoding::from_key(enc).is_some(),
+        Some(("chip", m)) => lights_hid::method_of(m).is_some(),
+        _ => false,
+    }
+}
 
 /// One light as the kernel shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,8 +79,20 @@ pub struct Led {
     pub channel_max: Vec<u32>,
     /// The kernel caps packed colors at 255: written through the files, every color comes out blue.
     pub capped: bool,
-    /// The controller's lighting chip, used instead of the files when they can't show the colors.
+    /// The controller's lighting chip, used instead of the files: when they can't show the colors, or when the
+    /// guided test (or Ally Hub's saved choice) says the chip is what works.
     pub chip: Option<Chip>,
+    /// The lighting chip this light has, used or not.
+    pub found: Option<Chip>,
+    /// The chip route in use (`lights_hid::METHODS`).
+    pub method: &'static Method,
+    /// How packed colors are written to the color file.
+    pub encoding: Encoding,
+    /// The way was picked (the guided test, or Ally Hub's saved choice): it is never changed by itself.
+    pub fixed: bool,
+    /// The light's own effect files and the value that makes each show plain colors ("effect" to "static"): left
+    /// in a mode of its own, a light ignores the colors written to it. Ally Hub's `static_mode`.
+    pub modes: Vec<(String, String)>,
 }
 
 impl Led {
@@ -51,6 +106,14 @@ impl Led {
     fn dir(&self) -> String {
         format!("/sys/class/leds/{}", self.name)
     }
+    /// The way this light is driven, as a route ("files:hex", "chip:m6").
+    pub fn route(&self) -> String {
+        match &self.chip {
+            Some(_) => format!("chip:{}", self.method.key),
+            None if self.packed() => format!("files:{}", self.encoding.key()),
+            None => "files".into(),
+        }
+    }
 }
 
 fn read(root: &Path, abs: &str) -> String {
@@ -62,9 +125,73 @@ pub fn is_multicolor(root: &Path, name: &str) -> bool {
     !name.contains('/') && !name.contains("..") && root.join("sys/class/leds").join(name).join("multi_intensity").exists()
 }
 
-/// The lights among `names` (from `Machine::rgb_leds`) with what each can do.
+/// The lights among `names` (from `Machine::rgb_leds`) with what each can do, driven the way their own files say.
 pub fn leds(root: &Path, names: &[String]) -> Vec<Led> {
     names.iter().filter(|n| !n.contains('/') && !n.contains("..")).map(|n| led(root, n)).collect()
+}
+
+/// The lights Turbine Hub drives: those among `names` that have a color file now, each driven by `route` (the
+/// guided test's answer or Ally Hub's saved choice; "" leaves it to the light's own files). A name without a color
+/// file is no light Turbine Hub can set, so it is never driven, checked or asked to be opened.
+pub fn driven(root: &Path, names: &[String], route: &str) -> Vec<Led> {
+    let mut out: Vec<Led> = names.iter().filter(|n| is_multicolor(root, n)).map(|n| led(root, n)).collect();
+    for l in &mut out {
+        via(l, route);
+    }
+    out
+}
+
+/// Sets the way a light is driven. A chip route only counts for a light that has a chip, an encoding only for a
+/// light with packed colors.
+pub fn via(led: &mut Led, route: &str) {
+    match route.split_once(':') {
+        Some(("chip", m)) => {
+            if let (Some(m), Some(chip)) = (lights_hid::method_of(m), led.found.clone()) {
+                (led.chip, led.method, led.fixed) = (Some(chip), m, true);
+            }
+        }
+        Some(("files", enc)) => {
+            if let Some(enc) = Encoding::from_key(enc).filter(|_| led.packed()) {
+                (led.chip, led.encoding, led.fixed) = (None, enc, true);
+            }
+        }
+        None if route == "files" && !led.packed() => (led.chip, led.fixed) = (None, true),
+        _ => {}
+    }
+}
+
+/// The light the page previews and the checkup answers for: the one with the most parts, the first of them.
+pub fn main_light(leds: &[Led]) -> Option<&Led> {
+    let most = leds.iter().map(|l| l.zones).max()?;
+    leds.iter().find(|l| l.zones == most)
+}
+
+/// The ways the guided test tries on this light, in Ally Hub's order: the light's own files first (each encoding
+/// of a packed color, unless the kernel says it caps them), then every chip route worth trying.
+pub fn test_routes(led: &Led) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if !led.packed() {
+        out.push("files".into());
+    } else if !led.capped {
+        out.extend(TEST_ENCODINGS.iter().map(|e| format!("files:{}", e.key())));
+    }
+    if led.found.is_some() {
+        out.extend(lights_hid::TEST_METHODS.iter().map(|m| format!("chip:{m}")));
+    }
+    out
+}
+
+/// A route in a few words, for Veteran mode and reports.
+pub fn route_words(route: &str) -> String {
+    match route.split_once(':') {
+        Some(("chip", m)) => match lights_hid::method_of(m) {
+            Some(x) => format!("lighting chip, route {} ({})", x.key, x.name),
+            None => format!("lighting chip, route {m}"),
+        },
+        Some(("files", enc)) => format!("the light's files, colors as {enc}"),
+        _ if route == "files" => "the light's files".into(),
+        _ => "decided from the light's files".into(),
+    }
 }
 
 fn led(root: &Path, name: &str) -> Led {
@@ -76,27 +203,48 @@ fn led(root: &Path, name: &str) -> Led {
         channels = (0..count).flat_map(|_| ["red", "green", "blue"]).map(String::from).collect();
     }
     let channel_max: Vec<u32> = text("multi_max_intensity").split_whitespace().filter_map(|v| v.parse().ok()).collect();
-    let mut l = Led { name: name.to_string(), zones: 1, max: text("max_brightness").trim().parse().ok().filter(|v| *v > 0).unwrap_or(255), channels, channel_max, capped: false, chip: None };
+    let mut l = Led { name: name.to_string(), zones: 1, max: text("max_brightness").trim().parse().ok().filter(|v| *v > 0).unwrap_or(255), channels, channel_max, capped: false, chip: None, found: None, method: lights_hid::auto(), encoding: Encoding::Packed, fixed: false, modes: Vec::new() };
     l.zones = if l.packed() { l.channels.len() } else { (l.channels.len() / 3).max(1) };
     l.capped = l.packed() && l.channel_max.len() == l.channels.len() && l.channels.iter().zip(&l.channel_max).any(|(c, m)| PACKED.contains(&c.as_str()) && (1..=255).contains(m));
+    // Only a light with packed colors can be the rings behind an ASUS lighting chip.
+    if l.packed() {
+        l.found = lights_hid::find(root, name);
+    }
     if l.capped {
-        l.chip = lights_hid::find(root, name);
+        l.chip = l.found.clone();
+    }
+    for attr in ["effect", "mode"] {
+        let options: Vec<String> = text(&format!("{attr}_index")).split_whitespace().map(|o| o.trim_matches(['[', ']']).to_string()).collect();
+        if !root.join(dir.trim_start_matches('/')).join(attr).exists() {
+            continue;
+        }
+        if let Some(plain) = STATIC_MODES.iter().find_map(|want| options.iter().find(|o| o.eq_ignore_ascii_case(want))) {
+            l.modes.push((attr.to_string(), plain.clone()));
+        }
     }
     l
 }
+
+/// Names a light's own effect file gives to "show the color that is written" (Ally Hub's `STATIC_MODE_NAMES`).
+const STATIC_MODES: &[&str] = &["monocolor", "static", "solid", "direct", "custom", "single", "fixed", "steady"];
 
 /// Use the lighting chip for this light from now on: the kernel was seen cutting the colors down after a write
 /// (`capped_by_kernel`), on a machine whose files didn't say so. None when there is no chip to use.
 pub fn to_chip(root: &Path, led: &mut Led) -> bool {
     led.capped = true;
-    led.chip = lights_hid::find(root, &led.name);
+    led.found = lights_hid::find(root, &led.name);
+    led.chip = led.found.clone();
     led.chip.is_some()
+}
+
+/// The numbers in a color file's text, plain or hex. None when something in it isn't a number.
+pub fn numbers(text: &str) -> Option<Vec<u32>> {
+    text.split_whitespace().map(|v| if let Some(h) = v.strip_prefix("0x") { u32::from_str_radix(h, 16).ok() } else { v.parse().ok() }).collect()
 }
 
 /// Did the kernel keep what was written to a color file? False when it cut the packed colors down to 255.
 pub fn capped_by_kernel(written: &str, now: &str) -> bool {
-    let nums = |t: &str| t.split_whitespace().map(|v| if let Some(h) = v.strip_prefix("0x") { u32::from_str_radix(h, 16).ok() } else { v.parse().ok() }).collect::<Option<Vec<u32>>>();
-    match (nums(written), nums(now)) {
+    match (numbers(written), numbers(now)) {
         (Some(w), Some(n)) => w.len() == n.len() && w.iter().any(|v| *v > 255) && n.iter().all(|v| *v <= 255) && w != n,
         _ => false,
     }
@@ -105,16 +253,44 @@ pub fn capped_by_kernel(written: &str, now: &str) -> bool {
 /// May the background helper drive this light? True once the helper's lighting access rule is in effect. Asked of
 /// the files' own permissions, because inside the app's sandbox /sys is read only whatever they say.
 pub fn writable(root: &Path, led: &Led) -> bool {
+    closed(root, led).is_empty()
+}
+
+/// Exactly what this user has to be able to write for the way this light is driven: the chip's commands interface
+/// when the chip is used, the light's color and brightness files otherwise. Nothing else is needed: not other
+/// lights, not the chip's other interfaces (Dynamic Lighting off is best effort).
+pub fn needs(led: &Led) -> Vec<String> {
     match &led.chip {
-        Some(chip) => lights_hid::writable(root, chip),
-        None => files_writable(root, led),
+        Some(chip) => vec![chip.lighting.clone()],
+        None => vec![format!("{}/multi_intensity", led.dir()), format!("{}/brightness", led.dir())],
     }
 }
 
-fn files_writable(root: &Path, led: &Led) -> bool {
+/// Those of `paths` that are closed to this user, each with its state in a few words ("/dev/hidraw3 (mode 600)").
+pub fn closed_among(root: &Path, paths: &[String]) -> Vec<String> {
     use std::os::unix::fs::PermissionsExt;
-    let dir = root.join("sys/class/leds").join(&led.name);
-    ["multi_intensity", "brightness"].iter().all(|f| std::fs::metadata(dir.join(f)).is_ok_and(|m| m.permissions().mode() & 0o002 != 0))
+    paths
+        .iter()
+        .filter_map(|path| match std::fs::metadata(root.join(path.trim_start_matches('/'))).ok().map(|m| m.permissions().mode() & 0o777) {
+            None => Some(format!("{path} (missing)")),
+            Some(m) if m & 0o002 == 0 => Some(format!("{path} (mode {m:o})")),
+            Some(_) => None,
+        })
+        .collect()
+}
+
+/// What is still closed to this user for the way this light is driven.
+pub fn closed(root: &Path, led: &Led) -> Vec<String> {
+    closed_among(root, &needs(led))
+}
+
+/// Why things can still be closed right after the helper opened them, in plain words.
+pub fn closed_why(closed: &[String]) -> &'static str {
+    if closed.iter().any(|c| c.ends_with("(missing)")) {
+        "The light isn't there right now (the controller may be asleep or restarting). Try again in a moment."
+    } else {
+        "Something else on this system closes them again right after Turbine Hub opens them, usually the system's own controller service. A lighting report shows what."
+    }
 }
 
 /// What the lights should show now, besides the player's choices.
@@ -386,8 +562,14 @@ pub fn color_text(led: &Led, colors: &[Rgb]) -> String {
             let (r, g, b) = colors.get(zone.min(n - 1)).copied().unwrap_or((0, 0, 0));
             let max = if led.channel_max.len() == led.channels.len() { led.channel_max[i] } else { 0 };
             let scale = |v: u8| if max > 0 && max != 255 { (v as u32 * max + 127) / 255 } else { v as u32 };
+            let rgb = (r as u32) << 16 | (g as u32) << 8 | b as u32;
             match ch.as_str() {
-                c if PACKED.contains(&c) => ((r as u32) << 16 | (g as u32) << 8 | b as u32).to_string(),
+                c if PACKED.contains(&c) => match led.encoding {
+                    Encoding::Packed => rgb.to_string(),
+                    Encoding::PackedBgr => ((b as u32) << 16 | (g as u32) << 8 | r as u32).to_string(),
+                    Encoding::Hex => format!("0x{rgb:06x}"),
+                    Encoding::Clamped => if max > 0 { rgb.min(max) } else { rgb }.to_string(),
+                },
                 "red" => scale(r).to_string(),
                 "green" => scale(g).to_string(),
                 "blue" => scale(b).to_string(),
@@ -411,23 +593,69 @@ pub fn frame(scene: &Scene, leds: &[Led], t_ms: u64) -> Vec<(String, String)> {
     out
 }
 
+/// A light's own effect files that have to change for plain colors to show, as (path, value): only those this user
+/// may write and that say something else now. Best effort, as in Ally Hub: the colors are written either way.
+pub fn mode_writes(root: &Path, leds: &[Led]) -> Vec<(String, String)> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut out = Vec::new();
+    for led in leds.iter().filter(|l| !l.uses_chip()) {
+        for (attr, value) in &led.modes {
+            let path = format!("{}/{attr}", led.dir());
+            let file = root.join(path.trim_start_matches('/'));
+            let open = std::fs::metadata(&file).is_ok_and(|m| m.permissions().mode() & 0o002 != 0);
+            let now = std::fs::read_to_string(&file).unwrap_or_default();
+            if open && now.trim().trim_matches(['[', ']']) != value {
+                out.push((path, value.clone()));
+            }
+        }
+    }
+    out
+}
+
 /// What the lighting chip should do now.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChipLook {
-    /// These four colors, one per ring half.
+    /// These four colors, one per ring half, as a frame.
     Zones(Vec<Rgb>),
-    /// The chip's own rainbow spiral (smoother than frames, and the chip runs it by itself).
-    Spiral { speed: f64, ccw: bool },
+    /// One of the chip's own modes, which it then runs by itself.
+    Own(Show),
 }
 
-/// The chip's look for this moment. The chip's spiral has only three brightness steps, so below full brightness
-/// the spiral is drawn frame by frame instead, which dims smoothly.
-pub fn chip_frame(scene: &Scene, t_ms: u64) -> ChipLook {
-    let (lk, brightness) = scene.current();
-    if !scene.dark() && lk.effect == "Spiral" && lk.chip && brightness >= 98 {
-        return ChipLook::Spiral { speed: lk.speed, ccw: lk.ccw };
+/// A look as one of the chip's own modes (Ally Hub's `hid_effect_packets`): a plain color, its pulse for the
+/// effects that breathe, beat, flash or blend two colors, its rainbow for the color cycle, its spiral.
+fn own_show(lk: &Look, brightness: u32) -> Show {
+    let cols: Vec<Rgb> = lk.colors.iter().map(|c| gamma(*c, 1.0)).collect();
+    let first = cols.first().copied().unwrap_or((255, 255, 255));
+    let show = |mode: Mode, color: Rgb, color2: Rgb, speed: f64| Show { mode, color, color2, speed, level: lights_hid::level(brightness), direction: 0, zones: None };
+    match lk.effect.as_str() {
+        "Spiral" => Show { direction: lk.ccw as u8, ..show(Mode::Spiral, (0, 0, 0), (0, 0, 0), lk.speed) },
+        // The rainbow switch on a still light: the color wheel over the four halves.
+        "Static" if lk.rainbow => Show { zones: Some((0..4).map(|z| gamma(hsv(z as f64 / 4.0, 1.0), 1.0)).collect()), ..show(Mode::Solid, first, (0, 0, 0), 1.0) },
+        "Static" => show(Mode::Solid, first, (0, 0, 0), 1.0),
+        "Color cycle" => show(Mode::Rainbow, (255, 255, 255), (0, 0, 0), lk.speed),
+        "Breathe" | "Heartbeat" => show(Mode::Pulse, first, (0, 0, 0), lk.speed),
+        "Strobe" => show(Mode::Pulse, first, cols.get(1).copied().unwrap_or((0, 0, 0)), 2.0),
+        // Wave, candle and twinkle: the chip's two-color pulse is the closest match.
+        _ => show(Mode::Pulse, first, cols.get(1).copied().unwrap_or(first), lk.speed),
     }
-    ChipLook::Zones(drive(scene, 4, t_ms))
+}
+
+/// The chip's look for this moment on the route `m`. A route that can be animated gets frames, except for the
+/// chip's own rainbow spiral at full brightness (smoother than frames; it has only three brightness steps, so below
+/// full the spiral is drawn frame by frame, which dims smoothly). Any other route gets one of the chip's own modes.
+pub fn chip_frame(scene: &Scene, m: &Method, t_ms: u64) -> ChipLook {
+    let (lk, brightness) = scene.current();
+    let dark = scene.dark();
+    if !dark && lk.effect == "Spiral" && lk.chip && brightness >= 98 {
+        return ChipLook::Own(Show { level: 3, ..own_show(&lk, brightness) });
+    }
+    if m.commit_first {
+        return ChipLook::Zones(drive(scene, 4, t_ms));
+    }
+    if dark {
+        return ChipLook::Own(Show { level: 0, ..Show::solid((0, 0, 0)) });
+    }
+    ChipLook::Own(own_show(&lk, brightness))
 }
 
 /// Remembers what each file was last given, so a frame only writes what changed.
@@ -463,66 +691,59 @@ pub fn preview(l: &Lighting, game: &str, zones: usize, count: usize, step_ms: u6
         .collect()
 }
 
-/// The steps of Test lights: each part of the light red in turn with the others off, then the whole light green,
-/// then blue. (colors, milliseconds to hold them).
-pub fn test_steps(zones: usize) -> Vec<(Vec<Rgb>, u64)> {
-    let zones = zones.max(1);
-    let mut out: Vec<(Vec<Rgb>, u64)> = (0..zones).map(|z| ((0..zones).map(|i| if i == z { (255, 0, 0) } else { (0, 0, 0) }).collect(), 600)).collect();
-    out.push((vec![(0, 255, 0); zones], 600));
-    out.push((vec![(0, 0, 255); zones], 600));
-    out
-}
+/// The guided test's color: red on every part.
+pub const TEST_COLOR: Rgb = (255, 0, 0);
 
-/// What happened to one light during Test lights.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Tested {
-    /// Every step went out, and the kernel kept the colors (files) or the chip took them.
-    Sent,
-    /// The kernel cut the colors down: the light can show blue only through its files.
-    Capped,
-    /// Couldn't write: the one-time setup is missing, or the light went away.
-    Failed(String),
-}
-
-/// Test lights' result in plain words, one line per light.
-pub fn test_words(led: &Led, how: &Tested) -> String {
-    let parts = if led.zones == 1 { "The light".to_string() } else { format!("Each of the {} parts", led.zones) };
-    match (how, &led.chip) {
-        (Tested::Sent, Some(_)) => format!("{parts} lit up red in turn, then all green and blue, through the controller's lighting chip."),
-        (Tested::Sent, None) => format!("{parts} lit up red in turn, then all green and blue."),
-        (Tested::Capped, Some(_)) => "This system cuts the colors down to blue, so the lights now go through the controller's lighting chip instead.".into(),
-        (Tested::Capped, None) => "This system cuts the colors down to blue, and no lighting chip was found to send them to instead.".into(),
-        (Tested::Failed(why), _) => format!("The lights couldn't be set: {why}"),
-    }
-}
-
-/// Everything about the machine's lights, for problem reports: each LED's files, each ASUS lighting interface,
-/// and how Turbine Hub drives them.
-pub fn diagnostics(root: &Path) -> Vec<String> {
+/// Everything about the machine's lights, for problem reports: every LED folder with its files, their modes and
+/// what they hold, each ASUS HID interface with its usages and mode, and how Turbine Hub drives each light on
+/// `route` (the guided test's answer, Ally Hub's saved choice, or "").
+pub fn diagnostics(root: &Path, route: &str) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
     let mut out = Vec::new();
     let mut names: Vec<String> = std::fs::read_dir(root.join("sys/class/leds")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
     names.sort();
-    for name in names.iter().filter(|n| is_multicolor(root, n)) {
-        let l = led(root, name);
+    let mut plain = Vec::new();
+    for name in &names {
+        if !is_multicolor(root, name) {
+            plain.push(name.clone());
+            continue;
+        }
+        let mut l = led(root, name);
+        via(&mut l, route);
         let f = |file: &str| read(root, &format!("/sys/class/leds/{name}/{file}")).trim().chars().take(120).collect::<String>();
         let how = match &l.chip {
-            Some(c) => format!("lighting chip {} (Dynamic Lighting {})", c.lighting, c.dynamic.as_deref().unwrap_or("none")),
-            None if l.capped => "files, capped at 255 and no lighting chip found".into(),
+            Some(c) => format!("lighting chip {} (Dynamic Lighting {}), route {} ({})", c.lighting, c.dynamic.as_deref().unwrap_or("none"), l.method.key, l.method.name),
+            None if l.capped && !l.fixed => "files, capped at 255 and no lighting chip found".into(),
+            None if l.packed() => format!("files, colors as {}", l.encoding.key()),
             None => "files".into(),
         };
+        let shut = closed(root, &l);
         out.push(format!(
-            "{name}: zones {} index [{}] intensity [{}] max_intensity [{}] brightness {} of {}, {}, driven by {how}",
+            "{name}: zones {} index [{}] intensity [{}] max_intensity [{}] brightness {} of {}, {}, driven by {how}{}",
             l.zones,
             f("multi_index"),
             f("multi_intensity"),
             f("multi_max_intensity"),
             f("brightness"),
             f("max_brightness"),
-            if writable(root, &l) { "writable" } else { "not writable" }
+            if shut.is_empty() { "writable".to_string() } else { format!("not writable: {}", shut.join(", ")) },
+            if l.fixed { ", way picked" } else { "" }
         ));
+        // Every file in the light's folder: its mode and what it holds.
+        let dir = root.join("sys/class/leds").join(name);
+        let mut files: Vec<String> = std::fs::read_dir(&dir).map(|d| d.flatten().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        files.sort();
+        for file in files.iter().filter(|x| x.as_str() != "uevent").take(30) {
+            let mode = std::fs::metadata(dir.join(file)).map(|m| format!("{:o}", m.permissions().mode() & 0o777)).unwrap_or_else(|_| "?".into());
+            let value = std::fs::read_to_string(dir.join(file)).map(|v| v.trim().chars().take(100).collect::<String>()).unwrap_or_else(|_| "(unreadable)".into());
+            out.push(format!("  {name}/{file}: mode {mode}, holds [{value}]"));
+        }
     }
     if out.is_empty() {
         out.push("No multicolor lights".into());
+    }
+    if !plain.is_empty() {
+        out.push(format!("other LEDs (one color, never driven): {}", plain.join(", ")));
     }
     out.extend(lights_hid::describe(root));
     out
@@ -542,7 +763,7 @@ mod tests {
     }
 
     fn triple(name: &str, zones: usize, max: u32) -> Led {
-        Led { name: name.into(), zones, max, channels: (0..zones).flat_map(|_| ["red", "green", "blue"]).map(String::from).collect(), channel_max: Vec::new(), capped: false, chip: None }
+        Led { name: name.into(), zones, max, channels: (0..zones).flat_map(|_| ["red", "green", "blue"]).map(String::from).collect(), channel_max: Vec::new(), capped: false, chip: None, found: None, method: lights_hid::auto(), encoding: Encoding::Packed, fixed: false, modes: Vec::new() }
     }
 
     #[test]
@@ -715,11 +936,126 @@ mod tests {
         assert_eq!((frames.len(), frames[0].len()), (32, 4));
         assert!(frames.iter().all(|f| f.iter().all(|c| hex_rgb(c).is_some())));
         assert_ne!(frames[0], frames[16]);
-        let steps = test_steps(4);
-        assert_eq!(steps.len(), 6);
-        assert_eq!(steps[1].0, vec![(0, 0, 0), (255, 0, 0), (0, 0, 0), (0, 0, 0)]);
-        let ring = triple("r", 4, 255);
-        assert!(test_words(&ring, &Tested::Sent).starts_with("Each of the 4 parts lit up"));
-        assert!(test_words(&ring, &Tested::Capped).contains("no lighting chip"));
+    }
+
+    #[test]
+    fn packed_colors_take_every_encoding_ally_hub_knows() {
+        // Printed from Ally Hub's led_intensities for (255, 128, 1) on four packed parts capped at 255.
+        let mut led = Led { channels: vec!["rgb".into(); 4], channel_max: vec![255; 4], zones: 4, ..triple("ally:rgb:joystick_rings", 4, 255) };
+        let c = [(255, 128, 1); 4];
+        for (enc, want) in [(Encoding::Packed, "16744449 16744449 16744449 16744449"), (Encoding::PackedBgr, "98559 98559 98559 98559"), (Encoding::Hex, "0xff8001 0xff8001 0xff8001 0xff8001"), (Encoding::Clamped, "255 255 255 255")] {
+            led.encoding = enc;
+            assert_eq!(color_text(&led, &c), want, "{enc:?}");
+            assert_eq!(Encoding::from_key(enc.key()), Some(enc));
+        }
+        // Hex text reads back as numbers, so a kernel that cuts it down is still seen.
+        assert_eq!(numbers("0xff8001 7"), Some(vec![0xFF8001, 7]));
+        assert!(capped_by_kernel("0xff0000 0x00ff00", "255 255") && !capped_by_kernel("0xff0000", "16711680"));
+        assert_eq!(numbers("red"), None);
+        assert_eq!(TEST_ENCODINGS.iter().map(|e| e.key()).collect::<Vec<_>>(), ["hex", "packed", "packed_bgr"]);
+    }
+
+    #[test]
+    fn a_picked_way_is_used_and_only_what_it_needs_is_checked() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("turbinehub-lights-way-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        crate::lights_hid::tests::ally_x(&root);
+        // A keyboard backlight with a color file of its own, and a name that only looks like a light.
+        fake_led(&root, "asus::kbd_backlight", &[("multi_intensity", "0 0 0\n"), ("brightness", "0\n")]);
+        std::fs::create_dir_all(root.join("sys/class/leds/phantom:rgb:logo")).unwrap();
+        let names: Vec<String> = ["ally:rgb:joystick_rings", "asus::kbd_backlight", "phantom:rgb:logo", "../x"].iter().map(|s| s.to_string()).collect();
+        let mode = |p: &str, m: u32| std::fs::set_permissions(root.join(p), std::fs::Permissions::from_mode(m)).unwrap();
+        for f in ["multi_intensity", "brightness"] {
+            mode(&format!("sys/class/leds/ally:rgb:joystick_rings/{f}"), 0o644);
+            mode(&format!("sys/class/leds/asus::kbd_backlight/{f}"), 0o644);
+        }
+        mode("dev/hidraw3", 0o600);
+        // A name without a color file is never driven.
+        let auto = driven(&root, &names, "");
+        assert_eq!(auto.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["ally:rgb:joystick_rings", "asus::kbd_backlight"]);
+        let rings = main_light(&auto).unwrap();
+        assert_eq!((rings.name.as_str(), rings.route(), rings.fixed), ("ally:rgb:joystick_rings", "chip:m6".to_string(), false));
+        // Capped by its own files: only the chip routes are worth trying. Uncapped: the files come first.
+        assert_eq!(test_routes(rings), ["chip:m6", "chip:m7", "chip:m8", "chip:m2", "chip:m3"]);
+        let open = Led { capped: false, ..rings.clone() };
+        assert_eq!(test_routes(&open), ["files:hex", "files:packed", "files:packed_bgr", "chip:m6", "chip:m7", "chip:m8", "chip:m2", "chip:m3"]);
+        assert_eq!(test_routes(&auto[1]), ["files"]);
+        // The chip path needs the chip's node and nothing else: the rings' files stay closed and don't count.
+        assert_eq!(closed(&root, rings), ["/dev/hidraw3 (mode 600)"]);
+        mode("dev/hidraw3", 0o602);
+        assert!(closed(&root, rings).is_empty());
+        // Ally Hub's route, or the test's: used as said, on the chip's own node.
+        let m3 = driven(&root, &names, "chip:m3");
+        assert_eq!((m3[0].route(), m3[0].fixed, m3[0].method.name), ("chip:m3".to_string(), true, "Full handshake"));
+        // The keyboard has no chip, so a chip route leaves it on its files.
+        assert_eq!((m3[1].route(), m3[1].fixed), ("files".to_string(), false));
+        // The files path needs the two files of that light, and says which is closed.
+        let hex = driven(&root, &names, "files:hex");
+        assert_eq!((hex[0].route(), hex[0].uses_chip(), hex[0].encoding), ("files:hex".to_string(), false, Encoding::Hex));
+        assert_eq!(closed(&root, &hex[0]), ["/sys/class/leds/ally:rgb:joystick_rings/multi_intensity (mode 644)", "/sys/class/leds/ally:rgb:joystick_rings/brightness (mode 644)"]);
+        mode("sys/class/leds/ally:rgb:joystick_rings/multi_intensity", 0o666);
+        assert_eq!(closed(&root, &hex[0]).len(), 1);
+        std::fs::remove_file(root.join("sys/class/leds/ally:rgb:joystick_rings/brightness")).unwrap();
+        assert_eq!(closed(&root, &hex[0]), ["/sys/class/leds/ally:rgb:joystick_rings/brightness (missing)"]);
+        assert!(closed_why(&closed(&root, &hex[0])).contains("isn't there") && closed_why(&["/dev/hidraw3 (mode 600)".to_string()]).contains("closes them again"));
+        // Junk is no route.
+        for (r, ok) in [("", true), ("files", true), ("files:hex", true), ("chip:m8", true), ("chip:m9", false), ("files:rot13", false), ("hid", false), ("chip:", false)] {
+            assert_eq!(route_ok(r), ok, "{r}");
+        }
+        // The report lists every file of a light with its mode, the other LEDs by name, and the way in use.
+        let d = diagnostics(&root, "chip:m7");
+        assert!(d[0].starts_with("ally:rgb:joystick_rings: zones 4") && d[0].contains("route m7 (Slow and steady)") && d[0].ends_with("way picked"), "{d:?}");
+        assert!(d.iter().any(|l| l == "  ally:rgb:joystick_rings/multi_intensity: mode 666, holds [255 255 255 255]"), "{d:?}");
+        assert!(d.iter().any(|l| l.starts_with("asus::kbd_backlight: zones 1") && l.contains("not writable: /sys/class/leds/asus::kbd_backlight/multi_intensity (mode 644)")), "{d:?}");
+        assert!(d.iter().any(|l| l == "other LEDs (one color, never driven): phantom:rgb:logo"), "{d:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_light_left_in_its_own_effect_is_put_back_to_plain_colors() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("turbinehub-lights-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        fake_led(&root, "x:rgb:ring", &[("multi_intensity", "0 0 0\n"), ("brightness", "0\n"), ("effect", "rainbow\n"), ("effect_index", "Static breathing rainbow\n"), ("mode_index", "wave\n")]);
+        let led = leds(&root, &["x:rgb:ring".into()]);
+        assert_eq!(led[0].modes, [("effect".to_string(), "Static".to_string())]);
+        // Closed to this user: left alone. Open: written once, until it says so itself.
+        std::fs::set_permissions(root.join("sys/class/leds/x:rgb:ring/effect"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(mode_writes(&root, &led).is_empty());
+        std::fs::set_permissions(root.join("sys/class/leds/x:rgb:ring/effect"), std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert_eq!(mode_writes(&root, &led), [("/sys/class/leds/x:rgb:ring/effect".to_string(), "Static".to_string())]);
+        std::fs::write(root.join("sys/class/leds/x:rgb:ring/effect"), "[Static]\n").unwrap();
+        assert!(mode_writes(&root, &led).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_chip_gets_frames_on_routes_that_animate_and_its_own_modes_on_the_others() {
+        let m6 = lights_hid::method_of("m6").unwrap();
+        let m3 = lights_hid::method_of("m3").unwrap();
+        let breathe = lit("Breathe");
+        assert!(matches!(chip_frame(&scene(&breathe), m6, 500), ChipLook::Zones(z) if z.len() == 4));
+        // The same look on Ally Hub's default route: the chip's pulse in the corrected color, at its top step.
+        let ChipLook::Own(show) = chip_frame(&scene(&breathe), m3, 500) else { panic!("frames on m3") };
+        assert_eq!((show.mode, show.color, show.color2, show.level), (Mode::Pulse, gamma((0xE0, 0x56, 0x4A), 1.0), (0, 0, 0), 3));
+        // It doesn't change from frame to frame, so it is sent once.
+        assert_eq!(chip_frame(&scene(&breathe), m3, 9000), ChipLook::Own(show));
+        // The brightness slider becomes the chip's steps; off is a plain black at step 0.
+        let dim = Lighting { brightness: 30, ..lit("Static") };
+        assert!(matches!(chip_frame(&scene(&dim), m3, 0), ChipLook::Own(s) if s.mode == Mode::Solid && s.level == 1));
+        let off = Lighting { brightness: 0, ..lit("Static") };
+        assert_eq!(chip_frame(&scene(&off), m3, 0), ChipLook::Own(Show { level: 0, ..Show::solid((0, 0, 0)) }));
+        let modes = |effect: &str| match chip_frame(&scene(&lit(effect)), m3, 0) {
+            ChipLook::Own(s) => s.mode,
+            ChipLook::Zones(_) => panic!("{effect}"),
+        };
+        assert_eq!([modes("Static"), modes("Heartbeat"), modes("Color cycle"), modes("Wave"), modes("Strobe"), modes("Candle"), modes("Twinkle"), modes("Spiral")], [Mode::Solid, Mode::Pulse, Mode::Rainbow, Mode::Pulse, Mode::Pulse, Mode::Pulse, Mode::Pulse, Mode::Spiral]);
+        // The chip's own spiral at full brightness, on any route; drawn frame by frame below it where frames work.
+        let spiral = PRESETS.iter().find(|p| p.name == "RGB Spiral").unwrap().apply(&Lighting { brightness: 100, ..Lighting::default() });
+        assert!(matches!(chip_frame(&scene(&spiral), m6, 0), ChipLook::Own(s) if s.mode == Mode::Spiral && s.level == 3));
+        let lower = Lighting { brightness: 60, ..spiral };
+        assert!(matches!(chip_frame(&scene(&lower), m6, 0), ChipLook::Zones(_)));
+        assert!(matches!(chip_frame(&scene(&lower), m3, 0), ChipLook::Own(s) if s.mode == Mode::Spiral && s.level == 2));
     }
 }

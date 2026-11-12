@@ -28,6 +28,12 @@ pub struct Facts {
     pub controller_wake_on: bool,
     /// Lighting choices are saved but the lights aren't open to the background helper (`lighting::locked`).
     pub lights_locked: bool,
+    /// With `lights_locked` once the setup was done: what happened, in plain words. Empty before the setup.
+    pub lights_note: String,
+    /// With `lights_locked`: opening them again was tried and didn't hold, so the same fix isn't offered again.
+    pub lights_stuck: bool,
+    /// Another app that is setting the lights at the same time as Turbine Hub (Ally Hub, HueSync), by name.
+    pub lights_rival: Option<String>,
     /// What Desktop Mode's display settings say each screen is set to now (empty in Game Mode, where they can't
     /// be asked).
     pub screens: Vec<ScreenNow>,
@@ -145,7 +151,17 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
         out.push(item("drive", Level::Look, "drive", "A drive isn't used for games".into(), format!("{}, empty. Add it to Steam as a game library?", if d.model.is_empty() { gb(d.bytes) } else { d.model.clone() }), ("Set up", "drives")));
     }
     if f.lights_locked {
-        out.push(item("lights", Level::Look, "light", "The lights need their one-time setup".into(), "Until then your look can't reach them. It's asked once and lasts through restarts and sleep.", ("Fix", "light-test")));
+        out.push(if f.lights_stuck {
+            // Opening them again didn't hold: asking for the same fix again would go on forever.
+            item("lights", Level::Look, "light", "The lights stay closed".into(), f.lights_note.clone(), ("Lighting check", "light-report"))
+        } else if !f.lights_note.is_empty() {
+            item("lights", Level::Look, "light", "The lights are closed again".into(), f.lights_note.clone(), ("Open them", "light-test"))
+        } else {
+            item("lights", Level::Look, "light", "The lights need their one-time setup".into(), "Until then your look can't reach them. It's asked once and lasts through restarts and sleep.", ("Fix", "light-test"))
+        });
+    }
+    if let Some(name) = &f.lights_rival {
+        out.push(item("lights-rival", Level::Look, "light", format!("{name} is setting the lights too"), "Two apps setting the same lights overwrite each other many times a second. Pick who runs them.", ("Choose", "lighting")));
     }
     if !f.updates.is_empty() {
         let n = f.updates.len();

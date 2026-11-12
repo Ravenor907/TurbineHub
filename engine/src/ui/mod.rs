@@ -120,6 +120,12 @@ pub struct Ui {
     pub updates_own: bool,
     /// The app asked the helper about drift itself in this run.
     pub drift_own: bool,
+    /// What the host says about the lights: Ally Hub's saved choice, who else is setting them, the helper's rule.
+    pub host_lights: lighting::HostLights,
+    /// The helper that came with this Turbine Hub (inside the Flatpak), to tell when the installed one is older.
+    pub helper_bundled: Option<PathBuf>,
+    /// The guided light test while it runs.
+    pub light_test: Option<lighting::LightTest>,
     pub(crate) picked: BTreeMap<String, BTreeSet<String>>,
     pub(crate) pending: Option<Plan>,
     pub(crate) home_all: bool,
@@ -129,7 +135,8 @@ pub struct Ui {
 impl Ui {
     pub fn new(ctx: Ctx, cache: PathBuf) -> Ui {
         let data = ctx.config_home.join("turbinehub/data");
-        Ui { data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
+        let host_lights = lighting::HostLights::load(&ctx.config_home.join("turbinehub"));
+        Ui { host_lights, helper_bundled: None, light_test: None, data, steam_started: None, agent_on: None, updates_own: false, drift_own: false, ctx, sample: false, window: false, facts: Facts::default(), installed: Vec::new(), updates: Vec::new(), windows_mount: None, cache, readings: None, sound: Vec::new(), sound_now: String::new(), decky_tag: None, nsl_tag: None, steam_running: false, free_bytes: None, offline: false, update: None, picked: BTreeMap::new(), pending: None, home_all: false, filter: BTreeMap::new() }
     }
 
     pub fn machine(&self) -> Machine {
@@ -188,9 +195,30 @@ impl Ui {
         before != (self.facts.clone(), self.updates.clone(), self.update.clone())
     }
 
-    /// The facts for the checkup, with the newer Turbine Hub among them.
+    /// The facts for the checkup, with the newer Turbine Hub and the state of the lights among them.
     pub(crate) fn facts_now(&self) -> Facts {
-        Facts { app_update: self.update.clone(), lights_locked: lighting::locked(&self.ctx.root, &self.folder(), &self.machine()), ..self.facts.clone() }
+        let shut = lighting::locked(self, &self.machine());
+        let l = lighting::Lighting::load(&self.folder());
+        // Another app setting the lights only matters once Turbine Hub drives them too.
+        let rival = if lighting::Lighting::saved(&self.folder()) && l.left_to().is_none() { lighting::rivals(&self.host_lights, &self.ctx.home).first().map(|r| r.name.to_string()) } else { None };
+        Facts { app_update: self.update.clone(), lights_locked: shut.is_some(), lights_stuck: shut.as_ref().is_some_and(|s| s.stuck), lights_note: shut.as_ref().map(|s| lighting::shut_words(self, s)).unwrap_or_default(), lights_rival: rival, ..self.facts.clone() }
+    }
+
+    /// Is the helper on this machine older than the one this Turbine Hub came with? Its file differs then. The
+    /// app update never replaces it by itself: a new helper only arrives with the player's password.
+    pub fn helper_outdated(&self) -> bool {
+        let Some(new) = &self.helper_bundled else { return false };
+        let installed = self.ctx.root.join(crate::helper::BIN.trim_start_matches('/'));
+        match (std::fs::read(new), std::fs::read(installed)) {
+            (Ok(a), Ok(b)) => a != b,
+            _ => false,
+        }
+    }
+
+    /// Takes in what the host said about the lights, and keeps it for the background helper.
+    pub fn set_host_lights(&mut self, host: lighting::HostLights) {
+        host.save(&self.folder());
+        self.host_lights = host;
     }
 
     /// What the top bar and the window need at every start and after every change.
@@ -374,5 +402,7 @@ mod tests;
 mod tests_play;
 #[cfg(test)]
 mod tests_background;
+#[cfg(test)]
+mod tests_lights;
 #[cfg(test)]
 mod tests_nsl;

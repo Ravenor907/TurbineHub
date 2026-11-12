@@ -327,6 +327,6 @@ fn the_lighting_page_puts_the_look_first_and_the_checkup_offers_the_setup() {
     assert_eq!(rows(&parse(&u.page("module:lighting", "")).unwrap()).len(), 1);
     // A lighting report has what Turbine Hub sees of the lights.
     let text = super::games::report_text(&u, super::lighting::REPORT, "now");
-    assert!(text.contains("Lighting:\n  ally:rgb:joystick_rings: zones 4"), "{text}");
+    assert!(text.contains("Lighting:\n  way in use: ") && text.contains("\n  ally:rgb:joystick_rings: zones 4") && text.contains("lights left to HueSync"), "{text}");
     done("looks");
 }

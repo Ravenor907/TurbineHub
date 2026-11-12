@@ -305,6 +305,14 @@ fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
     assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --settle --action=add --subsystem-match=hidraw"));
     // Open at once, without waiting for udev; nothing outside /sys changes.
     assert_eq!([led_mode(&sys, "multi_intensity"), led_mode(&sys, "brightness")], [0o666, 0o666]);
+    // A light's own effect file is opened with them (so it can be set back to plain colors), other files never.
+    for (f, want) in [("effect", 0o666), ("trigger", 0o644)] {
+        let path = sys.p(&format!("/sys/class/leds/ally:rgb:joystick_rings/{f}"));
+        fs::write(&path, "x\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        sys.open_lights();
+        assert_eq!(led_mode(&sys, f), want, "{f}");
+    }
     assert_eq!(fs::metadata(sys.p("/secret")).unwrap().permissions().mode() & 0o777 & 0o002, 0);
     // Closed again (a sleep, the controller service): the boot and wake run opens them again.
     fs::set_permissions(sys.p("/sys/class/leds/ally:rgb:joystick_rings/multi_intensity"), fs::Permissions::from_mode(0o644)).unwrap();
@@ -316,6 +324,10 @@ fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
     assert_eq!(sys.hid_access("hidraw3"), Ok(false));
     // Written by anyone, read by root only.
     assert_eq!([mode(&sys, "hidraw0"), mode(&sys, "hidraw1"), mode(&sys, "hidraw2"), mode(&sys, "hidraw3")], [0o602, 0o602, 0o600, 0o600]);
+    // An interface another lighting app opened for reading and writing (Ally Hub's rule sets 0666) keeps that.
+    fs::set_permissions(sys.p("/dev/hidraw1"), fs::Permissions::from_mode(0o664)).unwrap();
+    assert_eq!(sys.hid_access("hidraw1"), Ok(true));
+    assert_eq!(mode(&sys, "hidraw1"), 0o666);
     for bad in ["../hidraw0", "hidraw0/../../etc", "event0", "sda"] {
         assert!(sys.hid_access(bad).is_err(), "{bad}");
     }

@@ -296,12 +296,15 @@ fn power_and_wake_controls_stay_inside_the_helper_lists() {
 #[test]
 fn lighting_is_clamped_saved_and_written_per_ring() {
     let l = Lighting::parse(r##"{"effect":"Disco","speed":900,"brightness":-4,"color":"red","rainbow":true}"##);
-    assert_eq!((l.effect.as_str(), l.speed, l.brightness, l.color.as_str(), l.rainbow), ("Static", 100, 0, "#C99E52", true));
+    assert_eq!((l.effect.as_str(), l.speed, l.brightness, l.color.as_str(), l.rainbow), ("Static", 100, 0, "#6FAE8C", true));
+    // A saved color stays what it is, brass included.
+    assert_eq!(Lighting::parse(r##"{"color":"#C99E52"}"##).color, "#C99E52");
+    assert_eq!((super::machine::COLORS[0], super::machine::COLORS[1]), (("Jade", "#6FAE8C"), ("Brass", "#C99E52")));
     assert_eq!(Lighting::parse(&l.to_json()), l);
     let mut u = ui("light", HANDHELD, Mode::Guided);
     u.act("light", "effect", "8");
     u.act("light", "brightness", "40");
-    u.act("light", "color", "1");
+    u.act("light", "color", "2");
     let l = Lighting::load(&u.folder());
     assert_eq!((l.effect.as_str(), l.brightness, l.rgb()), ("Spiral", 40, (0xE0, 0x56, 0x4A)));
     let writes = light_writes(&u.ctx.root, &u.machine(), &l);

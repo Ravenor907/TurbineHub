@@ -17,7 +17,9 @@ impl Ui {
                 Step::Report { game } => {
                     let dir = games::reports_dir(self);
                     let text = games::report_text(self, game, &now.to_string());
-                    std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(crate::report::file_name(&now.to_string())), text)).map_err(|e| format!("Couldn't write the report: {e}"))?;
+                    // The lighting check has one file of its own, replaced each time, so it is easy to find.
+                    let file = if game == super::lighting::REPORT { super::lighting::report_file(self) } else { dir.join(crate::report::file_name(&now.to_string())) };
+                    std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(file, text)).map_err(|e| format!("Couldn't write the report: {e}"))?;
                 }
                 Step::SaveSetup => {
                     let file = settings::setup_file(self);

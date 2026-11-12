@@ -53,6 +53,8 @@ pub struct Facts {
     pub plugins: Option<Vec<String>>,
     /// What Desktop Mode has each screen set to, when it could be asked (not in Game Mode).
     pub screens: Option<Vec<turbinehub_engine::checkup::ScreenNow>>,
+    /// What the host says about the lights (Ally Hub's saved choice, who else sets them, the helper's rule).
+    pub lights: Option<ui::lighting::HostLights>,
 }
 
 pub fn in_flatpak() -> bool {
@@ -251,6 +253,8 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
         }
         // These need the engine's state: the interface thread does them once the rest worked.
         Step::Report { .. } | Step::SaveSetup | Step::Done { .. } | Step::SetupFinished { .. } | Step::Choice { .. } => Ok(()),
+        // The helper just opened the lights: are they open now? Says what isn't, and why, when not.
+        Step::LightsCheck { need, exact } => ui::lighting::check_open(Path::new("/"), &job.folder, need, *exact),
     }
 }
 
@@ -374,7 +378,23 @@ fn local_facts(home: &Path, cache: &Path, helper_there: bool) -> Facts {
     // systemctl says "disabled", or nothing at all for a unit that isn't there, with a failing exit code: only its
     // word counts.
     f.agent_on = run(&agent::unit_question(), None).ok().map(|o| agent::unit_enabled(&o.stdout));
+    f.lights = Some(host_lights(home));
     f
+}
+
+/// What the host says about the lights, from the engine's read-only questions: Ally Hub's settings file (the
+/// sandbox can't see ~/.config), whether its agent and Decky Loader run, the helper's lighting rule and its unit.
+/// Nothing here is ever written. systemctl answers with a failing exit code for anything but "active", so only
+/// its word counts; a file that isn't there is simply no answer.
+fn host_lights(home: &Path) -> ui::lighting::HostLights {
+    let q = ui::lighting::host_questions(home);
+    let ask = |i: usize| {
+        let line: Vec<String> = ["flatpak-spawn", "--host"].iter().map(|x| x.to_string()).chain(q[i].iter().cloned()).collect();
+        run(&line, None).ok()
+    };
+    let file = |i: usize| ask(i).filter(|o| o.code == 0).map(|o| o.stdout);
+    let word = |i: usize| ask(i).map(|o| o.stdout).unwrap_or_default();
+    ui::lighting::HostLights::from_host(file(0).as_deref(), &word(1), &word(2), file(3).as_deref(), &word(4))
 }
 
 /// Where a gathering reads and writes.

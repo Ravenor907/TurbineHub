@@ -473,7 +473,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 }
             })
         }
-        "light" | "light-test" | "light-report" => super::lighting::act(ui, action, arg, value),
+        "light" | "light-test" | "light-report" | "light-answer" | "light-rival" => super::lighting::act(ui, action, arg, value),
         "monitor" => {
             let (what, name) = arg.split_once('|')?;
             let d = m.connected_displays().find(|d| output_name(&d.connector) == name)?;

@@ -1,10 +1,14 @@
 //! Turbine Hub's engine: machine detection, setup steps, checks and the change ledger. It has no interface of its
 //! own: the app, the background agent and the `--json` command line call into it.
 
+pub mod fake;
 pub mod games;
+pub mod hardware;
+pub mod helper;
 pub mod heroic;
 pub mod inflate;
 pub mod json;
+pub mod modules;
 pub mod net;
 pub mod report;
 pub mod selfupdate;
@@ -12,6 +16,7 @@ pub mod sha256;
 pub mod shortcuts;
 pub mod steam;
 pub mod steam_art;
+pub mod tuneup;
 pub mod vdf;
 pub mod zip;
 

@@ -8,3 +8,5 @@ repository.workspace = true
 
 # No outside dependencies on purpose: fewer moving parts, nothing to audit, and it builds anywhere.
 [dependencies]
+# The helper's own types (settings, the change record), shared so the app writes exactly what the helper accepts.
+turbinehub-helper = { path = "../helper" }

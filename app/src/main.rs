@@ -93,7 +93,13 @@ fn main() {
     }
     // A question from the quick panel or a script: answered without the window.
     if let Some(i) = args.iter().position(|a| a == "--json") {
-        let (text, code) = turbinehub_engine::cli::run(args.get(i + 1).map(String::as_str).unwrap_or(""), &backend::real_ctx());
+        let job = args.get(i + 1).map(String::as_str).unwrap_or("");
+        let mut ctx = backend::real_ctx();
+        // Whether Windows is there to restart into is in the firmware's boot entries, which only the host can list.
+        if turbinehub_engine::cli::reads_boot_entries(job) {
+            ctx.efibootmgr = run::host_text(&["efibootmgr"]).unwrap_or_default();
+        }
+        let (text, code) = turbinehub_engine::cli::run(job, &ctx);
         println!("{text}");
         std::process::exit(code);
     }

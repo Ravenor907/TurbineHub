@@ -95,7 +95,9 @@ fn time_limit(line: &[String]) -> Duration {
 }
 
 /// Runs one command line to its end, with `stdin` typed into it when given. Stopped (TERM, then KILL) when it runs
-/// past its time limit.
+/// past its time limit. The helper runs as root, so nothing here can stop it: the app only stops waiting for it.
+/// That is why the helper keeps its own, shorter limits (its wait for the lock and every program it starts), and
+/// ends by itself well inside this one.
 pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
     let limit = time_limit(line);
     let mut c = command(line).ok_or("Nothing to run")?;

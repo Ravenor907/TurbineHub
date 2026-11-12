@@ -10,6 +10,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub const STATE_DIR: &str = "/var/lib/turbinehub";
 pub const BIN: &str = "/var/lib/turbinehub/bin/turbinehub-helper";
@@ -28,6 +29,108 @@ pub const MODPROBE: &str = "/usr/bin/modprobe";
 pub const EFIBOOTMGR: &str = "/usr/bin/efibootmgr";
 pub const CURL: &str = "/usr/bin/curl";
 
+/// The version of Turbine Hub this helper came with (0.5, 0.6 ...), set by the build like the app's. `status`
+/// answers it, so a check on a real machine can tell which helper is installed.
+pub const VERSION: &str = match option_env!("TURBINEHUB_VERSION") {
+    Some(v) => v,
+    None => "dev",
+};
+
+/// How long a job waits for another job to finish before it gives up. Shorter than the app's own two minutes.
+pub const LOCK_WAIT: Duration = Duration::from_secs(60);
+
+/// One job at a time: takes the helper's lock, waiting up to `wait` for the job that holds it. A job never waits
+/// for ever: one that can't get the lock says the helper is busy and ends, so nothing that holds the lock (another
+/// job, or a job started by this one) can leave the app, or the start of the machine, hanging. The lock file is
+/// root's alone: a file everyone may read is a file any program may lock, and that would stop every job. Answers
+/// None when there is no lock file to take (before the first install).
+pub fn take_lock(dir: &Path, wait: Duration) -> Result<Option<fs::File>, String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Ok(f) = fs::OpenOptions::new().create(true).truncate(false).write(true).mode(0o600).open(dir.join("lock")) else { return Ok(None) };
+    // A lock file from an older helper was readable by everyone.
+    let _ = f.set_permissions(fs::Permissions::from_mode(0o600));
+    let start = Instant::now();
+    loop {
+        match f.try_lock() {
+            Ok(()) => return Ok(Some(f)),
+            Err(fs::TryLockError::WouldBlock) if start.elapsed() < wait => std::thread::sleep(Duration::from_millis(20)),
+            Err(fs::TryLockError::WouldBlock) => return Err("Turbine Hub's helper is busy with another change. Try again in a moment.".into()),
+            Err(fs::TryLockError::Error(_)) => return Ok(None),
+        }
+    }
+}
+
+/// The number of a recorded change from the caller's JSON: a whole number from 1 up, nothing else. (1.9 is not
+/// change 1.)
+pub fn change_id(j: &Json) -> Result<u64, String> {
+    let v = j.get("id").and_then(Json::as_f64).ok_or("id is missing")?;
+    if v.fract() != 0.0 || !(1.0..9.0e15).contains(&v) {
+        return Err("id must be a whole number".into());
+    }
+    Ok(v as u64)
+}
+
+/// How long one program may run. Downloads carry their own limit (curl's --max-time) and get a little more than
+/// it; a service may take its full start or stop time; everything else answers in moments.
+pub fn time_limit(prog: &str, args: &[&str]) -> Duration {
+    let own = args.iter().position(|a| *a == "--max-time").and_then(|i| args.get(i + 1)?.parse::<u64>().ok());
+    Duration::from_secs(match (prog, own) {
+        (CURL, Some(secs)) => secs + 30,
+        (SYSTEMCTL, _) => 100,
+        _ => 20,
+    })
+}
+
+/// Runs one program to its end, or stops it when it runs past `limit`: a program that waits for something that
+/// never comes (udev waiting for this very helper, a service that never starts) must not keep the helper, and the
+/// lock it holds, for ever.
+pub fn run_limited(prog: &str, args: &[&str], limit: Duration) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let name = prog.rsplit('/').next().unwrap_or(prog);
+    let mut child = std::process::Command::new(prog)
+        .args(args)
+        .env_clear()
+        .env("PATH", "/usr/bin")
+        .env("LANG", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Couldn't run {prog} ({e})"))?;
+    // Both pipes are read as the program writes, so a program that prints a lot never waits on a full pipe.
+    fn reader(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let (out, err) = (reader(child.stdout.take()), reader(child.stderr.take()));
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(if start.elapsed() < Duration::from_millis(200) { 2 } else { 20 })),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{name} took too long, so it was stopped"));
+            }
+            Err(e) => return Err(format!("Couldn't wait for {prog} ({e})")),
+        }
+    };
+    let text = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
+    if status.success() {
+        Ok(text)
+    } else {
+        let err = String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned();
+        Err(format!("{name} failed: {}", err.trim().lines().last().unwrap_or("no message")))
+    }
+}
+
 /// Runs one program with fixed arguments and returns what it printed. Never a shell.
 pub trait Run {
     fn run(&mut self, prog: &str, args: &[&str]) -> Result<String, String>;
@@ -38,21 +141,7 @@ pub struct Host;
 
 impl Run for Host {
     fn run(&mut self, prog: &str, args: &[&str]) -> Result<String, String> {
-        let out = std::process::Command::new(prog)
-            .args(args)
-            .env_clear()
-            .env("PATH", "/usr/bin")
-            .env("LANG", "C")
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map_err(|e| format!("Couldn't run {prog} ({e})"))?;
-        let text = String::from_utf8_lossy(&out.stdout).into_owned();
-        if out.status.success() {
-            Ok(text)
-        } else {
-            let err = String::from_utf8_lossy(&out.stderr);
-            Err(format!("{} failed: {}", prog.rsplit('/').next().unwrap_or(prog), err.trim().lines().last().unwrap_or("no message")))
-        }
+        run_limited(prog, args, time_limit(prog, args))
     }
 }
 
@@ -166,6 +255,55 @@ impl<R: Run> Sys<R> {
         Ok(full)
     }
 
+    /// Where a recorded /sys value is now. The kernel numbers its hwmon folders afresh at every start (hwmon6 one
+    /// day, hwmon5 the next), so a value recorded under one number is looked for under the number the same device
+    /// has today. Anything else is where it was recorded.
+    fn sysfs_now(&self, path: &str) -> String {
+        if self.p(path).exists() {
+            return path.to_string();
+        }
+        let Some((dir, rest)) = path.split_once("/hwmon/hwmon") else { return path.to_string() };
+        let Some((_, file)) = rest.split_once('/') else { return path.to_string() };
+        let mut found: Vec<String> = fs::read_dir(self.p(&format!("{dir}/hwmon")))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("hwmon"))
+            .map(|n| format!("{dir}/hwmon/{n}/{file}"))
+            .filter(|p| policy::sysfs_rule(p).is_some() && self.p(p).exists())
+            .collect();
+        if found.len() == 1 { found.remove(0) } else { path.to_string() }
+    }
+
+    /// The wake switch (power/wakeup) of every USB device plugged in now with this maker and product id.
+    fn wake_files(&self, vendor: &str, product: &str) -> Vec<String> {
+        let mut out: Vec<String> = fs::read_dir(self.p("/sys/bus/usb/devices"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| {
+                let id = |f: &str| fs::read_to_string(e.path().join(f)).map(|t| t.trim().to_ascii_lowercase()).unwrap_or_default();
+                id("idVendor") == vendor && id("idProduct") == product
+            })
+            .map(|e| format!("/sys/bus/usb/devices/{}/power/wakeup", e.file_name().to_string_lossy()))
+            .filter(|p| policy::sysfs_rule(p).is_some() && self.sysfs_target(p).is_ok())
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Sets the wake switch of those devices now. The rule under /etc is what lasts (udev applies it when a device
+    /// appears); this is so Apply and Undo show at once, without a replug or a restart. A device that can't wake
+    /// the machine at all refuses the write, which is fine.
+    fn set_wake_now(&self, vendor: &str, product: &str, word: &str) {
+        for f in self.wake_files(vendor, product) {
+            if let Ok(t) = self.sysfs_target(&f) {
+                let _ = fs::write(t, word);
+            }
+        }
+    }
+
     fn check_live(&self, s: &Setting) -> Result<(), String> {
         if let Setting::Sysfs { path, value } = s {
             self.sysfs_target(path)?;
@@ -190,6 +328,8 @@ impl<R: Run> Sys<R> {
             Setting::Sysctl { key, .. } => self.read(&Self::proc_path(key)).map(|t| t.trim().to_string()),
             Setting::Sysfs { path, .. } => self.read(path).map(|t| live_word(&t)),
             Setting::Service { unit, .. } => Some(self.service_enabled(unit).to_string()),
+            // Whether the device may wake the machine now, so Undo can say so again. Not plugged in: nothing to keep.
+            Setting::Wake { vendor, product, .. } => self.wake_files(vendor, product).first().and_then(|f| self.read(f)).map(|t| t.trim().to_string()).filter(|v| WAKE_WORDS.contains(&v.as_str())),
             _ => None,
         };
         let mut out: Vec<(String, String)> = v.map(|v| vec![(if matches!(s, Setting::Service { .. }) { "enabled" } else { "value" }.to_string(), v)]).unwrap_or_default();
@@ -230,12 +370,17 @@ impl<R: Run> Sys<R> {
         match s {
             Setting::Sysctl { key, value } => fs::write(self.p(&Self::proc_path(key)), format!("{value}\n")).map_err(|e| io_err(&format!("set {key}"), e)),
             Setting::Sysfs { path, value } => {
+                let path = &self.sysfs_now(path);
                 let t = self.sysfs_target(path)?;
                 fs::write(t, value).map_err(|e| io_err(&format!("set {path}"), e))
             }
             Setting::Service { unit, enabled } => self.set_service(unit, *enabled),
             Setting::Module { name } => self.run.run(MODPROBE, &[name]).map(|_| ()),
-            Setting::Wake { .. } | Setting::Access { .. } | Setting::Zram { .. } => Ok(()),
+            Setting::Wake { vendor, product, wake } => {
+                self.set_wake_now(vendor, product, if *wake { "enabled" } else { "disabled" });
+                Ok(())
+            }
+            Setting::Access { .. } | Setting::Zram { .. } => Ok(()),
         }
     }
 
@@ -243,15 +388,27 @@ impl<R: Run> Sys<R> {
     fn restore_live(&mut self, e: &Entry) -> Result<(), String> {
         match &e.change {
             Change::Set(Setting::Sysctl { key, .. }) => self.restore_sysctl(key, e),
-            Change::Set(Setting::Sysfs { path, .. }) => match e.before("value") {
-                Some(v) => self.sysfs_target(path).and_then(|t| fs::write(t, v).map_err(|er| io_err(&format!("set {path}"), er))),
-                None => Ok(()),
-            },
+            Change::Set(Setting::Sysfs { path, .. }) => {
+                let path = &self.sysfs_now(path);
+                match e.before("value") {
+                    // The device is gone (a battery, a card, a USB device taken out): there is nothing to put back,
+                    // and the change must still leave the record instead of staying there for ever.
+                    Some(_) if !self.p(path).exists() => Ok(()),
+                    Some(v) => self.sysfs_target(path).and_then(|t| fs::write(t, v).map_err(|er| io_err(&format!("set {path}"), er))),
+                    None => Ok(()),
+                }
+            }
             Change::Set(Setting::Service { unit, .. }) => {
                 let was = e.before("enabled") == Some("true");
                 self.set_service(unit, was)
             }
-            Change::Set(Setting::Module { .. } | Setting::Wake { .. } | Setting::Access { .. } | Setting::Zram { .. }) => Ok(()),
+            Change::Set(Setting::Wake { vendor, product, .. }) => {
+                if let Some(v) = e.before("value").filter(|v| WAKE_WORDS.contains(v)) {
+                    self.set_wake_now(vendor, product, v);
+                }
+                Ok(())
+            }
+            Change::Set(Setting::Module { .. } | Setting::Access { .. } | Setting::Zram { .. }) => Ok(()),
             Change::Decky { .. } => self.undo_decky(e),
         }
     }
@@ -351,8 +508,13 @@ impl<R: Run> Sys<R> {
         for e in &l.entries {
             let ok = match &e.change {
                 Change::Set(Setting::Sysctl { key, value }) => self.read(&Self::proc_path(key)).map(|t| t.trim() == value.to_string()).unwrap_or(false),
-                Change::Set(Setting::Sysfs { path, value }) => self.read(path).map(|t| live_word(&t) == *value).unwrap_or(false),
+                Change::Set(Setting::Sysfs { path, value }) => self.read(&self.sysfs_now(path)).map(|t| live_word(&t) == *value).unwrap_or(false),
                 Change::Set(Setting::Service { unit, enabled }) => self.service_enabled(unit) == *enabled,
+                // Every such device plugged in now (none is fine: the rule waits for it).
+                Change::Set(Setting::Wake { vendor, product, wake }) => self.wake_files(vendor, product).iter().all(|f| match self.read(f).as_deref().map(str::trim) {
+                    Some(v) if WAKE_WORDS.contains(&v) => (v == "enabled") == *wake,
+                    _ => true,
+                }),
                 _ => true,
             };
             if !ok {
@@ -461,7 +623,7 @@ impl<R: Run> Sys<R> {
     pub fn status(&self) -> Result<String, String> {
         let l = self.ledger()?;
         let items: Vec<String> = l.entries.iter().map(|e| format!("{{\"id\":{},\"words\":{},\"applied\":{}}}", e.id, quote(&e.change.words()), e.applied)).collect();
-        Ok(format!("{{\"version\":{},\"changes\":[{}]}}", quote(env!("CARGO_PKG_VERSION")), items.join(",")))
+        Ok(format!("{{\"version\":{},\"changes\":[{}]}}", quote(VERSION), items.join(",")))
     }
 
     // ---------------------------------------------------------------- Decky Loader
@@ -617,9 +779,18 @@ impl<R: Run> Sys<R> {
     pub fn log(&self, line: &str) {
         use std::io::Write;
         if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(self.p(LOG)) {
-            let _ = writeln!(f, "{} {line}", self.now);
+            let _ = writeln!(f, "{} {}", self.now, log_text(line));
         }
     }
+}
+
+/// The two words a wake switch takes.
+const WAKE_WORDS: [&str; 2] = ["enabled", "disabled"];
+
+/// One line for the log: whatever the caller sent (a job name, a path in a refusal) stays on that one line, with
+/// nothing in it that could pass for a line of its own, and never longer than a line should be.
+pub fn log_text(line: &str) -> String {
+    line.chars().take(400).map(|c| if c.is_control() { ' ' } else { c }).collect()
 }
 
 /// The share-of-memory setting that stands in for a byte limit while that limit is off (reads 0), and the kernel's

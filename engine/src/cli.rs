@@ -108,6 +108,13 @@ pub fn take_open_request(config_home: &Path, now: u64) -> Option<String> {
 
 pub const JOBS: &[&str] = &["version", "machine", "readings", "checkup", "cards", "tuneup", "changes", "glossary", "panel", "game", "open"];
 
+/// Does this job's answer depend on the firmware's boot entries (is Windows there to restart into)? The caller
+/// asks the host for them (`efibootmgr`) for these jobs only and puts them in `Ctx::efibootmgr`: without them the
+/// answer says there is no Windows, whatever is on the drives.
+pub fn reads_boot_entries(job: &str) -> bool {
+    matches!(job.split('=').next(), Some("machine" | "cards"))
+}
+
 fn refuse(words: &str) -> (String, i32) {
     (format!("{{\"ok\":false,\"error\":{}}}", quote(words)), 2)
 }
@@ -224,6 +231,20 @@ mod tests {
         assert_eq!(code, 2);
         assert!(text.contains("\"ok\":false"));
         let _ = std::fs::remove_dir_all(&c.root);
+    }
+
+    #[test]
+    fn jobs_that_show_windows_are_the_ones_given_the_boot_entries() {
+        let with = ctx("boot", Preset::Desktop);
+        let without = Ctx { root: with.root.clone(), home: with.home.clone(), config_home: with.config_home.clone(), efibootmgr: String::new(), version: with.version.clone() };
+        for job in JOBS.iter().copied().filter(|j| !["game", "open", "readings"].contains(j)) {
+            assert_eq!(run(job, &with).0 != run(job, &without).0, reads_boot_entries(job), "{job}");
+        }
+        // Without them a machine with Windows on a drive reads as one without.
+        let j = parse(&run("machine", &without).0).unwrap();
+        assert_eq!(j.get("machine").unwrap().get("windows").and_then(Json::as_bool), Some(false));
+        assert!(!reads_boot_entries("game=1245620") && !reads_boot_entries("panel") && reads_boot_entries("machine"));
+        let _ = std::fs::remove_dir_all(&with.root);
     }
 
     #[test]

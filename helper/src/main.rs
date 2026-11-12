@@ -67,10 +67,7 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
     match verb {
         "status" => sys.status().map(|s| format!(",\"status\":{s}")),
         "apply" => sys.apply(Setting::from_json(&arg_json(arg)?)?).map(|id| format!(",\"id\":{id}")),
-        "undo" => {
-            let id = arg_json(arg)?.get("id").and_then(Json::as_f64).ok_or("id is missing")? as u64;
-            sys.undo(id).map(|w| format!(",\"undone\":{}", quote(&w)))
-        }
+        "undo" => sys.undo(ops::change_id(&arg_json(arg)?)?).map(|w| format!(",\"undone\":{}", quote(&w))),
         "undo-all" => sys.undo_all().map(|_| String::new()),
         "verify" => sys.verify().map(|d| format!(",\"drift\":{}", list(&d))),
         "reapply" => sys.reapply().map(|f| format!(",\"fixed\":{}", list(&f))),
@@ -115,14 +112,13 @@ fn main() {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let mut sys = Sys { root: PathBuf::from("/"), run: Host, now };
     // One job at a time. The lighting rule's own start (hid-access, run by udev while another job may be telling
-    // udev to look again) never waits: it only reads the record and opens one device.
-    let _lock = (verb != "hid-access" && euid() == 0 && Path::new(ops::STATE_DIR).is_dir())
-        .then(|| fs::OpenOptions::new().create(true).truncate(false).write(true).open(Path::new(ops::STATE_DIR).join("lock")).ok())
-        .flatten()
-        .inspect(|f| {
-            let _ = f.lock();
-        });
-    let result = run(verb, args.get(2), &mut sys);
+    // udev to look again) never waits: it only reads the record and opens one device. No job waits for ever: when
+    // the lock stays taken, it says the helper is busy and ends.
+    let lock = if verb != "hid-access" && euid() == 0 && Path::new(ops::STATE_DIR).is_dir() { ops::take_lock(Path::new(ops::STATE_DIR), ops::LOCK_WAIT) } else { Ok(None) };
+    let result = match &lock {
+        Ok(_) => run(verb, args.get(2), &mut sys),
+        Err(busy) => Err(busy.clone()),
+    };
     let caller = std::env::var("PKEXEC_UID").or_else(|_| std::env::var("SUDO_UID")).unwrap_or_else(|_| "boot".into());
     match &result {
         Ok(_) => sys.log(&format!("{caller} {verb} ok")),

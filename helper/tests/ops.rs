@@ -345,3 +345,159 @@ fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
     let _ = fs::remove_dir_all(&sys.root);
 }
 
+
+#[test]
+fn a_wake_rule_shows_at_once_and_undo_gives_the_wake_back() {
+    let mut sys = machine("wake");
+    let dev = |sys: &Sys<Fake>, port: &str, vendor: &str, product: &str| {
+        let d = sys.p(&format!("/sys/bus/usb/devices/{port}"));
+        fs::create_dir_all(d.join("power")).unwrap();
+        fs::write(d.join("idVendor"), format!("{vendor}\n")).unwrap();
+        fs::write(d.join("idProduct"), format!("{product}\n")).unwrap();
+        fs::write(d.join("power/wakeup"), "enabled\n").unwrap();
+    };
+    dev(&sys, "1-2", "046d", "c548");
+    dev(&sys, "1-3", "046d", "c548");
+    dev(&sys, "1-4", "3554", "fa09");
+    let wake = |sys: &Sys<Fake>, port: &str| read(sys, &format!("/sys/bus/usb/devices/{port}/power/wakeup")).trim().to_string();
+    let id = sys.apply(set(r#"{"kind":"wake","vendor":"046d","product":"c548","wake":false}"#)).unwrap();
+    // Both receivers of that kind stop waking the machine now, not at the next replug; the other device is left.
+    assert_eq!([wake(&sys, "1-2"), wake(&sys, "1-3"), wake(&sys, "1-4")], ["disabled", "disabled", "enabled"]);
+    assert_eq!(sys.ledger().unwrap().entries[0].before("value"), Some("enabled"));
+    assert!(sys.verify().unwrap().is_empty());
+    // Something else switched one back on: the check says the change isn't in effect.
+    fs::write(sys.p("/sys/bus/usb/devices/1-3/power/wakeup"), "enabled\n").unwrap();
+    assert_eq!(sys.verify().unwrap(), vec!["USB device 046d:c548 can't wake the machine isn't in effect"]);
+    // Changing the rule keeps the first "before"; Undo gives the wake back and removes the rule.
+    assert_eq!(sys.apply(set(r#"{"kind":"wake","vendor":"046d","product":"c548","wake":false}"#)).unwrap(), id);
+    assert_eq!(wake(&sys, "1-3"), "disabled");
+    sys.undo(id).unwrap();
+    assert_eq!([wake(&sys, "1-2"), wake(&sys, "1-3"), wake(&sys, "1-4")], ["enabled", "enabled", "enabled"]);
+    assert!(!sys.p(policy::WAKE_FILE).exists() && sys.ledger().unwrap().entries.is_empty());
+    // A device that isn't plugged in: the rule is written, nothing live is touched, and Undo is just the rule.
+    let id = sys.apply(set(r#"{"kind":"wake","vendor":"1234","product":"abcd","wake":false}"#)).unwrap();
+    assert_eq!(sys.ledger().unwrap().entries[0].before("value"), None);
+    sys.undo(id).unwrap();
+    assert_eq!([wake(&sys, "1-2"), wake(&sys, "1-4")], ["enabled", "enabled"]);
+}
+
+#[test]
+fn a_value_whose_folder_got_a_new_number_is_still_found_and_a_gone_one_can_be_undone() {
+    let mut sys = machine("moved");
+    const CAP: &str = "/sys/class/drm/card1/device/hwmon/hwmon3/power1_cap";
+    let id = sys.apply(set(&format!(r#"{{"kind":"sysfs","path":"{CAP}","value":"200000000"}}"#))).unwrap();
+    // The next start: the kernel calls the card's folder hwmon5, and the cap is back at its own default.
+    fs::rename(sys.p("/sys/devices/card1/hwmon/hwmon3"), sys.p("/sys/devices/card1/hwmon/hwmon5")).unwrap();
+    let moved = "/sys/class/drm/card1/device/hwmon/hwmon5/power1_cap";
+    fs::write(sys.p(moved), "220000000\n").unwrap();
+    assert_eq!(sys.verify().unwrap(), vec!["Graphics card power limit set to 200 W isn't in effect"]);
+    sys.reapply().unwrap();
+    assert_eq!(read(&sys, moved), "200000000");
+    assert!(sys.verify().unwrap().is_empty());
+    sys.undo(id).unwrap();
+    assert_eq!(read(&sys, moved), "220000000");
+    assert!(sys.ledger().unwrap().entries.is_empty());
+    // Two folders with that file: the helper doesn't guess.
+    let id = sys.apply(set(&format!(r#"{{"kind":"sysfs","path":"{moved}","value":"200000000"}}"#))).unwrap();
+    fs::rename(sys.p("/sys/devices/card1/hwmon/hwmon5"), sys.p("/sys/devices/card1/hwmon/hwmon7")).unwrap();
+    fs::create_dir_all(sys.p("/sys/devices/card1/hwmon/hwmon8")).unwrap();
+    for f in ["power1_cap", "power1_cap_min", "power1_cap_max"] {
+        fs::write(sys.p(&format!("/sys/devices/card1/hwmon/hwmon8/{f}")), "1\n").unwrap();
+    }
+    assert!(sys.reapply().is_err());
+    assert_eq!(read(&sys, "/sys/devices/card1/hwmon/hwmon8/power1_cap"), "1\n");
+    // Nothing to put back (the value's place is gone), and the change still leaves the record.
+    sys.undo(id).unwrap();
+    assert_eq!(read(&sys, "/sys/devices/card1/hwmon/hwmon7/power1_cap"), "200000000");
+    // A battery taken out: its charge limit can still be undone.
+    let id = sys.apply(set(&format!(r#"{{"kind":"sysfs","path":"{CHARGE}","value":"80"}}"#))).unwrap();
+    fs::remove_dir_all(sys.p("/sys/devices/platform/bat/BAT0")).unwrap();
+    sys.undo(id).unwrap();
+    assert!(sys.ledger().unwrap().entries.is_empty());
+    // A link out of /sys is still refused, not skipped.
+    let evil = "/sys/class/power_supply/EVIL/charge_control_end_threshold";
+    assert!(sys.set_now(evil, "80").is_err());
+    assert_eq!(read(&sys, "/secret"), "do not touch\n");
+}
+
+#[test]
+fn a_change_number_is_a_whole_number() {
+    let id = |t: &str| ops::change_id(&parse(t).unwrap());
+    assert_eq!(id(r#"{"id":7}"#), Ok(7));
+    for bad in [r#"{"id":1.9}"#, r#"{"id":0}"#, r#"{"id":-1}"#, r#"{"id":0.5}"#, r#"{"id":1e300}"#] {
+        assert_eq!(id(bad), Err("id must be a whole number".to_string()), "{bad}");
+    }
+    for bad in [r#"{"id":"1"}"#, r#"{}"#, r#"{"id":null}"#] {
+        assert_eq!(id(bad), Err("id is missing".to_string()), "{bad}");
+    }
+}
+
+#[test]
+fn the_log_keeps_each_job_on_one_line() {
+    let sys = machine("log");
+    sys.log("1000 nope ok\n1 0 uninstall ok\r\u{1b}[2J refused: Unknown job");
+    sys.log(&"x".repeat(5000));
+    let text = read(&sys, ops::LOG);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    assert_eq!(lines[0], "1000 1000 nope ok 1 0 uninstall ok  [2J refused: Unknown job");
+    assert_eq!(lines[1].len(), "1000 ".len() + 400);
+    assert_eq!(ops::log_text("plain words, 100%"), "plain words, 100%");
+}
+
+#[test]
+fn one_job_at_a_time_and_none_waits_for_ever() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+    let sys = machine("lock");
+    let dir = sys.p(ops::STATE_DIR);
+    // A lock file an older helper left readable by everyone (any program could hold it and stop every job).
+    fs::write(dir.join("lock"), "").unwrap();
+    fs::set_permissions(dir.join("lock"), fs::Permissions::from_mode(0o644)).unwrap();
+    let first = ops::take_lock(&dir, Duration::ZERO).unwrap().expect("the lock");
+    assert_eq!(fs::metadata(dir.join("lock")).unwrap().permissions().mode() & 0o777, 0o600);
+    // A second job waits its time, then says so instead of hanging.
+    let start = Instant::now();
+    let busy = ops::take_lock(&dir, Duration::from_millis(150)).unwrap_err();
+    assert!(busy.contains("busy"), "{busy}");
+    assert!(start.elapsed() >= Duration::from_millis(150) && start.elapsed() < Duration::from_secs(5));
+    // It gets the lock as soon as the first job ends.
+    let waiter = std::thread::spawn({
+        let dir = dir.clone();
+        move || ops::take_lock(&dir, Duration::from_secs(10)).map(|l| l.is_some())
+    });
+    std::thread::sleep(Duration::from_millis(100));
+    drop(first);
+    assert_eq!(waiter.join().unwrap(), Ok(true));
+    assert!(start.elapsed() < Duration::from_secs(5));
+    // No folder yet (before the first install): no lock, and the job goes on.
+    assert!(ops::take_lock(&sys.p("/var/lib/nowhere"), Duration::ZERO).unwrap().is_none());
+    assert!(ops::LOCK_WAIT < Duration::from_secs(120));
+}
+
+#[test]
+fn a_program_that_never_ends_is_stopped() {
+    use std::time::{Duration, Instant};
+    let start = Instant::now();
+    let e = ops::run_limited("/usr/bin/sleep", &["30"], Duration::from_millis(200)).unwrap_err();
+    assert_eq!(e, "sleep took too long, so it was stopped");
+    assert!(start.elapsed() < Duration::from_secs(5));
+    assert_eq!(ops::run_limited("/usr/bin/printf", &["%s", "hello"], Duration::from_secs(5)), Ok("hello".to_string()));
+    assert_eq!(ops::run_limited("/usr/bin/false", &[], Duration::from_secs(5)), Err("false failed: no message".to_string()));
+    assert!(ops::run_limited("/usr/bin/no-such-program", &[], Duration::from_secs(5)).is_err());
+    // udev and the like answer in moments; a service gets its start time; a download gets its own limit and a bit.
+    assert_eq!(ops::time_limit(ops::UDEVADM, &["trigger", "--action=add"]), Duration::from_secs(20));
+    assert_eq!(ops::time_limit(ops::SYSTEMCTL, &["enable", "--now", "sshd.service"]), Duration::from_secs(100));
+    assert_eq!(ops::time_limit(ops::CURL, &["-fsSL", "--max-time", "600", "-o", "x", "https://github.com"]), Duration::from_secs(630));
+    // Each is well inside what the app allows a job (two minutes, half an hour for a download).
+    assert!(ops::time_limit(ops::EFIBOOTMGR, &[]) < Duration::from_secs(120));
+}
+
+#[test]
+fn status_says_which_turbine_hub_the_helper_came_with() {
+    let sys = machine("status");
+    let j = parse(&sys.status().unwrap()).unwrap();
+    assert_eq!(j.str_at("version"), Some(ops::VERSION));
+    // Never the crate's own number, which stays the same from release to release.
+    assert_ne!(ops::VERSION, env!("CARGO_PKG_VERSION"));
+}

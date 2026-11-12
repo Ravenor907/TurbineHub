@@ -141,6 +141,11 @@ mod tests {
         }));
         assert!(ask(&path).is_ok());
         assert!(ask(&path).is_ok());
+        // The listener counts on its own thread, a moment after each answer: wait for it instead of racing it.
+        let started = std::time::Instant::now();
+        while count.load(Ordering::SeqCst) < 2 && started.elapsed() < std::time::Duration::from_secs(5) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         assert_eq!(count.load(Ordering::SeqCst), 2);
         // Only the player may open it.
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);

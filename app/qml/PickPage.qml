@@ -106,7 +106,7 @@ Item {
                                     }
                                     ShapePath {
                                         scale: Qt.size(drawing.k, drawing.k)
-                                        strokeColor: "transparent"; fillColor: page.app.colors.text
+                                        strokeColor: "transparent"; fillColor: page.app.colors.accent
                                         PathSvg { path: "M30 189a7 7 0 1 1 0 14a7 7 0 1 1 0-14z" }
                                     }
                                     Image {

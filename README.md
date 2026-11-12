@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ravenor907/TurbineHub/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Ravenor907/TurbineHub?color=c99e52&style=flat-square&label=release"></a>
+  <a href="https://github.com/Ravenor907/TurbineHub/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/Ravenor907/TurbineHub?color=6fae8c&style=flat-square&label=release"></a>
   <img alt="SteamOS" src="https://img.shields.io/badge/SteamOS-made%20for-1a9fff?style=flat-square&logo=steam&logoColor=white">
   <img alt="Machines" src="https://img.shields.io/badge/handheld%20%C2%B7%20desktop%20%C2%B7%20TV%20PC-any-8b5cf6?style=flat-square">
   <img alt="License" src="https://img.shields.io/github/license/Ravenor907/TurbineHub?color=22c55e&style=flat-square">

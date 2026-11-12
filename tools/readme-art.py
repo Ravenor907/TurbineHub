@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Draws the pictures on Turbine Hub's GitHub page into docs/art: the banner at the top of the README (1600x480)
-and the picture GitHub shows when the page is shared (1280x640). Made from the emblem and the brass palette with
+and the picture GitHub shows when the page is shared (1280x640). Made from the emblem and the jade palette with
 tools/steam-art.py's drawing, so they match the Steam library art:
 
     python3 tools/readme-art.py          needs Pillow and the fonts (tools/get-fonts.sh)
@@ -25,7 +25,7 @@ ROOT = art.ROOT
 OUT = os.path.join(ROOT, "docs", "art")
 SHOTS = os.path.join(ROOT, "docs", "screenshots")
 BODY = os.path.join(ROOT, "fonts", "Barlow-Medium.ttf")
-SOFT = (196, 186, 166)
+SOFT = (186, 204, 196)
 
 # The README's screenshots: the name in docs/screenshots, the picture run's size and name.
 README_SHOTS = [

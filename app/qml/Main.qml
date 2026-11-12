@@ -79,7 +79,7 @@ Window {
         readonly property color soft: hc ? "#FFFFFF" : light ? "#4A3E2A" : "#D9C9A6"
         readonly property color muted: hc ? "#E0E0E0" : light ? "#5E5038" : "#AC9873"
         readonly property var swatches: ({ brass: "#C99E52", iron: "#A9B4BE", copper: "#B07A5A", jade: "#6FAE8C" })
-        readonly property color accentBase: swatches[app.st.accent] || swatches.brass
+        readonly property color accentBase: swatches[app.st.accent] || swatches.jade
         readonly property color accent: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 1.8) : accentBase
         readonly property color accentHi: hc ? "#FFE680" : light ? Qt.darker(accentBase, 1.6) : Qt.lighter(accentBase, 1.22)
         readonly property color accentLo: light ? Qt.darker(accentBase, 2.1) : Qt.darker(accentBase, 1.35)

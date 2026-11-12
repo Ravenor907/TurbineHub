@@ -49,8 +49,8 @@ impl Default for Settings {
             ui_scale: 100,
             scale_chosen: false,
             animations: true,
-            theme: "dark".into(),
-            accent: "brass".into(),
+            theme: "black".into(),
+            accent: "jade".into(),
             game_boost: false,
             save_snapshots: false,
             test_builds: false,
@@ -157,7 +157,7 @@ mod tests {
         s.setup_done = vec!["machine".into(), "password".into()];
         assert_eq!(Settings::parse(&s.to_json()), s);
         let bad = Settings::parse(r#"{"mode":"hacker","uiScale":900,"theme":"pink","accent":7,"setupDone":["machine","x","machine"],"extra":1}"#);
-        assert_eq!((bad.mode, bad.ui_scale, bad.theme.as_str(), bad.accent.as_str()), (None, 150, "dark", "brass"));
+        assert_eq!((bad.mode, bad.ui_scale, bad.theme.as_str(), bad.accent.as_str()), (None, 150, "black", "jade"));
         assert_eq!(bad.setup_done, vec!["machine"]);
         // A size the player never picked follows the machine, and stays out of the file.
         let fresh = Settings::default();

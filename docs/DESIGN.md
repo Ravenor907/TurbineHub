@@ -157,46 +157,52 @@ SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced.
 The helper files are root-owned and not writable by the user, so the user account can't swap the binary that the rule allows.
 
 ### 4.3 How the app calls it
-1. **First install (the one password):** the in-app password dialog (works in Game Mode, where no system password prompt exists) runs `flatpak-spawn --host sudo -S -k` with the password on stdin, once, to copy the helper from the Flatpak into `/var/lib/turbinehub/bin`, check its SHA-256, write the polkit rule and the boot unit. The password is never stored.
-2. **After that:** `flatpak-spawn --host pkexec /var/lib/turbinehub/bin/turbinehub-helper <verb> <json args>`. The polkit rule says YES only for that exact program path, for the active local session of the user who installed it. No password, works in Game Mode.
-3. **Updates:** a new app version carries a new helper. The app compares versions and asks the old helper to replace itself (`self-update` verb with the new binary's path and SHA-256; it copies, verifies and swaps).
+1. **First install (the one password):** the in-app password dialog (works in Game Mode, where no system password prompt exists) runs `flatpak-spawn --host sudo -S -k <helper inside the Flatpak> install` with the password on stdin. The helper copies itself to `/var/lib/turbinehub/bin`, writes the polkit rule and the boot unit, and records which user it serves. The password is never stored.
+2. **After that:** `flatpak-spawn --host pkexec /var/lib/turbinehub/bin/turbinehub-helper <job> <json>`. The polkit rule says YES only for that exact program, for the active local session of its owner. No password, works in Game Mode.
+3. **Helper updates ask for the password again** (step 1). They are rare, and a password-free self-update would let any program running as the player replace the helper.
+4. The helper refuses to run unless its folder and file are root's and writable by nobody else, and refuses callers other than its owner.
 
-### 4.4 Verbs (the whole list)
-Each verb validates its arguments against fixed allowlists; anything else is refused and logged.
+### 4.4 Jobs (the whole list)
+Config files are **never** taken from the caller: a hand-written sysctl, udev, modprobe, tmpfiles or systemd file can run any command as root. The caller sends a typed **setting**; the helper checks it against fixed lists (`helper/src/policy.rs`) and writes the files itself.
 
-| Verb | Does | Limits |
+| Job | Does |
+|---|---|
+| `apply <setting>` | Checks, records "before", applies, writes the files, records the change |
+| `undo {id}`, `undo-all` | Puts things back from the record, newest first |
+| `verify` | Lists what differs between the record and the machine (read only) |
+| `reapply` | Puts the record back in effect (boot unit, after SteamOS updates) |
+| `set-now {path,value}` | A listed /sys value right now, not recorded (Game Boost while a game runs; gone at reboot) |
+| `decky-install {tag}` | Downloads Decky Loader's official release itself and installs it only if it matches the SHA-256 GitHub publishes |
+| `boot-next {entry}` | Next boot only: an entry efibootmgr lists as Windows Boot Manager |
+| `status` | Version and the record |
+| `install` | Through sudo only: installs or updates the helper |
+| `uninstall` | `undo-all`, then removes the rule, unit and helper |
+
+Settings:
+
+| Setting | Allowed | Lives in |
 |---|---|---|
-| `status` | Version, ledger summary | read only |
-| `file-put` | Writes one config file | only names starting `turbinehub-` / `90-turbinehub-` in `/etc/sysctl.d`, `/etc/udev/rules.d`, `/etc/tmpfiles.d`, `/etc/modprobe.d`, `/etc/systemd/system`, `/etc/systemd/zram-generator.conf.d`; content size capped |
-| `file-remove` | Removes a file it created | only files in the ledger |
-| `sysfs-set` | Writes one runtime value | allowlisted patterns: battery charge threshold, platform power limits, CPU EPP and governor, USB/PCI wakeup, GPU fan curve and power cap (amdgpu), LED brightness |
-| `service` | enable, disable, start, stop, restart | allowlisted units: `sshd`, `plugin_loader` (Decky), `tailscaled`, `turbinehub-*` |
-| `reload` | udev reload and trigger, sysctl load, systemd daemon-reload | fixed commands |
-| `decky-install` | Installs or repairs Decky Loader from its official release | release checked by SHA-256 before running |
-| `boot-next` | Sets the next boot to an existing EFI entry (Restart to Windows) | entry must exist and be a Windows Boot Manager entry |
-| `undo` | Reverts one change from its backup | only ledger entries |
-| `undo-all` | Reverts everything, newest first | |
-| `reapply` | Puts back runtime values and missing files from the ledger | run at boot and after updates |
-| `verify` | Compares the ledger with the system, reports drift | read only |
-| `self-update` | Replaces the helper binary | SHA-256 checked |
-| `uninstall` | `undo-all`, then removes the rule, unit, binary and `/var/lib/turbinehub` | |
+| `sysctl` | Listed keys (swappiness, page-cluster, dirty bytes, max_map_count, split-lock...) with ranges | `/etc/sysctl.d/99-zz-turbinehub.conf` + applied now |
+| `sysfs` | Listed /sys patterns (charge limit, EPP, governor, CPU boost, THP, wake flags, GPU power cap, firmware TDP) with value checks; the path must exist and stay inside /sys with links followed; limits read from the kernel's own min/max files where they exist | runtime, re-applied at boot |
+| `wake` | One USB device (vendor:product hex) may or may not wake the machine | `/etc/udev/rules.d/71-turbinehub-wake.rules` |
+| `access` | Fixed rules: `lighting` (LED files and the ASUS lighting chip for the agent's animations), `ntsync` | `/etc/udev/rules.d/70-turbinehub-access.rules` |
+| `zram` | 25 to 200% of memory; zstd, lz4 or lzo-rle | `/etc/systemd/zram-generator.conf.d/turbinehub.conf` (next boot) |
+| `module` | `ntsync` | `/etc/modules-load.d/turbinehub.conf` + loaded now |
+| `service` | `sshd`, `plugin_loader` (Decky), `tailscaled`: on or off | systemd |
 
-Drive formatting is **not** a helper verb. The Drives module hands off to SteamOS's own formatting in Steam's Storage settings, and only offers drives that are not the system drive.
+Drive formatting is **not** a helper job. The Drives module hands off to SteamOS's own formatting in Steam's Storage settings.
 
 ### 4.5 The ledger
-One JSON file, one entry per change:
+One JSON file, one entry per setting (a second change to the same setting updates it and keeps the first "before"):
 
 ```json
-{"id":"0007","module":"tuneup","what":"zram swap","kind":"file",
- "path":"/etc/systemd/zram-generator.conf.d/turbinehub-zram.conf",
- "before":{"existed":false},"after":{"sha256":"..."},
- "backup":"backup/0007","applied":"2026-11-12T03:40:00Z","steamos":"3.8.13",
- "reapply":"boot"}
+{"id":7,"words":"Kernel setting vm.swappiness set to 100",
+ "change":{"kind":"sysctl","key":"vm.swappiness","value":100},
+ "before":{"value":"60"},"applied":1794455000,"steamos":"3.9.5"}
 ```
 
-- `kind`: file, sysfs, service, decky, bootnext.
-- `before` is captured before anything changes; a file that existed is copied into `backup/`.
-- `reapply`: `never` (persists by itself, e.g. files in `/etc`), `boot` (runtime values such as charge limit), `game` (Game Boost, applied by the agent while a game runs).
+- The files under /etc are always written from the ledger, so the ledger and the files can't disagree, and a tampered ledger with an unlisted setting is refused when read.
+- Decky's entry keeps backups of any loader and unit that were there before, in `/var/lib/turbinehub/backup/`.
 - The app shows the ledger as **Settings, Review changes**: every change in plain words, with Undo.
 
 ### 4.6 SteamOS updates

@@ -107,11 +107,12 @@ pub fn run(line: &[String], stdin: Option<&str>) -> Result<Output, String> {
     run_until(line, stdin, None)
 }
 
-/// What a job says when it was stopped because Turbine Hub is closing.
-pub const STOPPED: &str = "Stopped, because Turbine Hub was closed.";
+/// What a job says when it was stopped: the player's Stop, or Turbine Hub closing. The engine's own words, so the
+/// line of work knows a stop from a failure.
+pub const STOPPED: &str = turbinehub_engine::STOPPED;
 
 /// The same, for a job of the line of work: it is also stopped (TERM, then KILL) the moment `stop` is set, which
-/// closing Turbine Hub does. flatpak ends a transaction it is told to end without leaving half of it behind.
+/// Stop and closing Turbine Hub do. flatpak ends a transaction it is told to end without leaving half of it behind.
 pub fn run_until(line: &[String], stdin: Option<&str>, stop: Option<&AtomicBool>) -> Result<Output, String> {
     let limit = time_limit(line);
     let mut c = command(line).ok_or("Nothing to run")?;
@@ -193,7 +194,8 @@ pub fn share_dir() -> PathBuf {
 pub struct Job {
     /// 0 behind the cover; its number in the line of work otherwise.
     pub id: u64,
-    /// Set when Turbine Hub closes: a job of the line of work stops then.
+    /// Set by Stop and when Turbine Hub closes: a job of the line of work stops then, between two pieces of its
+    /// work, and takes away what it had half made.
     pub stop: Arc<AtomicBool>,
     pub steps: Vec<Step>,
     pub password: String,
@@ -240,10 +242,10 @@ fn step_name(st: &Step) -> String {
     }
 }
 
-/// One step, with its start and how it ended in the log.
-fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
+/// One step, with its start and how it ended in the log. `far` hears how far a long step is, from 0 to 1.
+fn step(job: &Job, st: &Step, say: &dyn Fn(String), far: &dyn Fn(f64)) -> Result<(), String> {
     let name = step_name(st);
-    let result = step_inner(job, st, say);
+    let result = step_inner(job, st, say, far);
     match &result {
         Ok(()) => crate::log::line("step", &format!("{name}: done")),
         Err(why) => crate::log::line("step", &format!("{name}: failed: {why}")),
@@ -251,7 +253,19 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
     result
 }
 
-fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
+fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String), far: &dyn Fn(f64)) -> Result<(), String> {
+    // What the two long jobs (a game from the Windows drive, a GE-Proton) are handed: their line and how far they
+    // are go to the top bar, and the answer says whether to go on. Once the job's stop is set they take away what
+    // they had half made and end with the engine's STOPPED.
+    let tick = |words: &str, part: Option<f64>| {
+        if !words.is_empty() {
+            say(words.to_string());
+        }
+        if let Some(p) = part {
+            far(p);
+        }
+        !job.stop.load(Ordering::SeqCst)
+    };
     match st {
         Step::Host(line) => {
             let is_helper = line.iter().any(|a| a == helper::BIN);
@@ -288,9 +302,8 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
         }
         Step::CopyGame { name, pairs } => {
             say(format!("Copying {name}"));
-            for (from, to) in pairs {
-                ui::bring::copy_tree(from, to).map_err(|e| format!("Couldn't copy {name}: {e}"))?;
-            }
+            let done = turbinehub_engine::bring::copy_game(name, pairs, &turbinehub_engine::bring::free_at, &tick)?;
+            crate::log::line("copy", &format!("{name}: {} files, {} bytes", done.files, done.bytes));
             Ok(())
         }
         Step::ResetPrefix { .. } | Step::ResetUndo { .. } => ui::games::reset_step(st, &job.folder, turbinehub_engine::now()).unwrap_or(Ok(())),
@@ -348,7 +361,7 @@ fn step_inner(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> 
         Step::ProtonGet { .. } | Step::ProtonRemove { .. } | Step::TileArt | Step::TileArtUndo => {
             // Only the pictures touch Steam's library: they ask whether Steam runs right before they write.
             let steam = if matches!(st, Step::TileArt | Step::TileArtUndo) { steam_now() } else { Steam::Closed };
-            ui::onepress::run_step(st, &job.home, &job.folder, &job.cache, &Client::new(&job.version, &job.cache), steam, say).unwrap_or(Ok(()))
+            ui::onepress::run_step(st, &job.home, &job.folder, &job.cache, &Client::new(&job.version, &job.cache), steam, &tick).unwrap_or(Ok(()))
         }
         Step::Nsl { tag, plugin } => {
             say("Getting NonSteamLaunchers".into());
@@ -406,11 +419,14 @@ pub fn start(job: Job, tx: Sender<Event>) {
             if job.stop.load(Ordering::SeqCst) {
                 return Err(STOPPED.to_string());
             }
-            // With several steps, how many are through is how far it is.
+            // With several steps, how many are through is how far it is; a long step says how far it is itself.
             if count > 1 {
                 let _ = tx.send(Event::Progress(id, String::new(), Some(i as f64 / count as f64)));
             }
-            step(&job, st, &say)
+            let far = |part: f64| {
+                let _ = tx.send(Event::Progress(id, String::new(), Some((i as f64 + part.clamp(0.0, 1.0)) / count as f64)));
+            };
+            step(&job, st, &say, &far)
         });
         let _ = tx.send(Event::Done(id, result));
     });
@@ -639,6 +655,52 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(10));
         // Without a stop the same call runs to its end.
         assert_eq!(run_until(&host(&["true"]), None, Some(&AtomicBool::new(false))).map(|o| o.code), Ok(0));
+    }
+
+    /// A game from the Windows drive copied as a job of the line: it says how far it is, and with its stop set
+    /// while it copies it ends with the engine's STOPPED and leaves no folder and no manifest.
+    #[test]
+    fn a_game_copy_reports_how_far_it_is_and_stops_cleanly() {
+        let d = std::env::temp_dir().join(format!("turbinehub-run-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let (from, lib) = (d.join("win/common/Game"), d.join("here/steamapps"));
+        std::fs::create_dir_all(&from).unwrap();
+        for i in 0..40 {
+            std::fs::write(from.join(format!("{i}.bin")), vec![i as u8; 300_000]).unwrap();
+        }
+        std::fs::write(d.join("win/appmanifest_7.acf"), "manifest").unwrap();
+        let pairs = vec![(from.clone(), lib.join("common/Game")), (d.join("win/appmanifest_7.acf"), lib.join("appmanifest_7.acf"))];
+        let copy = || vec![Step::CopyGame { name: "Game".into(), pairs: pairs.clone() }, Step::Done { setup: None, brought: None }];
+        // Stopped at its first word of progress: the job's own thread sees the stop at its next look.
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = std::sync::mpsc::channel();
+        start(job(4, copy(), stop.clone()), tx);
+        let result = loop {
+            match rx.recv_timeout(Duration::from_secs(20)).expect("the copy never ended") {
+                Event::Progress(4, words, _) if words.starts_with("Copying Game") => stop.store(true, Ordering::SeqCst),
+                Event::Done(4, result) => break result,
+                _ => {}
+            }
+        };
+        assert_eq!(result.err().as_deref(), Some(STOPPED));
+        assert_eq!(std::fs::read_dir(lib.join("common")).map(|r| r.count()).unwrap_or(0), 0);
+        assert!(!lib.join("appmanifest_7.acf").exists());
+        // Left alone it goes through, saying how far it is on the way (half of the plan is this step).
+        let (tx, rx) = std::sync::mpsc::channel();
+        start(job(5, copy(), Arc::new(AtomicBool::new(false))), tx);
+        let mut parts = Vec::new();
+        let result = loop {
+            match rx.recv_timeout(Duration::from_secs(20)).expect("the copy never ended") {
+                Event::Progress(5, _, part) => parts.extend(part),
+                Event::Done(5, result) => break result,
+                _ => {}
+            }
+        };
+        assert_eq!(result, Ok(()));
+        assert!(parts.iter().all(|p| (0.0..=1.0).contains(p)) && parts.windows(2).all(|w| w[0] <= w[1]) && parts.contains(&0.5), "{parts:?}");
+        assert_eq!(std::fs::read_dir(lib.join("common/Game")).unwrap().count(), 40);
+        assert_eq!(std::fs::read_to_string(lib.join("appmanifest_7.acf")).unwrap(), "manifest");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

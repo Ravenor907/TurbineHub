@@ -20,7 +20,15 @@ pub(crate) fn proton_rows(ui: &Ui) -> Vec<Json> {
     let Some(root) = steam_root(ui) else { return Vec::new() };
     let about = "A community build of Proton with extra fixes for some games.";
     let mut rows = Vec::new();
-    rows.push(match proton_get::known(&ui.cache) {
+    // While one is being fetched its row says so and has Stop; one that waits for its turn says that.
+    let known = proton_get::known(&ui.cache);
+    let key = format!("proton:{}", known.as_ref().map(|r| r.tag.as_str()).unwrap_or("*"));
+    let fetching = ui.queue.place(&key).filter(|_| known.as_ref().is_none_or(|r| !proton_get::installed(&root, &r.tag)));
+    let name = known.as_ref().map(|r| r.tag.clone()).unwrap_or_else(|| "The newest GE-Proton".into());
+    rows.push(match known {
+        _ if fetching == Some(super::queue::Place::Working) && ui.queue.stopping() => with(with(with(row("none", "", "info", &name, "Stopping. What was downloaded and unpacked so far is taken away."), "icon", s("download")), "badge", s("Stopping")), "tone", s("muted")),
+        _ if fetching == Some(super::queue::Place::Working) => with(with(with(row("work-stop", "", "button", &name, "Being downloaded, checked and unpacked. Keep going: the top bar shows how it is doing. Stop takes away what was fetched so far."), "icon", s("download")), "button", s("Stop")), "badge", s("Working")),
+        _ if fetching == Some(super::queue::Place::Waiting) => with(with(with(row("none", "", "info", &name, "Waiting for its turn. It is fetched once the work before it has finished."), "icon", s("download")), "badge", s("Waiting")), "tone", s("muted")),
         Some(r) if proton_get::installed(&root, &r.tag) => with(with(with(row("none", "", "info", &proton_get::installed_as(&root, &r.tag).unwrap_or(r.tag), "The newest GE-Proton is installed. Pick it in the list above to use it for this game."), "icon", s("download")), "badge", s("Up to date")), "tone", s("ok")),
         Some(r) => with(with(row("proton-get", &r.tag, "button", "Get the newest GE-Proton", &format!("{}: {about} Downloaded, checked and added to the list above.", r.tag)), "icon", s("download")), "button", s("Get")),
         None => with(with(row("proton-get", "", "button", "Get the newest GE-Proton", &format!("{about} Downloaded, checked and added to the list above.")), "icon", s("download")), "button", s("Get")),
@@ -151,11 +159,12 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
 }
 
 /// These steps of a confirmed dialog. None for any other step. `steam`: asked right before (only the pictures need
-/// the answer). `say` gets a line for the player at each stage of a download.
-pub fn run_step(step: &Step, home: &Path, folder: &Path, cache: &Path, client: &Client, steam: Steam, say: &dyn Fn(String)) -> Option<Result<(), String>> {
+/// the answer). `tick` gets a line for the player at each stage of a download and how far it is, and stops the
+/// download by answering false (nothing half fetched stays).
+pub fn run_step(step: &Step, home: &Path, folder: &Path, cache: &Path, client: &Client, steam: Steam, tick: crate::Tick) -> Option<Result<(), String>> {
     let root = || crate::steam::steam_roots(home).into_iter().next().ok_or_else(|| "Steam wasn't found on this machine.".to_string());
     Some(match step {
-        Step::ProtonGet { tag } => root().and_then(|r| proton_get::install(client, cache, &r, folder, tag, crate::now(), say).map(|_| ())),
+        Step::ProtonGet { tag } => root().and_then(|r| proton_get::install(client, cache, &r, folder, tag, crate::now(), tick).map(|_| ())),
         Step::ProtonRemove { name } => root().and_then(|r| proton_get::remove(&r, folder, name)),
         Step::TileArt => tile_art::fix(home, folder, steam).and_then(|done| if done.files == 0 { Err("Every library entry has its pictures already.".into()) } else { Ok(()) }),
         Step::TileArtUndo => tile_art::undo(home, folder, steam).map(|_| ()),

@@ -230,6 +230,105 @@ fn what_runs_behind_the_cover_stays_there() {
 }
 
 #[test]
+fn the_job_being_worked_on_can_be_stopped_from_its_row_and_from_options() {
+    let mut u = ui("stop", HANDHELD);
+    let option_titles = |j: &Json| -> Vec<String> { j.get("options").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|o| o.str_at("title").map(String::from)).collect() };
+    // Nothing runs: nothing offers Stop, and the press says so.
+    assert!(!option_titles(&page(&mut u, "apps")).iter().any(|x| x.starts_with("Stop")));
+    assert_eq!(act(&mut u, "work-stop", "").str_at("toast"), Some("Nothing is being worked on right now."));
+    confirm(&mut u, "store", "com.spotify.Client");
+    confirm(&mut u, "store", "com.obsproject.Studio");
+    let (id, _) = u.queue_next().unwrap();
+    let flag = u.queue_running_stop().unwrap();
+    // The row of the one being worked on offers Stop first; the one that waits doesn't. Options on any page
+    // (the Store, Home, Settings) has it too.
+    assert_eq!(offers(&row(&page(&mut u, "apps"), "Spotify")), ["Stop Spotify", "Details", "Where it comes from"]);
+    assert_eq!(offers(&row(&page(&mut u, "apps"), "OBS Studio")), ["Details", "Where it comes from"]);
+    for name in ["home", "settings", "games"] {
+        let j = parse(&u.page(name, "")).unwrap();
+        let stop = j.get("options").unwrap().as_array().iter().find(|o| o.str_at("act") == Some("work-stop")).unwrap_or_else(|| panic!("{name} has no Stop")).clone();
+        assert_eq!(stop.str_at("title"), Some("Stop Spotify"));
+    }
+    // On a real machine the job is told, and the line says Stopping until the job says it has stopped.
+    u.sample = false;
+    assert!(!flag.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(act(&mut u, "work-stop", "").str_at("toast"), Some("Stopping Spotify..."));
+    assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
+    let st = status(&u);
+    assert_eq!((st.str_at("work"), st.str_at("workShort"), st.get("stopping").and_then(Json::as_bool), st.get("jobs").and_then(Json::as_f64)), (Some("Stopping: Spotify... (1 more waiting)"), Some("Stopping..."), Some(true), Some(2.0)));
+    assert_eq!(st.str_at("detail"), Some("Stopping. What was half done is taken away."));
+    u.sample = true;
+    let r = row(&page(&mut u, "apps"), "Spotify");
+    assert_eq!((shows(&r).0, offers(&r)), ("Stopping", vec!["Details".to_string(), "Where it comes from".to_string()]));
+    assert!(!option_titles(&page(&mut u, "apps")).iter().any(|x| x.starts_with("Stop")));
+    u.sample = false;
+    assert_eq!(act(&mut u, "work-stop", "").str_at("toast"), Some("Spotify is stopping already."));
+    // The job says it stopped: the note says nothing was left, and the next one gets its turn with its own stop.
+    let end = u.queue_done(id, Err(crate::STOPPED.into())).unwrap();
+    assert_eq!((end.get("ok").and_then(Json::as_bool), end.str_at("toast")), (Some(false), Some("Spotify: stopped. Nothing was left behind.")));
+    u.sample = true;
+    assert_eq!(shows(&row(&page(&mut u, "apps"), "Spotify")), ("Not installed", "", "Install", "store"));
+    let (next, _) = u.queue_next().unwrap();
+    assert!(!u.queue_running_stop().unwrap().load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(status(&u).str_at("work"), Some("Working: OBS Studio"));
+    // A job that was at a step it had to finish says it worked, and that is what the note says.
+    u.sample = false;
+    act(&mut u, "work-stop", "");
+    u.sample = true;
+    assert_eq!(u.queue_done(next, Ok(())).unwrap().str_at("toast"), Some("OBS Studio installed (12 s)"));
+    // A made-up machine's job runs nowhere: Stop ends it then and there.
+    confirm(&mut u, "store", "com.spotify.Client");
+    u.queue_next().unwrap();
+    assert_eq!(act(&mut u, "work-stop", "").str_at("toast"), Some("Spotify: stopped. Nothing was left behind."));
+    assert_eq!(status(&u).get("jobs").and_then(Json::as_f64), Some(0.0));
+    done("stop");
+}
+
+#[test]
+fn games_from_the_windows_drive_show_in_the_line_can_be_stopped_and_keep_a_cleaning_out() {
+    let mut u = ui("copyline", HANDHELD);
+    let drive = |u: &mut Ui| parse(&u.page("windrive", "")).unwrap();
+    let first = drive(&mut u);
+    let label = first.get("primary").unwrap().str_at("label").unwrap().to_string();
+    assert!(label.starts_with("Copy "), "{label}");
+    let ticked: Vec<String> = rows(&first).iter().filter(|r| r.str_at("kind") == Some("check")).filter_map(|r| r.str_at("title").map(String::from)).collect();
+    assert!(!ticked.is_empty());
+    // Confirmed: it joins the line (no cover), named for the bar.
+    let a = confirm(&mut u, "copy", "");
+    assert_eq!(a.get("queued").and_then(Json::as_bool), Some(true));
+    let (id, plan) = u.queue_next().unwrap();
+    assert!(plan.steps.iter().any(|st| matches!(st, super::Step::CopyGame { .. })));
+    // The page says which games are being copied, and its main button stops that.
+    let j = drive(&mut u);
+    assert_eq!((j.get("primary").unwrap().str_at("label"), j.get("primary").unwrap().str_at("act")), (Some("Stop the copy"), Some("work-stop")));
+    for name in &ticked {
+        assert_eq!(shows(&row(&j, name)).0, "Working", "{name}");
+    }
+    // The same games can't be asked for twice, and no cleaning runs while they are copied.
+    assert!(act(&mut u, "copy", "").str_at("toast").is_some());
+    let mut clean = super::plan::Plan::new("Free up space?", "", "Free up");
+    clean.steps.push(super::Step::Storage(crate::storage::Job::Undo));
+    assert!(u.runs_covered(&clean));
+    let why = u.work_refusal(&clean).unwrap();
+    assert!(why.ends_with("is being copied from your Windows drive, or waits to be. Free up space once that has finished."), "{why}");
+    // Progress: the copy's own words and how far it is.
+    u.queue_say(id, "Copying Hades II: 3 of 40 files, 1.0 GB of 4.0 GB", Some(0.25));
+    assert_eq!(status(&u).get("part").and_then(Json::as_f64), Some(0.25));
+    // Stopped: said on the page while the job clears up, then the games can be ticked again.
+    u.sample = false;
+    act(&mut u, "work-stop", "");
+    u.sample = true;
+    let j = drive(&mut u);
+    assert!(j.get("primary").is_none_or(|p| *p == Json::Null));
+    assert_eq!(shows(&row(&j, &ticked[0])).0, "Stopping");
+    let end = u.queue_done(id, Err(crate::STOPPED.into())).unwrap();
+    assert!(end.str_at("toast").unwrap().ends_with(": stopped. Nothing was left behind."));
+    assert_eq!(drive(&mut u).get("primary").unwrap().str_at("label"), Some(label.as_str()));
+    assert!(u.work_refusal(&clean).is_none());
+    done("copyline");
+}
+
+#[test]
 fn closing_stops_the_line_and_says_how_much_runs() {
     let mut u = ui("close", HANDHELD);
     u.sample_queue(2);
@@ -237,8 +336,11 @@ fn closing_stops_the_line_and_says_how_much_runs() {
     assert_eq!(st.str_at("work"), Some("Working: Discord (2 more waiting)"));
     assert_eq!(st.str_at("closing"), Some("3 things are still running. Close anyway? The one being worked on is stopped cleanly and the rest are dropped."));
     // Closing drops what waits and hands back the running plan's number for the app to stop.
+    let flag = u.queue_running_stop().unwrap();
     let running = u.queue_stop();
     assert!(running.is_some());
+    // The job's thread hears it through the stop it was started with.
+    assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(status(&u).get("jobs").and_then(Json::as_f64), Some(1.0));
     let end = u.queue_done(running.unwrap(), Err("Stopped, because Turbine Hub was closed.".into())).unwrap();
     assert_eq!(end.get("ok").and_then(Json::as_bool), Some(false));

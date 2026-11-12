@@ -121,17 +121,26 @@ pub fn digest_hex(data: &[u8]) -> String {
 
 /// SHA-512 of a file as lowercase hex, read in pieces so files of any size need little memory.
 pub fn file_hex(path: &Path) -> io::Result<String> {
+    Ok(file_hex_while(path, &|| true)?.unwrap_or_default())
+}
+
+/// The same for a big file that may be given up on: `go` is asked between pieces, and None is the answer once it
+/// says false.
+pub fn file_hex_while(path: &Path, go: &dyn Fn() -> bool) -> io::Result<Option<String>> {
     let mut f = File::open(path)?;
     let mut h = Sha512::new();
     let mut buf = vec![0u8; 256 * 1024];
     loop {
+        if !go() {
+            return Ok(None);
+        }
         let n = f.read(&mut buf)?;
         if n == 0 {
             break;
         }
         h.update(&buf[..n]);
     }
-    Ok(crate::sha256::hex(&h.finish()))
+    Ok(Some(crate::sha256::hex(&h.finish())))
 }
 
 /// Is this a SHA-512 written as 128 hex digits (either case)?

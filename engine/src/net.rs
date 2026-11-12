@@ -180,6 +180,9 @@ pub struct Request {
     pub connect_timeout: u32,
     /// Seconds the whole transfer may take (0 means no limit, for big downloads; a stall still ends it).
     pub max_time: u32,
+    /// Where the answer is saved, when it has to be one certain file (a big download's ".part"); a temp file
+    /// otherwise.
+    pub into: Option<PathBuf>,
 }
 
 impl Request {
@@ -191,7 +194,15 @@ impl Request {
             max_bytes: 64 << 20,
             connect_timeout: 15,
             max_time: 60,
+            into: None,
         }
+    }
+
+    /// Saves the answer to this file instead of a temp file. It is removed again when the transfer fails or is
+    /// stopped.
+    pub fn into_file(mut self, path: &Path) -> Request {
+        self.into = Some(path.to_path_buf());
+        self
     }
 
     pub fn header(mut self, name: &str, value: &str) -> Request {
@@ -417,7 +428,7 @@ impl Client {
         }
         fs::create_dir_all(&self.temp_dir)
             .map_err(|e| NetError::Failed(format!("Couldn't make the download folder ({e}).")))?;
-        let out = temp_path(&self.temp_dir, "body");
+        let out = req.into.clone().unwrap_or_else(|| temp_path(&self.temp_dir, "body"));
         let hdr = temp_path(&self.temp_dir, "headers");
         let args = curl_args(req, &self.user_agent, &out, &hdr);
         let cleanup = |also_body: bool| {

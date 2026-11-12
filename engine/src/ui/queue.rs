@@ -10,11 +10,16 @@
 //! - Never two jobs that touch the same thing (`keys_of`, `clash`): the second one is refused in plain words.
 //! - The app runs a plan's steps (it owns the threads and the host); Files runs its own copy. Both report back
 //!   here, and the next job starts only when the one before has ended.
+//! - The job being worked on can be stopped (`work-stop`: its row, Options on any page, closing Turbine Hub). The
+//!   line says "Stopping" until the job has taken away what it had half made and said so; a job that is at a step
+//!   that can't be cut short (a folder getting its name) finishes that step first, and then it simply worked.
 use super::plan::{Plan, Step};
 use super::{Ui, b, n, obj, s};
 use crate::helper;
 use crate::json::Json;
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 /// How many jobs may wait at once. More than this is a slip of the thumb, not a plan.
@@ -52,6 +57,8 @@ struct Running {
     words: String,
     /// How far it is, 0 to 1, when that is known.
     part: Option<f64>,
+    /// Set when it is told to stop: whoever runs it looks at this between its pieces of work.
+    stop: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -79,6 +86,8 @@ fn free_step(st: &Step) -> bool {
         Step::Host(line) => !helper_line(line) && flatpak_args(line).and_then(|a| a.first()).is_some_and(|verb| ["install", "update", "uninstall"].contains(&verb.as_str())),
         // A GE-Proton download: half a gigabyte fetched, checked and unpacked into a folder of its own in Steam's
         // folder for tools. None of Steam's own files change, so it needs no cover.
+        // A copy from the Windows drive is as long, and lands in a folder of its own beside the library's games.
+        // Both stop cleanly when told to.
         Step::CopyGame { .. } | Step::ProtonGet { .. } | Step::Done { .. } => true,
         // Everything else stays behind the cover: among it a storage cleaning and the library pictures, which
         // touch Steam's folders, and taking a Proton out again.
@@ -97,6 +106,8 @@ pub fn covered(plan: &Plan) -> bool {
 /// for a folder being written, "proton:<build>" for a Proton build being fetched or removed ("proton:*" for the
 /// newest, whichever that is), "system" for a change through the helper, "self" for Turbine Hub's own update. A
 /// storage cleaning touches every app (it has Flatpak drop unused runtimes) and every Proton (it may remove one).
+/// A copy from the Windows drive has "games:copy" and a storage cleaning "games:clean": the two never meet (a
+/// cleaning looks through the libraries for folders no game owns, and a game that is half copied is one).
 pub fn keys_of(plan: &Plan) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut put = |k: String| {
@@ -116,12 +127,16 @@ pub fn keys_of(plan: &Plan) -> Vec<String> {
                     _ => {}
                 }
             }
-            Step::CopyGame { pairs, .. } => pairs.iter().for_each(|(_, to)| put(path_key(to))),
+            Step::CopyGame { pairs, .. } => {
+                pairs.iter().for_each(|(_, to)| put(path_key(to)));
+                put(COPYING.into());
+            }
             Step::ProtonGet { tag } => put(format!("proton:{}", if tag.is_empty() { "*" } else { tag.as_str() })),
             Step::ProtonRemove { name } => put(format!("proton:{name}")),
             Step::Storage(_) => {
                 put("app:*".into());
                 put("proton:*".into());
+                put(CLEANING.into());
             }
             Step::HelperInstall | Step::SetPassword => put("system".into()),
             Step::SelfUpdate => put("self".into()),
@@ -131,14 +146,22 @@ pub fn keys_of(plan: &Plan) -> Vec<String> {
     out
 }
 
+/// The keys of a copy from the Windows drive and of a storage cleaning: each clashes with the other, never with
+/// its own kind (two games can wait to be copied one after the other).
+const COPYING: &str = "games:copy";
+const CLEANING: &str = "games:clean";
+
 /// The key of a folder or file a job reads or writes.
 pub fn path_key(p: &std::path::Path) -> String {
     format!("path:{}", p.display())
 }
 
 /// Do two keys name the same thing? The same key; every app against any one app (and every Proton against any one
-/// Proton); a folder against anything in it.
+/// Proton); a folder against anything in it; a copy from the Windows drive against a storage cleaning.
 pub fn clash(a: &str, b: &str) -> bool {
+    if let (Some(x), Some(y)) = (a.strip_prefix("games:"), b.strip_prefix("games:")) {
+        return x != y;
+    }
     if a == b {
         return true;
     }
@@ -172,6 +195,18 @@ impl Queue {
     pub fn running_what(&self) -> Option<&str> {
         self.running.as_ref().map(|r| r.entry.what.as_str())
     }
+    /// The running job's stop: whoever runs it keeps a copy and looks at it between its pieces of work.
+    pub fn running_stop(&self) -> Option<Arc<AtomicBool>> {
+        self.running.as_ref().map(|r| r.stop.clone())
+    }
+    /// Was the running job told to stop (and hasn't said yet that it did)?
+    pub fn stopping(&self) -> bool {
+        self.running.as_ref().is_some_and(|r| r.stop.load(Ordering::SeqCst))
+    }
+    /// Tells the running job to stop. False when nothing runs or it was told already.
+    pub fn stop_running(&mut self) -> bool {
+        self.running.as_ref().is_some_and(|r| !r.stop.swap(true, Ordering::SeqCst))
+    }
 
     /// The job that already touches one of these keys, and where it stands.
     fn holder(&self, keys: &[String]) -> Option<(&Entry, Place)> {
@@ -188,6 +223,9 @@ impl Queue {
     pub fn refusal(&self, keys: &[String]) -> Option<String> {
         if let Some((e, place)) = self.holder(keys) {
             return Some(match place {
+                // A cleaning and a copy from the Windows drive: not the same thing, but never at the same time.
+                _ if keys.iter().any(|k| k == CLEANING) && e.keys.iter().any(|k| k == COPYING) => format!("{} is being copied from your Windows drive, or waits to be. Free up space once that has finished.", e.what),
+                _ if keys.iter().any(|k| k == COPYING) && e.keys.iter().any(|k| k == CLEANING) => format!("{} is cleaning up the libraries. Copy games once that has finished.", e.what),
                 Place::Working => format!("{} is being worked on right now. Wait for it to finish, then try again.", e.what),
                 Place::Waiting => format!("{} is waiting for its turn already. It can't be asked for twice.", e.what),
             });
@@ -211,7 +249,7 @@ impl Queue {
             return None;
         }
         let entry = self.waiting.pop_front()?;
-        self.running = Some(Running { entry, since: Instant::now(), words: String::new(), part: None });
+        self.running = Some(Running { entry, since: Instant::now(), words: String::new(), part: None, stop: Arc::new(AtomicBool::new(false)) });
         self.running.as_ref().map(|r| &r.entry)
     }
 
@@ -258,18 +296,24 @@ impl Queue {
         self.waiting.iter().find(|e| matches!(e.work, Work::Files(_))).map(|e| e.id)
     }
 
-    /// The bar's words: "Working: Discord (2 more waiting)". "" when nothing runs.
+    /// The bar's words: "Working: Discord (2 more waiting)", or "Stopping: Discord..." once it was told to stop.
+    /// "" when nothing runs.
     pub fn words(&self) -> String {
         let Some(r) = &self.running else { return String::new() };
+        let doing = if self.stopping() { "Stopping" } else { "Working" };
+        let dots = if self.stopping() { "..." } else { "" };
         match self.waiting.len() {
-            0 => format!("Working: {}", r.entry.what),
-            c => format!("Working: {} ({c} more waiting)", r.entry.what),
+            0 => format!("{doing}: {}{dots}", r.entry.what),
+            c => format!("{doing}: {}{dots} ({c} more waiting)", r.entry.what),
         }
     }
 
-    /// The same in a few letters, for a bar with little room: "Discord +2".
+    /// The same in a few letters, for a bar with little room: "Discord +2" ("Stopping..." once told to stop).
     pub fn short(&self) -> String {
         let Some(r) = &self.running else { return String::new() };
+        if self.stopping() {
+            return "Stopping...".into();
+        }
         match self.waiting.len() {
             0 => r.entry.what.clone(),
             c => format!("{} +{c}", r.entry.what),
@@ -295,9 +339,10 @@ pub fn took_words(secs: u64) -> String {
     }
 }
 
-/// The note when a job ends: its own words with the time it took, or what went wrong, named.
+/// The note when a job ends: its own words with the time it took, that it was stopped, or what went wrong, named.
 pub fn end_words(what: &str, done: &str, result: &Result<(), String>, secs: u64) -> String {
     match result {
+        Err(why) if why == crate::STOPPED => format!("{what}: stopped. Nothing was left behind."),
         Ok(()) if done.is_empty() => format!("{what}: done{}", took_words(secs)),
         Ok(()) => format!("{}{}", done.trim_end_matches('.'), took_words(secs)),
         Err(why) => format!("{what} didn't work: {why}"),
@@ -405,12 +450,26 @@ impl Ui {
         self.queue.end(id).map(|(_, secs)| took_words(secs)).unwrap_or_default()
     }
 
-    /// Turbine Hub is closing: nothing waits any more, and a copy of Files that runs is told to stop (what was
-    /// half copied is removed). Answers the id of a running plan, which the app stops itself.
+    /// Turbine Hub is closing: nothing waits any more, and the job being worked on is told to stop (a plan through
+    /// its stop, which the app's thread looks at; a copy of Files through its own). What was half made is removed
+    /// by the job itself. Answers the id of a running plan, whose end the app waits for.
     pub fn queue_stop(&mut self) -> Option<u64> {
         self.queue.clear_waiting();
         super::files::stop_job(self);
+        self.queue.stop_running();
         self.queue.running_id()
+    }
+
+    /// The running job's stop, for the thread that runs it.
+    pub fn queue_running_stop(&self) -> Option<Arc<AtomicBool>> {
+        self.queue.running_stop()
+    }
+
+    /// Stop for the job being worked on, as a row or a menu offers it: ("Stop Discord", "work-stop"). None when
+    /// nothing runs or it is stopping already.
+    pub(crate) fn stop_offer(&self) -> Option<Json> {
+        let what = self.queue.running_what().filter(|_| !self.queue.stopping())?;
+        Some(super::controls::option(&format!("Stop {what}"), "work-stop", ""))
     }
 
     /// What the top bar shows beside the tabs, as JSON: the battery (only where there is one), whether the clock
@@ -428,7 +487,8 @@ impl Ui {
             "clockText": s(if self.sample { "20:41" } else { "" }),
             "work": s(self.queue.words()),
             "workShort": s(self.queue.short()),
-            "detail": s(running.map(|x| x.words.as_str()).unwrap_or("")),
+            "detail": s(if self.queue.stopping() { "Stopping. What was half done is taken away." } else { running.map(|x| x.words.as_str()).unwrap_or("") }),
+            "stopping": b(self.queue.stopping()),
             "part": n(running.and_then(|x| x.part).unwrap_or(-1.0)),
             "jobs": n(self.queue.count() as f64),
             "closing": s(self.queue.closing_words()),
@@ -460,6 +520,25 @@ pub const SAMPLE_SECS: u64 = 12;
 /// The made-up machine's own press: the job that is being worked on ends now (the pictures and the build's checks
 /// use it; a real machine's jobs end when the host says so).
 pub(crate) fn act(ui: &mut Ui, action: &str, _arg: &str, value: &str) -> Option<Json> {
+    if action == "work-stop" {
+        // Stop for the job being worked on. The job hears it between two pieces of its work, takes away what it
+        // had half made, and its note says so; until then the line says Stopping.
+        let Some(what) = ui.queue.running_what().map(String::from) else { return Some(obj! {"toast": s("Nothing is being worked on right now."), "refresh": b(true)}) };
+        if ui.queue.stopping() {
+            return Some(obj! {"toast": s(format!("{what} is stopping already.")), "refresh": b(true)});
+        }
+        ui.queue.stop_running();
+        // A copy of Files hears it through its own stop.
+        super::files::stop_job(ui);
+        if ui.sample {
+            // A made-up machine's job runs nowhere: it ends here, as a real one would a moment later.
+            let id = ui.queue.running_id()?;
+            let j = ui.queue_done(id, Err(crate::STOPPED.to_string())).unwrap_or_else(|| obj! {});
+            let _ = ui.queue_next();
+            return Some(super::with(j, "refresh", b(true)));
+        }
+        return Some(obj! {"toast": s(format!("Stopping {what}...")), "refresh": b(true)});
+    }
     if action != "queue-finish" || !ui.sample {
         return None;
     }
@@ -525,7 +604,7 @@ mod tests {
         remove.steps.push(Step::ProtonRemove { name: "GE-Proton10-4".into() });
         let mut clean = Plan::new("Free space?", "", "Free");
         clean.steps.push(Step::Storage(crate::storage::Job::Undo));
-        assert_eq!(keys_of(&clean), ["app:*", "proton:*"]);
+        assert_eq!(keys_of(&clean), ["app:*", "proton:*", "games:clean"]);
         // Removing, cleaning and the library pictures run alone behind the cover.
         assert!(covered(&remove) && covered(&clean));
         for st in [Step::TileArt, Step::TileArtUndo] {
@@ -594,7 +673,7 @@ mod tests {
         p.steps.push(Step::Host(helper::job("verify", None)));
         p.steps.push(Step::SelfUpdate);
         p.steps.push(Step::CopyGame { name: "g".into(), pairs: vec![("/a".into(), "/lib/g".into())] });
-        assert_eq!(keys_of(&p), ["app:com.google.Chrome", "system", "self", "path:/lib/g"]);
+        assert_eq!(keys_of(&p), ["app:com.google.Chrome", "system", "self", "path:/lib/g", "games:copy"]);
     }
 
     #[test]
@@ -674,6 +753,67 @@ mod tests {
         assert!(add(&mut q, copy("/lib/common/ER")).is_err());
         assert!(add(&mut q, copy("/lib/common/ER/sub")).is_err());
         assert!(add(&mut q, copy("/lib/common/BG3")).is_ok());
+    }
+
+    #[test]
+    fn a_cleaning_and_a_copy_from_the_windows_drive_never_meet() {
+        let copy = |to: &str| {
+            let mut p = Plan::new("Copy 1 game?", "", "Copy");
+            p.steps.push(Step::CopyGame { name: to.into(), pairs: vec![("/win/x".into(), format!("/lib/common/{to}").into())] });
+            p.what = to.into();
+            p
+        };
+        let mut clean = Plan::new("Free up space?", "", "Free up");
+        clean.steps.push(Step::Storage(crate::storage::Job::Undo));
+        assert_eq!(keys_of(&copy("ER")), ["path:/lib/common/ER", "games:copy"]);
+        assert_eq!(keys_of(&clean), ["app:*", "proton:*", "games:clean"]);
+        assert!(clash("games:copy", "games:clean") && clash("games:clean", "games:copy"));
+        assert!(!clash("games:copy", "games:copy") && !clash("games:clean", "games:clean") && !clash("games:copy", "app:*"));
+        // A copy that waits or runs: the cleaning is refused, in words that say why. Another game is still taken.
+        let mut q = Queue::default();
+        add(&mut q, copy("ER")).unwrap();
+        let why = q.refusal(&keys_of(&clean)).unwrap();
+        assert_eq!(why, "ER is being copied from your Windows drive, or waits to be. Free up space once that has finished.");
+        add(&mut q, copy("BG3")).unwrap();
+        q.begin();
+        assert!(q.refusal(&keys_of(&clean)).is_some());
+        // Once both are through the cleaning may run.
+        let (a, b2) = (q.running_id().unwrap(), q.waiting.front().unwrap().id);
+        q.end(a);
+        assert!(q.refusal(&keys_of(&clean)).is_some());
+        q.begin();
+        q.end(b2);
+        assert!(q.refusal(&keys_of(&clean)).is_none());
+        // The reverse: while a cleaning is in the line (it runs alone behind the cover, but its keys are asked
+        // about the same way), no copy is taken.
+        let mut q = Queue::default();
+        q.add("Storage", keys_of(&clean), Work::Plan(Box::new(clean))).unwrap();
+        let why = add(&mut q, copy("ER")).unwrap_err();
+        assert_eq!(why, "Storage is cleaning up the libraries. Copy games once that has finished.");
+    }
+
+    #[test]
+    fn the_running_job_is_told_to_stop_once_and_the_line_says_so() {
+        let mut q = Queue::default();
+        // Nothing runs: nothing to stop.
+        assert!(!q.stop_running() && !q.stopping() && q.running_stop().is_none());
+        let a = add(&mut q, install("Discord")).unwrap();
+        add(&mut q, install("Spotify")).unwrap();
+        // One that only waits isn't told anything.
+        assert!(!q.stop_running());
+        q.begin();
+        let flag = q.running_stop().unwrap();
+        assert!(!flag.load(Ordering::SeqCst) && !q.stopping());
+        assert!(q.stop_running());
+        // Whoever runs it sees it through the copy it took, and a second Stop changes nothing.
+        assert!(flag.load(Ordering::SeqCst) && q.stopping() && !q.stop_running());
+        assert_eq!((q.words().as_str(), q.short().as_str()), ("Stopping: Discord... (1 more waiting)", "Stopping..."));
+        q.end(a);
+        // The next job starts with a stop of its own, not set.
+        q.begin();
+        assert!(!q.stopping() && !q.running_stop().unwrap().load(Ordering::SeqCst));
+        assert_eq!(q.words(), "Working: Spotify");
+        assert_eq!(end_words("GE-Proton10-4", "GE-Proton10-4 is installed.", &Err(crate::STOPPED.into()), 40), "GE-Proton10-4: stopped. Nothing was left behind.");
     }
 
     #[test]

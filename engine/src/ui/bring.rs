@@ -139,12 +139,24 @@ pub(crate) fn drive(ui: &mut Ui) -> Json {
     let picked = picks(ui, "windrive", || dg.games.iter().filter(|g| dg.can_copy(g)).map(|g| g.app_id.clone()).collect()).clone();
     let chosen: Vec<&WinGame> = dg.games.iter().filter(|g| picked.contains(&g.app_id) && dg.can_copy(g)).collect();
     let bytes: u64 = chosen.iter().map(|g| g.bytes).sum();
+    // Where each game stands in the line of work, when it is being copied or waits to be.
+    let target = copy_target(&ui.ctx.home);
+    let stopping = ui.queue.stopping();
+    let in_line = |g: &WinGame| target.as_ref().and_then(|t| bring::copy_plan(g, t).first().and_then(|(_, to)| ui.queue.place(&super::queue::path_key(to))));
+    let copying = dg.games.iter().any(|g| in_line(g) == Some(super::queue::Place::Working));
     let rows: Vec<Json> = dg
         .games
         .iter()
         .map(|g| {
             let size = size_words(g.bytes);
-            if dg.here.contains(&g.app_id) {
+            if let Some(place) = in_line(g).filter(|_| dg.can_copy(g)) {
+                let (badge, line) = match place {
+                    super::queue::Place::Working if stopping => ("Stopping", "What was half copied is taken away."),
+                    super::queue::Place::Working => ("Working", "Being copied. Steam sees it only once every file is here."),
+                    super::queue::Place::Waiting => ("Waiting", "Copied once the work before it has finished."),
+                };
+                with(with(with(row("none", "", "info", &g.name, line), "value", s(size)), "badge", s(badge)), "tone", s("muted"))
+            } else if dg.here.contains(&g.app_id) {
                 with(with(with(row("none", "", "info", &g.name, "Already on this machine"), "value", s(size)), "badge", s("Here already")), "tone", s("ok"))
             } else if dg.blocked.contains(&g.app_id) {
                 with(with(with(row("none", "", "info", &g.name, "Its anti-cheat blocks SteamOS, so copying it wouldn't help"), "value", s(size)), "badge", s("Won't run here")), "tone", s("stop"))
@@ -168,7 +180,8 @@ pub(crate) fn drive(ui: &mut Ui) -> Json {
             section("Saves", saves_rows(ui)),
         ]),
         "note": s(room),
-        "primary": if count > 0 { obj! {"label": s(if count == 1 { "Copy 1 game".to_string() } else { format!("Copy {count} games") }), "act": s("copy"), "arg": s("")} } else { Json::Null },
+        // While games are being copied the main button stops that; a game half copied is taken away again.
+        "primary": if copying && !stopping { obj! {"label": s("Stop the copy"), "act": s("work-stop"), "arg": s("")} } else if copying { Json::Null } else if count > 0 { obj! {"label": s(if count == 1 { "Copy 1 game".to_string() } else { format!("Copy {count} games") }), "act": s("copy"), "arg": s("")} } else { Json::Null },
         "options": arr([super::controls::page_button("Tick all", "tick-all", "windrive")]),
     }
 }
@@ -228,28 +241,6 @@ pub(crate) fn apps(ui: &mut Ui) -> Json {
     }
 }
 
-/// Copies a folder and everything in it. Nothing at the source is changed; links are skipped. Answers the bytes
-/// copied.
-pub fn copy_tree(from: &Path, to: &Path) -> std::io::Result<u64> {
-    let meta = std::fs::symlink_metadata(from)?;
-    if meta.file_type().is_symlink() {
-        return Ok(0);
-    }
-    if meta.is_file() {
-        if let Some(p) = to.parent() {
-            std::fs::create_dir_all(p)?;
-        }
-        return std::fs::copy(from, to);
-    }
-    std::fs::create_dir_all(to)?;
-    let mut total = 0;
-    for e in std::fs::read_dir(from)? {
-        let e = e?;
-        total += copy_tree(&e.path(), &to.join(e.file_name()))?;
-    }
-    Ok(total)
-}
-
 /// The steamapps folder games are copied into: Steam's main library on this machine.
 pub fn copy_target(home: &Path) -> Option<PathBuf> {
     crate::steam::steam_roots(home).into_iter().next().map(|r| r.join("steamapps"))
@@ -305,6 +296,12 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.steps = chosen.iter().map(|g| Step::CopyGame { name: g.name.clone(), pairs: bring::copy_plan(g, &target) }).collect();
             p.steps.push(Step::Done { setup: None, brought: Some("windows") });
             p.done = "Games copied. Steam checks them at its next start.".into();
+            p.what = if chosen.len() == 1 { chosen[0].name.clone() } else { format!("{} games from your Windows drive", chosen.len()) };
+            p.items.push(("While it copies".into(), "Keep going: the top bar shows how far it is. Stop takes away a game that is half copied. Steam sees a game only once every file is here.".into()));
+            // One of them is being copied already, or a cleaning runs: said now, not after the dialog.
+            if let Some(why) = ui.work_refusal(&p) {
+                return Some(toast(&why));
+            }
             Some(dialog(ui, p))
         }
         "win-saves" => {

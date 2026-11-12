@@ -35,6 +35,8 @@ pub enum TarError {
     TooBig,
     /// A kind of entry Turbine Hub doesn't unpack (a device file, a pipe).
     Unsupported(String),
+    /// Whoever asked for it said to stop. The folder is half filled, as after any other error.
+    Stopped,
 }
 
 impl std::fmt::Display for TarError {
@@ -47,6 +49,7 @@ impl std::fmt::Display for TarError {
             TarError::UnsafeLink(p) => write!(f, "the archive holds a link that points outside its folder ({p})"),
             TarError::TooBig => write!(f, "the archive unpacks to more than is allowed"),
             TarError::Unsupported(p) => write!(f, "the archive holds something that isn't a file, folder or link ({p})"),
+            TarError::Stopped => write!(f, "it was stopped"),
         }
     }
 }
@@ -177,11 +180,13 @@ struct TarSink<'a> {
     real: HashSet<PathBuf>,
     links: Vec<PathBuf>,
     err: Option<TarError>,
+    /// Asked before every piece is taken: false stops the unpacking there.
+    go: Option<&'a dyn Fn() -> bool>,
 }
 
 impl<'a> TarSink<'a> {
     fn new(dest: &'a Path, limits: Limits) -> Self {
-        TarSink { dest, limits, header: Vec::with_capacity(512), remaining: 0, padding: 0, body: Body::Skip, long_name: None, long_link: None, ended: false, crc: Crc32::new(), stream_bytes: 0, entries: 0, done: Unpacked::default(), real: HashSet::new(), links: Vec::new(), err: None }
+        TarSink { dest, limits, header: Vec::with_capacity(512), remaining: 0, padding: 0, body: Body::Skip, long_name: None, long_link: None, ended: false, crc: Crc32::new(), stream_bytes: 0, entries: 0, done: Unpacked::default(), real: HashSet::new(), links: Vec::new(), err: None, go: None }
     }
 
     /// Makes sure every folder on the way to `rel` is a real folder, making the missing ones. A link on the way is
@@ -417,6 +422,10 @@ impl<'a> TarSink<'a> {
 
 impl Write for TarSink<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.go.is_some_and(|go| !go()) {
+            self.err = Some(TarError::Stopped);
+            return Err(io::Error::other("stopped"));
+        }
         self.crc.update(buf);
         self.stream_bytes += buf.len() as u64;
         match self.take(buf) {
@@ -485,6 +494,12 @@ fn gzip_header(r: &mut impl Read) -> Result<(), TarError> {
 /// what was unpacked at the end. For the rules see the top of this file. On an error the folder may be half
 /// filled: unpack into a scratch folder.
 pub fn unpack_tar_gz(archive: &Path, dest: &Path, limits: Limits) -> Result<Unpacked, TarError> {
+    unpack_tar_gz_while(archive, dest, limits, None)
+}
+
+/// The same for an archive big enough to be given up on: `go` is asked before every piece (a few tens of KiB), and
+/// once it says false the unpacking ends with `TarError::Stopped`, the folder half filled.
+pub fn unpack_tar_gz_while(archive: &Path, dest: &Path, limits: Limits, go: Option<&dyn Fn() -> bool>) -> Result<Unpacked, TarError> {
     let mut file = File::open(archive)?;
     let size = file.metadata()?.len();
     if size < 18 {
@@ -499,6 +514,7 @@ pub fn unpack_tar_gz(archive: &Path, dest: &Path, limits: Limits) -> Result<Unpa
     gzip_header(&mut r)?;
     fs::create_dir_all(dest)?;
     let mut sink = TarSink::new(dest, limits);
+    sink.go = go;
     // The tar stream is the files plus a header and padding for each: a generous cap of its own.
     let cap = limits.total.saturating_add(limits.entries.saturating_mul(2048)).saturating_add(1 << 20);
     match inflate_stream(&mut r, &mut sink, cap) {

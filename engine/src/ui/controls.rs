@@ -206,6 +206,14 @@ pub(crate) fn finish(ui: &mut Ui, name: &str, arg: &str, page: Json) -> Json {
     if search {
         push(&mut options, local("Find", "find", "y"));
     }
+    // Whatever page is open, the job the top bar names can be stopped from here (Files has its own Stop for
+    // its own copy).
+    if !first_run(name)
+        && !options.iter().any(|o| ["work-stop", "files-job-stop"].contains(&o.str_at("act").unwrap_or("")))
+        && let Some(stop) = ui.stop_offer()
+    {
+        push(&mut options, stop);
+    }
     match name {
         "wheres" => {}
         "help" => push(&mut options, option("Where's my...?", "open", "wheres")),

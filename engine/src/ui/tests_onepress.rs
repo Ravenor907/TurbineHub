@@ -64,6 +64,19 @@ fn the_proton_page_offers_the_newest_ge_proton_in_one_press() {
     assert_eq!(items[3].1, "It shows in this list at once. Steam lists it after its next start.");
     let plan = u.confirm().unwrap();
     assert_eq!((plan.steps.clone(), plan.done.as_str()), (vec![Step::ProtonGet { tag: "GE-Proton10-99".into() }], "GE-Proton10-99 is installed. Steam lists it after its next start."));
+    // While it is fetched its row says so and A stops it; told to stop, it says that until the job has cleared up.
+    u.enqueue(plan.clone());
+    let (id, _) = u.queue_next().unwrap();
+    let rows = last(&mut u);
+    assert_eq!((rows[0].str_at("title"), rows[0].str_at("badge"), rows[0].str_at("button"), rows[0].str_at("act")), (Some("GE-Proton10-99"), Some("Working"), Some("Stop"), Some("work-stop")));
+    assert!(parse(&u.act("proton-get", "GE-Proton10-99", "")).unwrap().str_at("toast").unwrap().starts_with("GE-Proton10-99 is being worked on"));
+    u.sample = false;
+    assert_eq!(parse(&u.act("work-stop", "", "")).unwrap().str_at("toast"), Some("Stopping GE-Proton10-99..."));
+    u.sample = true;
+    let rows = last(&mut u);
+    assert_eq!((rows[0].str_at("badge"), rows[0].str_at("kind")), (Some("Stopping"), Some("info")));
+    assert_eq!(u.queue_done(id, Err(crate::STOPPED.into())).unwrap().str_at("toast"), Some("GE-Proton10-99: stopped. Nothing was left behind."));
+    assert_eq!(last(&mut u)[0].str_at("button"), Some("Get"));
     // Offline, nothing is asked: it needs the internet.
     u.offline = true;
     assert!(parse(&u.act("proton-get", "GE-Proton10-99", "")).unwrap().str_at("toast").unwrap().starts_with("You're offline"));
@@ -90,13 +103,13 @@ fn the_proton_page_offers_the_newest_ge_proton_in_one_press() {
     assert_eq!(d.get("items").unwrap().as_array()[0].str_at("title"), Some("Baldur's Gate 3"));
     assert!(u.confirm().is_none());
     let step = Step::ProtonRemove { name: "GE-Proton10-4".into() };
-    assert!(onepress::run_step(&step, &u.ctx.home, &u.folder(), &u.cache, &client, Steam::Closed, &|_| {}).unwrap().unwrap_err().starts_with("1 game is set to use it"));
+    assert!(onepress::run_step(&step, &u.ctx.home, &u.folder(), &u.cache, &client, Steam::Closed, &|_, _| true).unwrap().unwrap_err().starts_with("1 game is set to use it"));
     crate::compat_tool::set_proton_pick(&u.folder(), "1086940", None).unwrap();
     let d = dialog_of(&u.act("proton-remove", "GE-Proton10-4", ""));
     assert_eq!((d.str_at("title"), d.get("danger").and_then(Json::as_bool)), (Some("Remove GE-Proton10-4?"), Some(true)));
     let plan = u.confirm().unwrap();
     assert_eq!(plan.steps, vec![step.clone()]);
-    onepress::run_step(&step, &u.ctx.home, &u.folder(), &u.cache, &client, Steam::Closed, &|_| {}).unwrap().unwrap();
+    onepress::run_step(&step, &u.ctx.home, &u.folder(), &u.cache, &client, Steam::Closed, &|_, _| true).unwrap().unwrap();
     assert!(!steam.join("compatibilitytools.d/GE-Proton10-4").exists());
     assert_eq!(titles(&last(&mut u)), vec!["Get the newest GE-Proton", "More versions"]);
     done("get");
@@ -110,7 +123,7 @@ fn entry(name: &str) -> NewShortcut {
 fn blank_library_entries_get_pictures_from_the_checkup() {
     let mut u = ui("art");
     let client = crate::net::Client::new("0.1", &dir("art").join("tmp"));
-    let run = |u: &Ui, step: &Step, steam: Steam| onepress::run_step(step, &u.ctx.home, &u.folder(), &u.cache, &client, steam, &|_| {}).unwrap();
+    let run = |u: &Ui, step: &Step, steam: Steam| onepress::run_step(step, &u.ctx.home, &u.folder(), &u.cache, &client, steam, &|_, _| true).unwrap();
     // Nothing to fix: no card, and the press says so.
     assert_eq!(u.facts_now().tiles_without_art, 0);
     assert!(!crate::checkup::items(&u.machine(), &u.facts_now()).iter().any(|i| i.id == "tile-art"));

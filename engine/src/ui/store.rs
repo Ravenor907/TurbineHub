@@ -216,7 +216,10 @@ fn app_row(ui: &Ui, a: &App, facts: &BTreeMap<String, AppFacts>) -> Json {
     let details = format!("store-item|{}", a.id);
     let source = offer("Where it comes from", "store-source", a.id);
     if let Some(word) = in_line(ui, &id) {
-        return thing(&id, a.name, a.line, ("open", &details, ""), (word, ""), vec![offer("Details", "open", &details), source]);
+        // The one being worked on can be stopped from its row's Options.
+        let stop = if word == "Working" { ui.stop_offer() } else { None };
+        let word = if word == "Working" && ui.queue.stopping() { "Stopping" } else { word };
+        return thing(&id, a.name, a.line, ("open", &details, ""), (word, ""), stop.into_iter().chain([offer("Details", "open", &details), source]).collect());
     }
     let (installed, update) = (is_installed(ui, a.id), ui.updates.iter().any(|u| u == a.id));
     let (state, tone) = app_state(ui, a, facts);

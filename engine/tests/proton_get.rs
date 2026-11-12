@@ -16,8 +16,8 @@ use turbinehub_engine::{compat_tool, proton_get, protondb};
 
 /// A stand-in for curl that asks the stand-in server instead of the real sites (the same path, on 127.0.0.1) and
 /// answers the way curl does: the body, the headers, and "<status> <where it ended up>" with the real site's
-/// name. Two marker files change what it does: `no-api` makes GitHub's API refuse (its limit), `tamper` adds a byte
-/// to every .tar.gz.
+/// name. Three marker files change what it does: `no-api` makes GitHub's API refuse (its limit), `tamper` adds a
+/// byte to every .tar.gz, and `slow` writes the first half of a .tar.gz and then hangs, as a download under way.
 const CURL: &str = r#"#!/usr/bin/env python3
 import os, sys, urllib.error, urllib.parse, urllib.request
 BASE, MARKS = "@BASE@", "@MARKS@"
@@ -44,6 +44,12 @@ except urllib.error.HTTPError as e:
     fail(e.code)
 if parts.path.endswith(".tar.gz") and os.path.exists(os.path.join(MARKS, "tamper")):
     body += b"x"
+if parts.path.endswith(".tar.gz") and os.path.exists(os.path.join(MARKS, "slow")):
+    import time
+    open(hdr, "w").write("HTTP/1.1 200\r\ncontent-length: %d\r\n\r\n" % len(body))
+    with open(out, "wb") as f:
+        f.write(body[:len(body) // 2])
+    time.sleep(60)
 open(out, "wb").write(body)
 open(hdr, "w").write("HTTP/1.1 200\r\ncontent-length: %d\r\n\r\n" % len(body))
 sys.stdout.write("200 https://%s%s" % (parts.netloc, ended))
@@ -109,6 +115,11 @@ fn names(dir: &Path) -> Vec<String> {
     v
 }
 
+/// The downloads in the cache: whole ones and ones still coming in.
+fn downloads(cache: &Path) -> Vec<String> {
+    names(cache).into_iter().filter(|n| n.ends_with(".part") || n.ends_with(".tar.gz")).collect()
+}
+
 const TAG: &str = "GE-Proton11-99";
 
 /// The build of the made-up release for this machine: "GE-Proton11-99-x86_64".
@@ -132,7 +143,13 @@ fn the_newest_ge_proton_is_found_downloaded_checked_unpacked_and_removed() {
     assert!(!proton_get::installed(&root, TAG));
 
     let said = std::cell::RefCell::new(Vec::new());
-    let got = proton_get::install(&s.client, &cache, &root, &folder, "", now, &|line| said.borrow_mut().push(line)).unwrap();
+    let got = proton_get::install(&s.client, &cache, &root, &folder, "", now, &|line, _| {
+        if !line.is_empty() {
+            said.borrow_mut().push(line.to_string());
+        }
+        true
+    })
+    .unwrap();
     assert_eq!(got, name);
     assert_eq!(*said.borrow(), ["Asking GitHub for the newest GE-Proton".to_string(), format!("Downloading {TAG}"), format!("Checking {TAG}"), format!("Unpacking {TAG}")]);
     // It is a Proton Turbine Hub's list shows, with the name Steam will call it (its tool file has a comment
@@ -149,10 +166,11 @@ fn the_newest_ge_proton_is_found_downloaded_checked_unpacked_and_removed() {
     // Nothing is left over: no scratch folder beside it, no download in the cache.
     assert_eq!(names(&compat_tool::tools_dir(&root)), vec![name.clone()]);
     assert_eq!(names(&cache.join("tmp")), Vec::<String>::new());
+    assert_eq!(downloads(&cache), Vec::<String>::new());
     assert_eq!(proton_get::fetched(&root, &folder), vec![name.clone()]);
     // A second press downloads nothing.
     let before = s.asked().len();
-    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, TAG, now, &|_| {}).unwrap(), name);
+    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, TAG, now, &|_, _| true).unwrap(), name);
     assert_eq!(s.asked().len(), before);
 
     // Remove: refused while a pick names it, then it goes, and only it.
@@ -168,18 +186,87 @@ fn a_download_that_does_not_match_its_checksum_installs_nothing() {
     let Some(s) = StandIn::start("tamper") else { return };
     let (root, folder, cache) = (s.steam(), s.dir.join("turbinehub"), s.cache());
     s.mark("tamper", true);
-    let why = proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_| {}).unwrap_err();
+    let why = proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_, _| true).unwrap_err();
     assert!(why.contains("didn't match what the site published") && why.contains("SHA-512"), "{why}");
     assert!(!proton_get::installed(&root, TAG) && names(&compat_tool::tools_dir(&root)).is_empty());
     assert_eq!(names(&cache.join("tmp")), Vec::<String>::new());
     assert!(proton_get::fetched(&root, &folder).is_empty());
     // A release that isn't there, and a name that isn't a release's.
-    assert!(proton_get::install(&s.client, &cache, &root, &folder, "GE-Proton1-1", 0, &|_| {}).unwrap_err().starts_with("Couldn't get the checksum published with GE-Proton1-1"));
-    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, "../../x", 0, &|_| {}).unwrap_err(), "That isn't a GE-Proton release.");
+    assert!(proton_get::install(&s.client, &cache, &root, &folder, "GE-Proton1-1", 0, &|_, _| true).unwrap_err().starts_with("Couldn't get the checksum published with GE-Proton1-1"));
+    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, "../../x", 0, &|_, _| true).unwrap_err(), "That isn't a GE-Proton release.");
     // The same download, untouched, goes in.
     s.mark("tamper", false);
-    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_| {}).unwrap(), build_name());
+    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_, _| true).unwrap(), build_name());
     assert!(proton_get::installed(&root, TAG));
+}
+
+/// A fetch that was stopped: no build and no half build in Steam's folder, no download in the cache, and no word
+/// of it in the list of fetched builds.
+fn nothing_left(s: &StandIn, at: &str) {
+    let (root, folder, cache) = (s.steam(), s.dir.join("turbinehub"), s.cache());
+    assert_eq!(names(&compat_tool::tools_dir(&root)), Vec::<String>::new(), "{at}");
+    assert_eq!((downloads(&cache), names(&cache.join("tmp"))), (Vec::<String>::new(), Vec::<String>::new()), "{at}");
+    assert!(!proton_get::installed(&root, TAG) && proton_get::fetched(&root, &folder).is_empty() && !proton_get::record_file(&folder).exists(), "{at}");
+}
+
+#[test]
+fn a_fetch_stopped_anywhere_leaves_nothing_behind() {
+    let Some(s) = StandIn::start("stop") else { return };
+    let (root, folder, cache) = (s.steam(), s.dir.join("turbinehub"), s.cache());
+    // In the middle of the download: half of it is in the cache as a .part when Stop comes.
+    s.mark("slow", true);
+    let part = cache.join(format!("{}.tar.gz.part", build_name()));
+    let half = std::cell::Cell::new(false);
+    let began = std::time::Instant::now();
+    let why = proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_, _| {
+        if fs::metadata(&part).is_ok_and(|m| m.len() > 0) {
+            half.set(true);
+        }
+        !half.get()
+    })
+    .unwrap_err();
+    assert_eq!(why, turbinehub_engine::STOPPED);
+    assert!(half.get() && began.elapsed() < std::time::Duration::from_secs(30));
+    nothing_left(&s, "in the middle of the download");
+    s.mark("slow", false);
+    // Stopped at every look in turn, from the first to the one right before the build gets its name: the same
+    // each time. The stage it was at is noted, so all of them are known to have been stopped in.
+    let mut stages: Vec<String> = Vec::new();
+    for at in 0.. {
+        assert!(at < 2000, "it never got through");
+        let (n, stage) = (std::cell::Cell::new(0usize), std::cell::RefCell::new(String::new()));
+        let result = proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|line, _| {
+            n.set(n.get() + 1);
+            if !line.is_empty() {
+                *stage.borrow_mut() = line.split(' ').next().unwrap_or("").to_string();
+            }
+            n.get() <= at
+        });
+        match result {
+            Err(why) => {
+                assert_eq!(why, turbinehub_engine::STOPPED, "stopped at look {at}");
+                nothing_left(&s, &format!("stopped at look {at}"));
+                stages.push(stage.into_inner());
+            }
+            // Never told to stop any more: it went through.
+            Ok(name) => {
+                assert_eq!((name, n.get() <= at), (build_name(), true));
+                break;
+            }
+        }
+    }
+    for stage in ["Downloading", "Checking", "Unpacking"] {
+        assert!(stages.iter().any(|x| x == stage), "never stopped while {stage}: {stages:?}");
+    }
+    // The last stop was right before the name was given: everything was unpacked by then.
+    assert_eq!(stages.last().map(String::as_str), Some("Unpacking"));
+    assert!(proton_get::installed(&root, TAG) && proton_get::fetched(&root, &folder) == [build_name()] && downloads(&cache).is_empty());
+    // What a killed run left is gone after the next press, whatever that press fetches.
+    proton_get::remove(&root, &folder, &build_name()).unwrap();
+    fs::write(&part, "half").unwrap();
+    fs::create_dir_all(proton_get::part_dir(&root, &build_name()).join(build_name())).unwrap();
+    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, TAG, 0, &|_, _| true).unwrap(), build_name());
+    assert_eq!((names(&compat_tool::tools_dir(&root)), downloads(&cache)), (vec![build_name()], Vec::<String>::new()));
 }
 
 #[test]
@@ -195,7 +282,7 @@ fn the_releases_page_answers_when_githubs_api_does_not() {
     // What the page said is kept too, and the whole install works from it.
     assert_eq!(proton_get::known(&cache).unwrap().tag, TAG);
     let (root, folder) = (s.steam(), s.dir.join("turbinehub"));
-    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, "", now + 7 * 3600, &|_| {}).unwrap(), build_name());
+    assert_eq!(proton_get::install(&s.client, &cache, &root, &folder, "", now + 7 * 3600, &|_, _| true).unwrap(), build_name());
     assert!(proton_get::installed(&root, TAG));
 }
 
@@ -204,7 +291,7 @@ fn a_release_from_before_the_per_processor_builds_is_found_under_its_plain_name(
     let Some(s) = StandIn::start("older") else { return };
     let (root, folder, cache) = (s.steam(), s.dir.join("turbinehub"), s.cache());
     let old = "GE-Proton10-98";
-    let got = proton_get::install(&s.client, &cache, &root, &folder, old, 0, &|_| {});
+    let got = proton_get::install(&s.client, &cache, &root, &folder, old, 0, &|_, _| true);
     if proton_get::arch() != "x86_64" {
         // Those releases had no build for any other processor.
         assert!(got.unwrap_err().starts_with("Couldn't get the checksum published with GE-Proton10-98"));

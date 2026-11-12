@@ -51,6 +51,15 @@ pub mod zip;
 
 pub use games::{Game, Runtime, Scan, Store};
 
+/// What a long job says when it was stopped (the player's Stop, or Turbine Hub closing): it took away whatever it
+/// had half made before it said so.
+pub const STOPPED: &str = "Stopped. Nothing was left behind.";
+
+/// What a long job is handed so it can be stopped and can say how it is doing: it calls this between pieces of
+/// work with a line for the player ("" for none) and how far it is from 0 to 1 when it knows, and stops cleanly
+/// when the answer is false.
+pub type Tick<'a> = &'a dyn Fn(&str, Option<f64>) -> bool;
+
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

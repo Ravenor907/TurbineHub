@@ -473,7 +473,9 @@ impl HubRust {
             self.pretend = Some(std::time::Instant::now());
             return;
         }
-        self.stop = Arc::new(AtomicBool::new(false));
+        // The line's own stop for this job: Stop (the engine's `work-stop`) and closing set it, the job's thread
+        // looks at it between its pieces of work.
+        self.stop = self.ui.queue_running_stop().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         run::start(self.job(id, &plan, String::new(), self.stop.clone()), self.tx.clone());
     }
 }
@@ -482,8 +484,10 @@ impl HubRust {
 const PRETEND_FOR: Duration = Duration::from_secs(4);
 /// How often the top bar's battery and clock are looked at again.
 const STATUS_EVERY: Duration = Duration::from_secs(5);
-/// How long closing waits for the job being worked on to stop.
-const STOP_WITHIN: Duration = Duration::from_secs(8);
+/// How long closing waits at most for the job being worked on to stop. A job stops between two pieces of its work,
+/// in well under a second; taking away a big game that was half copied is what can take longer, and closing
+/// waits for that, so nothing half made stays.
+const STOP_WITHIN: Duration = Duration::from_secs(45);
 
 /// How long the controller's presses are ignored after the window comes back to the front.
 const QUIET_AFTER_BACK: Duration = Duration::from_millis(250);

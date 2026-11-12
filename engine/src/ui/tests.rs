@@ -357,7 +357,7 @@ fn windows_drive_picks_copy_only_what_can_run_and_never_write_to_it() {
     let (from, to) = (dir("drive").join("copy-from"), dir("drive").join("copy-to"));
     std::fs::create_dir_all(from.join("sub")).unwrap();
     std::fs::write(from.join("sub/a.bin"), b"12345").unwrap();
-    assert_eq!(bring::copy_tree(&from, &to).unwrap(), 5);
+    assert_eq!(crate::bring::copy_game("A game", &[(from.clone(), to.clone())], &|_| None, &|_, _| true).unwrap().bytes, 5);
     assert_eq!(std::fs::read(to.join("sub/a.bin")).unwrap(), b"12345");
     assert!(from.join("sub/a.bin").exists());
     done("drive");

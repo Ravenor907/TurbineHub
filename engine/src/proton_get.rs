@@ -4,9 +4,10 @@
 //! Turbine Hub asks GitHub which release is the newest (its API through `sources`, so the last answer is kept; when
 //! the API doesn't answer, the releases page, read by where it redirects to, the way Turbine Hub's own update check
 //! does), downloads the release's .tar.gz into Turbine Hub's cache, checks its SHA-512 against the .sha512sum
-//! published beside it, unpacks it with `tar` (which refuses anything that would land outside) into a scratch
-//! folder inside Steam's compatibilitytools.d, and only then gives it its name there. Steam lists it after its
-//! next start; Turbine Hub's own Proton list shows it at once.
+//! published beside it, unpacks it with `tar` (which refuses anything that would land outside) into a folder
+//! beside its place in Steam's compatibilitytools.d, and only then gives it its name there. Steam lists it after
+//! its next start; Turbine Hub's own Proton list shows it at once. All of it can be stopped (see `install`), and a
+//! stop leaves nothing behind.
 //!
 //! Since GE-Proton 11 a release has one build for each kind of processor, named after it
 //! ("GE-Proton11-12-x86_64.tar.gz", with a folder of that name inside); before that there was one build, named
@@ -17,7 +18,7 @@
 
 use crate::compat_tool as tool;
 use crate::json::{self, Json};
-use crate::net::{Client, Expect, NetError, Request};
+use crate::net::{Client, NetError, Request};
 use crate::sources::{self, Origin, Source};
 use crate::{sha512, tar};
 use std::fs;
@@ -204,12 +205,50 @@ fn remember(folder: &Path, name: &str, there: bool) {
     let _ = crate::write_atomic(&record_file(folder), names.iter().map(|n| format!("{n}\n")).collect::<String>().as_bytes());
 }
 
+/// What marks a folder or file as half made by Turbine Hub: a build still being unpacked ("<name>.turbinehub-part"
+/// in Steam's folder for tools), a download still coming in ("<name>.tar.gz.part" in the cache).
+pub const PART: &str = ".turbinehub-part";
+
+/// Where a build is unpacked before it gets its name: a folder beside it, on the same disk, so giving it its name
+/// afterwards is one step. The build sits one folder deeper in there, where Steam doesn't look for tools.
+pub fn part_dir(steam_root: &Path, name: &str) -> PathBuf {
+    tool::tools_dir(steam_root).join(format!("{name}{PART}"))
+}
+
+/// Takes away what an earlier run left when it was cut short (the power went, Turbine Hub was killed): half
+/// unpacked builds in Steam's folder for tools, and downloads in the cache. Only real folders and files with
+/// exactly those names go; a link is somebody else's. Answers how many things went.
+pub fn clean_leftovers(cache: &Path, steam_root: &Path) -> usize {
+    let mut gone = 0;
+    let entries = |dir: &Path| -> Vec<(String, PathBuf, fs::Metadata)> { fs::read_dir(dir).map(|rd| rd.flatten().filter_map(|e| Some((e.file_name().to_string_lossy().into_owned(), e.path(), fs::symlink_metadata(e.path()).ok()?))).collect()).unwrap_or_default() };
+    for (name, path, meta) in entries(&tool::tools_dir(steam_root)) {
+        // Today's name, and the one Turbine Hub used before it.
+        let ours = name.strip_suffix(PART).is_some_and(name_ok) || name.strip_prefix('.').and_then(|n| n.strip_suffix(".turbinehub-unpacking")).is_some_and(name_ok);
+        if ours && meta.is_dir() && !meta.file_type().is_symlink() && fs::remove_dir_all(&path).is_ok() {
+            gone += 1;
+        }
+    }
+    for (name, path, meta) in entries(cache) {
+        let ours = name.strip_suffix(".part").unwrap_or(&name).strip_suffix(".tar.gz").is_some_and(name_ok);
+        if ours && meta.is_file() && fs::remove_file(&path).is_ok() {
+            gone += 1;
+        }
+    }
+    gone
+}
+
 /// Unpacks a build's archive into Steam's folder for tools. `tag`: the build's name, which the one folder in the
-/// archive has to carry. Everything goes into a scratch folder there first (the
-/// same disk, so giving it its name afterwards is one step); the build gets its name only when all of it unpacked,
-/// the archive held exactly the one folder its name promises, and that folder is a Proton. Otherwise nothing is
-/// left behind.
+/// archive has to carry. Everything goes into a folder beside it first (`part_dir`); the build gets its name only
+/// when all of it unpacked, the archive held exactly the one folder its name promises, and that folder is a
+/// Proton. Otherwise nothing is left behind.
 pub fn install_archive(archive: &Path, tag: &str, steam_root: &Path) -> Result<(), String> {
+    install_archive_while(archive, tag, steam_root, &|| true)
+}
+
+/// The same, stoppable: `go` is asked before every piece that is unpacked and once more right before the build
+/// gets its name. Once it says false the half unpacked folder is removed and the answer is `STOPPED`. Giving the
+/// build its name is one step that either happened or didn't.
+pub fn install_archive_while(archive: &Path, tag: &str, steam_root: &Path, go: &dyn Fn() -> bool) -> Result<(), String> {
     if !name_ok(tag) {
         return Err("That isn't a GE-Proton release.".into());
     }
@@ -219,12 +258,24 @@ pub fn install_archive(archive: &Path, tag: &str, steam_root: &Path) -> Result<(
         return if tool::is_proton(&target) { Ok(()) } else { Err(format!("A folder called {tag} is in Steam's folder for tools already, and it isn't a Proton. Turbine Hub left it alone.")) };
     }
     fs::create_dir_all(&tools).map_err(|e| format!("Couldn't make Steam's folder for tools: {e}"))?;
-    let scratch = tools.join(format!(".{tag}.turbinehub-unpacking"));
-    let _ = fs::remove_dir_all(&scratch);
+    let scratch = part_dir(steam_root, tag);
+    // Only ever a real folder with that name: what an earlier run left. A link there is somebody else's.
+    match fs::symlink_metadata(&scratch) {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => fs::remove_dir_all(&scratch).map_err(|e| format!("Couldn't clear what an earlier try left in Steam's folder for tools: {e}"))?,
+        Ok(_) => return Err(format!("Something called {tag}{PART} is in Steam's folder for tools, and it isn't Turbine Hub's. Turbine Hub left it alone.")),
+        Err(_) => {}
+    }
     let result = (|| {
-        let done = tar::unpack_tar_gz(archive, &scratch, LIMITS).map_err(|e| format!("Couldn't unpack {tag}: {e}. Nothing was installed."))?;
+        let done = tar::unpack_tar_gz_while(archive, &scratch, LIMITS, Some(go)).map_err(|e| match e {
+            tar::TarError::Stopped => crate::STOPPED.to_string(),
+            e => format!("Couldn't unpack {tag}: {e}. Nothing was installed."),
+        })?;
         if done.top != [tag.to_string()] || !tool::is_proton(&scratch.join(tag)) {
             return Err(format!("What was downloaded isn't the Proton build {tag}. Nothing was installed."));
+        }
+        // The last moment it can be stopped: from here it is one step.
+        if !go() {
+            return Err(crate::STOPPED.to_string());
         }
         fs::rename(scratch.join(tag), &target).map_err(|e| format!("Couldn't put {tag} into Steam's folder for tools: {e}"))
     })();
@@ -232,11 +283,24 @@ pub fn install_archive(archive: &Path, tag: &str, steam_root: &Path) -> Result<(
     result
 }
 
-/// Downloads a release, checks it and installs it. `tag`: the release to get, or "" for the newest. `say` gets a
-/// line for the player at each stage. Answers the name of the build that is installed now (its folder's name).
-pub fn install(client: &Client, cache: &Path, steam_root: &Path, folder: &Path, tag: &str, now: u64, say: &dyn Fn(String)) -> Result<String, String> {
+/// Downloads a release, checks it and installs it. `tag`: the release to get, or "" for the newest. `tick` gets a
+/// line for the player at each stage and how far it is, and stops the whole thing by answering false: between the
+/// pieces of the download, of the check and of the unpacking, and right before the build gets its name. Answers
+/// the name of the build that is installed now (its folder's name).
+///
+/// Nothing half made is ever where Steam or a later run would take it for whole: the download comes in as
+/// "<name>.tar.gz.part" in the cache and loses the ".part" only once all of it is there and its SHA-512 matches;
+/// the build is unpacked beside its place and gets its name in one step; and it joins the list of fetched builds
+/// only after that. A stop or a failure removes the download and the half unpacked folder, and what a run that
+/// was cut short left behind goes at the start of the next.
+pub fn install(client: &Client, cache: &Path, steam_root: &Path, folder: &Path, tag: &str, now: u64, tick: crate::Tick) -> Result<String, String> {
+    let stopped = || crate::STOPPED.to_string();
+    let go = || tick("", None);
+    clean_leftovers(cache, steam_root);
     let mut release = if tag.is_empty() {
-        say("Asking GitHub for the newest GE-Proton".into());
+        if !tick("Asking GitHub for the newest GE-Proton", None) {
+            return Err(stopped());
+        }
         newest(client, cache, now)?
     } else {
         // What GitHub last said about this very release names its files; otherwise the tag does.
@@ -245,6 +309,9 @@ pub fn install(client: &Client, cache: &Path, steam_root: &Path, folder: &Path, 
     let tag = release.tag.clone();
     if let Some(name) = installed_as(steam_root, &tag) {
         return Ok(name);
+    }
+    if !go() {
+        return Err(stopped());
     }
     // The checksum first: without it nothing big is downloaded at all.
     let sums_of = |r: &Release| client.send(&Request::get(&r.sums_url).max_bytes(64 << 10).max_time(60), None).and_then(|r| r.take_text());
@@ -257,30 +324,50 @@ pub fn install(client: &Client, cache: &Path, steam_root: &Path, folder: &Path, 
     }
     .map_err(|e| format!("Couldn't get the checksum published with {tag}. {e}"))?;
     let want = sha512::from_sum_file(&sums, &release.archive_name()).ok_or_else(|| format!("The checksum file published with {tag} doesn't name its archive, so nothing was downloaded."))?;
-    say(format!("Downloading {tag}"));
-    let step = std::cell::Cell::new(0u64);
-    let mut progress = |got: u64, total: Option<u64>| {
-        // A line every 25 MB, not at every look.
-        if got / (25 << 20) != step.get() {
-            step.set(got / (25 << 20));
-            say(match total {
-                Some(t) if t > 0 => format!("Downloading {tag}: {} of {}", crate::net::human_size(got), crate::net::human_size(t)),
-                _ => format!("Downloading {tag}: {}", crate::net::human_size(got)),
-            });
+    if !tick(&format!("Downloading {tag}"), Some(0.0)) {
+        return Err(stopped());
+    }
+    let (part, archive) = (cache.join(format!("{}.part", release.archive_name())), cache.join(release.archive_name()));
+    let result = (|| {
+        let step = std::cell::Cell::new(0u64);
+        let mut progress = |got: u64, total: Option<u64>| {
+            // The download is most of the work: it fills the bar up to four fifths.
+            let far = total.filter(|t| *t > 0).map(|t| 0.8 * (got as f64 / t as f64).min(1.0));
+            // A line every 25 MB, not at every look.
+            if got / (25 << 20) != step.get() {
+                step.set(got / (25 << 20));
+                return tick(
+                    &match total {
+                        Some(t) if t > 0 => format!("Downloading {tag}: {} of {}", crate::net::human_size(got), crate::net::human_size(t)),
+                        _ => format!("Downloading {tag}: {}", crate::net::human_size(got)),
+                    },
+                    far,
+                );
+            }
+            tick("", far)
+        };
+        client.send(&Request::get(&release.archive_url).max_bytes(MAX_ARCHIVE).max_time(0).into_file(&part), Some(&mut progress)).map_err(|e| match e {
+            NetError::Cancelled => stopped(),
+            e => format!("Couldn't download {tag}. {e}"),
+        })?;
+        if !tick(&format!("Checking {tag}"), Some(0.8)) {
+            return Err(stopped());
         }
-        true
-    };
-    let got = client.download(&release.archive_url, &Expect::up_to(MAX_ARCHIVE), Some(&mut progress)).map_err(|e| format!("Couldn't download {tag}. {e}"))?;
-    say(format!("Checking {tag}"));
-    let result = match sha512::file_hex(&got.path) {
-        Ok(have) if sha512::same_digest(&have, &want) => {
-            say(format!("Unpacking {tag}"));
-            install_archive(&got.path, &release.name, steam_root)
+        match sha512::file_hex_while(&part, &go) {
+            Ok(Some(have)) if sha512::same_digest(&have, &want) => {}
+            Ok(Some(_)) => return Err(NetError::Mismatch("its SHA-512 is different".into()).to_string()),
+            Ok(None) => return Err(stopped()),
+            Err(e) => return Err(format!("Couldn't read the download ({e}).")),
         }
-        Ok(_) => Err(NetError::Mismatch("its SHA-512 is different".into()).to_string()),
-        Err(e) => Err(format!("Couldn't read the download ({e}).")),
-    };
-    let _ = fs::remove_file(&got.path);
+        // All of it is there and it is what its makers published: now it has its name.
+        fs::rename(&part, &archive).map_err(|e| format!("Couldn't keep the download ({e})."))?;
+        if !tick(&format!("Unpacking {tag}"), Some(0.85)) {
+            return Err(stopped());
+        }
+        install_archive_while(&archive, &release.name, steam_root, &go)
+    })();
+    let _ = fs::remove_file(&part);
+    let _ = fs::remove_file(&archive);
     result?;
     remember(folder, &release.name, true);
     Ok(release.name)
@@ -463,6 +550,71 @@ mod tests {
         // A folder of that name that isn't a Proton is somebody else's: left alone.
         fs::create_dir_all(build_dir(&root, other)).unwrap();
         assert!(install_archive(&good, other, &root).unwrap_err().contains("left it alone"));
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn unpacking_stopped_anywhere_leaves_nothing_in_steams_folder() {
+        let d = dir("stop");
+        let root = steam(&d);
+        let tag = "GE-Proton10-99";
+        let good = d.join("good.tar.gz");
+        // Big enough to be unpacked in many pieces.
+        let mut tarred = tar::testing::proton(tag);
+        tarred.truncate(tarred.len() - 1024);
+        let noise: Vec<u8> = (0..600_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        tarred.extend(tar::testing::archive(&[tar::testing::entry(b'0', &format!("{tag}/files/big.bin"), "", &noise)]));
+        fs::write(&good, crate::deflate::gzip(&tarred)).unwrap();
+        let names = |p: &Path| -> Vec<String> { fs::read_dir(p).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default() };
+        // How often it asks whether to go on: before every piece, and once more right before the build gets its
+        // name. While it asks, Steam has no build of that name to list.
+        let looks = std::cell::Cell::new(0usize);
+        install_archive_while(&good, tag, &root, &|| {
+            looks.set(looks.get() + 1);
+            assert!(!build_dir(&root, tag).exists(), "the build had its name while it was still unpacked");
+            true
+        })
+        .unwrap();
+        let looks = looks.get();
+        assert!(looks > 4 && installed(&root, tag), "{looks}");
+        fs::remove_dir_all(build_dir(&root, tag)).unwrap();
+        // Stopped at each of them in turn, the very last one (everything unpacked, the name not given yet)
+        // included: no build, no half build.
+        for at in 0..looks {
+            let n = std::cell::Cell::new(0usize);
+            let result = install_archive_while(&good, tag, &root, &|| {
+                n.set(n.get() + 1);
+                n.get() <= at
+            });
+            assert_eq!(result.unwrap_err(), crate::STOPPED, "stopped at look {at}");
+            assert_eq!(names(&tool::tools_dir(&root)), Vec::<String>::new(), "stopped at look {at}");
+        }
+        // What a run that was killed left behind goes at the start of the next: half unpacked builds (under
+        // today's name and the one before it) and downloads. Nothing else with a similar name is touched.
+        let (tools, cache) = (tool::tools_dir(&root), d.join("cache"));
+        fs::create_dir_all(&cache).unwrap();
+        for half in [part_dir(&root, tag), tools.join(format!(".{tag}.turbinehub-unpacking")), tools.join("My Tool.turbinehub-part"), tools.join("GE-Proton10-98")] {
+            fs::create_dir_all(half.join(tag)).unwrap();
+            fs::write(half.join(tag).join("proton"), "half").unwrap();
+        }
+        std::os::unix::fs::symlink(d.join("cache"), tools.join("GE-Proton10-97.turbinehub-part")).unwrap();
+        for f in ["GE-Proton10-99.tar.gz.part", "GE-Proton11-12-x86_64.tar.gz", "notes.tar.gz.part", "proton-ge-release.json"] {
+            fs::write(cache.join(f), "x").unwrap();
+        }
+        assert_eq!(clean_leftovers(&cache, &root), 4);
+        let mut left = names(&tools);
+        left.sort();
+        assert_eq!(left, ["GE-Proton10-97.turbinehub-part", "GE-Proton10-98", "My Tool.turbinehub-part"]);
+        let mut left = names(&cache);
+        left.sort();
+        assert_eq!(left, ["notes.tar.gz.part", "proton-ge-release.json"]);
+        // A half build with that name is cleared by the unpacking itself too, and somebody else's thing with
+        // that name (a link) stops it, untouched.
+        fs::create_dir_all(part_dir(&root, tag).join("old")).unwrap();
+        install_archive(&good, tag, &root).unwrap();
+        assert!(installed(&root, tag) && !part_dir(&root, tag).exists());
+        assert!(install_archive(&good, "GE-Proton10-97", &root).unwrap_err().contains("isn't Turbine Hub's"));
+        assert!(tools.join("GE-Proton10-97.turbinehub-part").exists() && cache.exists());
         let _ = fs::remove_dir_all(&d);
     }
 

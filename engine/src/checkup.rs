@@ -182,14 +182,22 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     out
 }
 
-/// The one-line summary above the list (no greeting).
+/// The one-line summary above the list (no greeting). It counts what needs a look; ideas shown under it are named
+/// in the second line, so the count always matches the cards.
 pub fn headline(items: &[Item]) -> (String, String) {
     let n = items.iter().filter(|i| i.level == Level::Look).count();
-    match n {
-        0 => ("Everything is running fine".into(), String::new()),
-        1 => ("One thing could use a look".into(), "Everything else is running fine.".into()),
-        2 => ("Two things could use a look".into(), "Everything else is running fine.".into()),
-        3 => ("Three things could use a look".into(), "Everything else is running fine.".into()),
-        n => (format!("{n} things could use a look"), "Everything else is running fine.".into()),
-    }
+    let tips = items.len() - n;
+    let ideas = match tips {
+        0 => String::new(),
+        1 => " One idea below too.".into(),
+        t => format!(" {t} ideas below too."),
+    };
+    let head = match n {
+        0 => return ("Everything is running fine".into(), ideas.trim().to_string()),
+        1 => "One thing could use a look".to_string(),
+        2 => "Two things could use a look".into(),
+        3 => "Three things could use a look".into(),
+        n => format!("{n} things could use a look"),
+    };
+    (head, format!("Everything else is running fine.{ideas}"))
 }

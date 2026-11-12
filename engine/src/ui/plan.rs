@@ -97,6 +97,19 @@ impl Plan {
             "danger": b(self.danger),
         }
     }
+    /// Does any step download something (installs and updates from Flathub, Decky Loader, Turbine Hub itself,
+    /// NonSteamLaunchers)? Removing apps works offline.
+    pub fn needs_internet(&self) -> bool {
+        self.steps.iter().any(|x| match x {
+            Step::Host(c) => {
+                let has = |w: &str| c.iter().any(|a| a == w);
+                (has("flatpak") && (has("install") || has("update"))) || has("decky-install")
+            }
+            Step::SelfUpdate | Step::Nsl { .. } => true,
+            _ => false,
+        })
+    }
+
     /// How many system changes the plan makes (helper jobs).
     pub fn helper_jobs(&self) -> usize {
         self.steps.iter().filter(|x| matches!(x, Step::Host(c) if c.iter().any(|a| a == helper::BIN))).count()
@@ -118,6 +131,10 @@ pub(crate) fn state() -> Json {
 
 /// Shows the dialog and keeps the plan until the player answers.
 pub(crate) fn dialog(ui: &mut Ui, plan: Plan) -> Json {
+    // Downloads can't work offline: say so before anything is asked or changed.
+    if ui.offline && plan.needs_internet() {
+        return toast("You're offline. This needs the internet, so try again once you're connected.");
+    }
     let j = plan.to_json();
     ui.pending = Some(plan);
     obj! {"dialog": j}

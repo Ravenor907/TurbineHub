@@ -1,0 +1,239 @@
+# Turbine Hub design
+
+Turbine Hub is the first stop after installing SteamOS: everything the "first things to do" guides tell people to paste into Konsole, done from the couch with a controller (or at a desk with a mouse), explained in Windows terms, checked before it runs, and undoable. It is the successor to AllyHub and covers three kinds of machine: handhelds, desktop PCs, and media-center PCs used in Game Mode on a TV.
+
+The app name is two words, **Turbine Hub**. The repository, Flatpak ID and code use **TurbineHub** / `turbinehub`.
+
+Turbine Mod Manager (github.com/Ravenor907/Turbine-Mod-Manager) is the reference for every engineering choice. Where this document is silent, do what Turbine does.
+
+## 1. Who it is for
+
+- **Guided mode**: people new to SteamOS, often coming from Windows. Walks them through setup, explains things in Windows terms, hides expert controls.
+- **Veteran mode** ("I know more than you."): people who know what they want. One-screen setup, a dashboard Home, every control visible. Replaces AllyHub's Simple/Advanced switch.
+- Both modes have the same features. The first-run screen asks which one; Settings switches any time without losing anything.
+
+Machines, all first-class:
+- Handhelds (Ally X tested; Ally, Ally Z1E, Steam Deck, Legion Go S expected).
+- Desktop PCs in Game Mode and in Desktop Mode with mouse and keyboard.
+- TV PCs in Game Mode with a controller only.
+
+## 2. Product
+
+### Tabs
+Home, Games, Store, My machine, Settings. LB/RB (Q/E on a keyboard) switch tabs.
+
+### First run
+1. Mode picker (Guided or Veteran).
+2. Guided: Your machine (detected), Password, Will my games run?, Bring it over, Picks.
+3. Veteran: Quick setup, one screen of checkboxes, one password, one go. "Load My setup file" applies a saved setup.
+
+### Home
+- Guided: what needs attention first ("Two things could use a look"), the checkup, health stats, a "Finish setting up" card until setup is done.
+- Veteran: dashboard (temps, power, battery, fps, fans), quick switches, compact checkup, activity log.
+- The checkup lists only problems, each with its fix. It includes "known limits" for the hardware in plain words (Nvidia drivers, 4K 120 Hz over HDMI, one screen in Game Mode) and PC checks (monitor below its refresh rate, unused drive).
+
+### Will my games run? (library check)
+Every owned game (Steam, plus Epic, GOG and Amazon through Heroic, plus Game Pass titles) gets Works, Needs a fix (one tap), or Won't run here with the best alternative (GeForce NOW, Xbox Cloud, or Restart to Windows). Data: Valve's SteamOS ratings, anti-cheat lists, Turbine Hub's own fixes. Fetched fresh, never pinned in the app.
+
+### Bring it over from Windows
+- Other stores: Heroic (Epic, GOG, Amazon) and NonSteamLaunchers (Battle.net, EA, Ubisoft, Rockstar) as library tiles with art.
+- Game Pass: Xbox Cloud as a tile. Local Game Pass (Xodus Nexus) only under Veteran, labeled Experimental.
+- Your Windows drive: found automatically, read only, never written. Copies Steam games into a SteamOS library (no re-download) and saves into the right Proton prefixes. Saves use Ludusavi's CLI with the Windows drive added as an "other Windows" root.
+- Your Windows apps: pick the Windows apps you use, get the SteamOS version of each in one install (Discord, MangoHud and MangoJuice for MSI Afterburner, Steam Input for DS4Windows, Xbox Cloud for the Xbox app, and so on).
+- TV and streaming: Netflix, YouTube, Disney+, Twitch, Plex as controller-ready tiles.
+- "Where's my...?": Windows things and where they are on SteamOS.
+
+### Games
+Per-game switches (FSR 4 upgrade, frame generation, Steam Deck mode, Proton log, Proton choice), "Won't start?" help (another Proton, reset Windows files with a backup, send a report), the save time machine (snapshot at every launch, restore, undo). Mods open Turbine Mod Manager. Games whose anti-cheat runs online are locked: Turbine Hub never changes them.
+
+### Store
+Essentials, Apps (Flathub), Decky plugins (with turn-off and "Turn all off" for troubleshooting), Launchers, TV and streaming, Emulation (EmuDeck), Installed. Update all. Everything installed keeps itself current.
+
+### My machine
+Capability modules, shown only when the hardware has them:
+- Handheld: Power (TDP, Game Boost), Display (refresh, guided experimental refresh test with automatic revert), Lighting (Ally rings first), Battery (charge limit, history), Sleep (drain per sleep, wake sources), Dock, Tune-up, Restart to Windows.
+- PC: Graphics card (fan curve, power limit, safe reset), Processor (Game Boost), Monitors (refresh, VRR, HDR, which screen Game Mode uses), Drives (set up a drive as a game library, Windows drives read only), Sound (output), Sleep and wake (Wake on LAN, controller wake, USB wake), Tune-up, Restart to Windows.
+- TDP is shown only where the kernel exposes power limits, and hidden while Steam's own slider, SimpleDeckyTDP or Ally Center manages it.
+
+### Settings
+Mode, interface size (50 to 150%, re-flows), animations, theme and accent (Turbine's design system), updates, My setup (save and apply), help and reports (Labs mode as in Turbine), Bring it over again, "Review changes" (undo anything, one step at a time), remove Turbine Hub completely.
+
+### Deferred
+Phone remote and Wake-on-LAN web page: after the core is solid.
+
+### Dropped from AllyHub
+The git-clone installer, the Testing Rescue entry, four-part versions, layout variants (tabs on the side, bottom bar off), the extra AllyHub theme, anything that places files in a game folder (that is Turbine Mod Manager's job).
+
+### Wording rules
+- Player-facing words are short and plain, with one glossary used everywhere.
+- No past tense about the player ("Your Windows apps", not "I used to use").
+- No greetings or time-of-day remarks.
+- No placeholder art: game and app art only where real art exists (Steam's art, Flathub icons), otherwise the name alone.
+- No em or en dashes.
+
+### Controls and layout (from Turbine)
+- One footer hint bar with a fixed priority order. A and B are never dropped, VIEW and START have short labels, LB/RB show tab names. With a keyboard the hints switch to keys (Enter, Esc, Q/E, F1).
+- One dialog template: sizes to its content, buttons pinned, controller glyph inside each button.
+- Distinct focus, selected and primary styles. Every action has its own icon.
+- Scroll fades, the focused item always fully in view, toasts inside the content area, top insets, dark scrims behind overlays.
+- Body text at least 14 px at 1280x800. Interface size 50 to 150% re-flows instead of truncating.
+- One motion system with an Animations on/off setting.
+- In Game Mode everything opens inside the app, never in a new window.
+- Screens are checked at 1280x800, 1920x1080 and a 1600x900 Desktop Mode window.
+
+## 3. Architecture
+
+```
+TurbineHub/
+  Cargo.toml          workspace: engine, app, helper (edition 2024, toolchain 1.97.0 in CI)
+  VERSION             one-dot version, e.g. 0.1
+  engine/             all logic, std only, unit tested
+  app/                Qt 6 QML UI through cxx-qt (+ a little C++ glue)
+    qml/              UI glue only; SelfCheck.qml loads only in --screenshot mode
+  helper/             turbinehub-helper: the privileged helper, std only, tiny
+  decky/              optional quick panel: TypeScript frontend, Python backend that only calls --json
+  packaging/          Flatpak manifest, desktop file, metainfo, icons, Steam art
+  tools/              ci-shots.sh, qml-check.js, release-check.py (from Turbine)
+  .github/workflows/  build.yml (from Turbine)
+```
+
+### engine (std only)
+Copied from Turbine where they fit: `json`, `vdf`, `sha256`, `zip`, `net` (curl with fixed arguments), `steam`, `shortcuts`, `steam_art`, `compat_tool`, `selfupdate`, `report`, `anticheat` (the online anti-cheat list only).
+
+New:
+- `hardware`: reads DMI, sysfs, DRM and PCI once into a `Machine` (kind, CPU, GPU, panel, battery, lighting, power limits, drives, monitors). Each module asks it for a `Capability`.
+- `modules/*`: one file per capability (power, display, lighting, battery, sleep, dock, gpu, cpu, monitors, drives, sound, wake, tuneup, windows_boot). Each answers: applies? current state? what change would X make? what does undo look like?
+- `checkup`: rules that turn state into "needs a look" items with a fix.
+- `library`: owned games from Steam and Heroic, Valve ratings, anti-cheat status, the three labels and the alternative.
+- `bring`: stores, Game Pass, Windows drive scan (games and Ludusavi save plan), Windows app map.
+- `store`: Flathub (via `flatpak` on the host), Decky store, launchers, streaming tiles.
+- `saves`: save time machine on top of the Ludusavi CLI.
+- `ledger`: the change record shared with the helper (see 4).
+- `settings`, `glossary`, `mode`, `migrate` (AllyHub import, runs once).
+- `cli`: `--json` verbs for the Decky backend and scripts.
+
+Every decision (filtering, sorting, what to warn about, what a check means) is Rust with tests. QML only shows what the engine says.
+
+### app
+cxx-qt bridge objects expose engine state to QML. A `--screenshot <page> <size>` mode renders a page with fake data and loads SelfCheck.qml, which checks clipped text, overflow and missing footer hints.
+
+### Background agent
+The same Flatpak run as `turbinehub --agent`, started by a systemd **user** unit in `~/.config/systemd/user/` (user-level, survives SteamOS updates). It watches game launches (Game Boost on/off, save snapshots), records battery and sleep history, animates lighting, checks for updates daily, and runs the after-update check (see 4.6).
+
+### Steam integration
+- Adds itself to Steam with art (Turbine's shortcuts and steam_art).
+- Per-game settings go through **one** compatibility tool, shared with Turbine Mod Manager, because Steam allows one tool per game. The tool is Turbine's tool, extended: it reads Turbine's mod launch settings and Turbine Hub's per-game switches (env vars, frame generation, chosen Proton) from a shared folder. Whichever app is newer installs the tool, so either app works alone. No Launch Options edits and no Steam restarts.
+- Games with online anti-cheat are never given the tool or any switch.
+
+### Decky quick panel
+Optional. TypeScript frontend, Python backend that only runs `flatpak run io.github.ravenor907.TurbineHub --json <verb>`. No logic of its own.
+
+### Flatpak
+org.kde.Platform/Sdk 6.11 with rust-stable, offline build, vendored crates, committed Cargo.lock, built in ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11. Permissions as Turbine's, plus what the modules need (read-only `/sys` and `/run/udev` data, `/run/media`, Ludusavi's and Heroic's folders). Host actions use `flatpak-spawn --host`.
+
+ID: `io.github.ravenor907.TurbineHub`.
+
+## 4. The privileged helper
+
+### 4.1 Goals
+- Small and auditable: one std-only Rust binary, a fixed list of verbs, no shell, no free-form commands, no arbitrary paths.
+- Every change recorded, backed up first, undoable.
+- Survives SteamOS updates, or is put back automatically after one.
+- Never touches the read-only system: no pacman, no `steamos-readonly disable`, nothing under `/usr`.
+- One password, once.
+
+### 4.2 Where things live
+SteamOS keeps `/etc` (an overlay) and `/var` across updates; `/usr` is replaced. So:
+
+| What | Where | Owner |
+|---|---|---|
+| Helper binary | `/var/lib/turbinehub/bin/turbinehub-helper` | root, 0755 |
+| Change ledger | `/var/lib/turbinehub/ledger.json` | root, 0644 |
+| Backups of every file it changes | `/var/lib/turbinehub/backup/<change id>` | root |
+| Helper log | `/var/lib/turbinehub/helper.log` | root, 0644 |
+| Permission rule | `/etc/polkit-1/rules.d/49-turbinehub.rules` | root |
+| Boot re-apply unit | `/etc/systemd/system/turbinehub-reapply.service` | root |
+
+The helper files are root-owned and not writable by the user, so the user account can't swap the binary that the rule allows.
+
+### 4.3 How the app calls it
+1. **First install (the one password):** the in-app password dialog (works in Game Mode, where no system password prompt exists) runs `flatpak-spawn --host sudo -S -k` with the password on stdin, once, to copy the helper from the Flatpak into `/var/lib/turbinehub/bin`, check its SHA-256, write the polkit rule and the boot unit. The password is never stored.
+2. **After that:** `flatpak-spawn --host pkexec /var/lib/turbinehub/bin/turbinehub-helper <verb> <json args>`. The polkit rule says YES only for that exact program path, for the active local session of the user who installed it. No password, works in Game Mode.
+3. **Updates:** a new app version carries a new helper. The app compares versions and asks the old helper to replace itself (`self-update` verb with the new binary's path and SHA-256; it copies, verifies and swaps).
+
+### 4.4 Verbs (the whole list)
+Each verb validates its arguments against fixed allowlists; anything else is refused and logged.
+
+| Verb | Does | Limits |
+|---|---|---|
+| `status` | Version, ledger summary | read only |
+| `file-put` | Writes one config file | only names starting `turbinehub-` / `90-turbinehub-` in `/etc/sysctl.d`, `/etc/udev/rules.d`, `/etc/tmpfiles.d`, `/etc/modprobe.d`, `/etc/systemd/system`, `/etc/systemd/zram-generator.conf.d`; content size capped |
+| `file-remove` | Removes a file it created | only files in the ledger |
+| `sysfs-set` | Writes one runtime value | allowlisted patterns: battery charge threshold, platform power limits, CPU EPP and governor, USB/PCI wakeup, GPU fan curve and power cap (amdgpu), LED brightness |
+| `service` | enable, disable, start, stop, restart | allowlisted units: `sshd`, `plugin_loader` (Decky), `tailscaled`, `turbinehub-*` |
+| `reload` | udev reload and trigger, sysctl load, systemd daemon-reload | fixed commands |
+| `decky-install` | Installs or repairs Decky Loader from its official release | release checked by SHA-256 before running |
+| `boot-next` | Sets the next boot to an existing EFI entry (Restart to Windows) | entry must exist and be a Windows Boot Manager entry |
+| `undo` | Reverts one change from its backup | only ledger entries |
+| `undo-all` | Reverts everything, newest first | |
+| `reapply` | Puts back runtime values and missing files from the ledger | run at boot and after updates |
+| `verify` | Compares the ledger with the system, reports drift | read only |
+| `self-update` | Replaces the helper binary | SHA-256 checked |
+| `uninstall` | `undo-all`, then removes the rule, unit, binary and `/var/lib/turbinehub` | |
+
+Drive formatting is **not** a helper verb. The Drives module hands off to SteamOS's own formatting in Steam's Storage settings, and only offers drives that are not the system drive.
+
+### 4.5 The ledger
+One JSON file, one entry per change:
+
+```json
+{"id":"0007","module":"tuneup","what":"zram swap","kind":"file",
+ "path":"/etc/systemd/zram-generator.conf.d/turbinehub-zram.conf",
+ "before":{"existed":false},"after":{"sha256":"..."},
+ "backup":"backup/0007","applied":"2026-11-12T03:40:00Z","steamos":"3.8.13",
+ "reapply":"boot"}
+```
+
+- `kind`: file, sysfs, service, decky, bootnext.
+- `before` is captured before anything changes; a file that existed is copied into `backup/`.
+- `reapply`: `never` (persists by itself, e.g. files in `/etc`), `boot` (runtime values such as charge limit), `game` (Game Boost, applied by the agent while a game runs).
+- The app shows the ledger as **Settings, Review changes**: every change in plain words, with Undo.
+
+### 4.6 SteamOS updates
+- Files in `/etc` and everything in `/var` survive.
+- Runtime values are put back at every boot by `turbinehub-reapply.service`.
+- After an update (the agent sees the SteamOS version change), the app runs `verify`. Anything SteamOS now does itself (for example a tune-up item that became default) is reported and offered for removal. Anything that drifted is re-applied, and the player is told in one line.
+
+### 4.7 Safety rules
+- Check before applying: every module states the exact change and the undo before asking.
+- Back up before any change.
+- Never touch a game whose anti-cheat runs online.
+- Never write to a Windows (NTFS) drive.
+- The helper refuses to run if its own file or folder is writable by anyone but root.
+
+## 5. Updates, reports, CI
+
+- Updates: GitHub releases checked at startup, installed only when the player agrees, bundle checked by SHA-256 (Turbine's selfupdate). Test builds: opt-in pre-releases.
+- Reports and Labs mode: Turbine's report and Labs.
+- A release only ships a bundle from a green CI run of the same commit (Turbine's reuse and release jobs).
+- CI follows Turbine's build.yml: house rules check, engine tests and `clippy -D warnings` on 1.97.0, QML syntax check, release rules, Flatpak build, screenshot shards at 1280x800, 1920x1080 and 1600x900 with SelfCheck, stand-in servers and fake home folders (a live check may warn, never fail), layout checks and before/after screenshot comparison.
+- The repo variable `TURBINE_RUNNER` picks GitHub's runners or the owner's PC. The PC gets its own runner set with the label `turbinehub`, and a matching switch next to `~/dev-setup/turbine-ci`.
+
+## 6. Migration from AllyHub
+
+1. Detect AllyHub's install, settings and every system change it made (its udev, polkit, sysctl, tmpfiles and service files, Decky changes, environment.d entries).
+2. For each change: take it over into the ledger (same effect, Turbine Hub's file) or undo it, with the player's choice per group.
+3. Import settings once (lighting, per-game switches, favorites). No compatibility code for old formats after that.
+4. Remove AllyHub.
+
+## 7. Build order
+
+1. Feature inventory: done (this document, sections 1 and 2).
+2. Architecture and helper design: this document, sections 3 and 4. **Needs the owner's approval.**
+3. Engine with tests.
+4. App UI (from the reviewed mockups).
+5. CI and runners.
+6. Decky plugin.
+7. Migration from AllyHub.
+8. Screenshot review of every screen at every size.
+9. A hands-on checklist for the owner to try in Game Mode.

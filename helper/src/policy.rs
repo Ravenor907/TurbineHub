@@ -53,7 +53,13 @@ impl Access {
     /// The rule text. Fixed: nothing in it comes from the caller.
     pub fn rule(self) -> &'static str {
         match self {
-            Access::Lighting => "SUBSYSTEM==\"leds\", KERNEL==\"*:rgb:*\", RUN+=\"/usr/bin/chmod 0666 /sys%p/brightness /sys%p/multi_intensity\"\n",
+            // Every multicolor LED's color and brightness files, and, on ASUS controllers only, the helper's own
+            // check of each hidraw interface (`hid-access`): it opens the one that takes lighting commands and the
+            // Dynamic Lighting one for writing, never for reading, and leaves every other interface as it was.
+            Access::Lighting => concat!(
+                "SUBSYSTEM==\"leds\", TEST==\"multi_intensity\", RUN+=\"/usr/bin/chmod 0666 /sys%p/brightness /sys%p/multi_intensity\"\n",
+                "SUBSYSTEM==\"hidraw\", KERNEL==\"hidraw*\", ATTRS{idVendor}==\"0b05\", RUN+=\"/var/lib/turbinehub/bin/turbinehub-helper hid-access %k\"\n",
+            ),
             Access::Ntsync => "KERNEL==\"ntsync\", MODE=\"0666\"\n",
         }
     }
@@ -466,6 +472,13 @@ mod tests {
         assert!(from(r#"{"kind":"module","name":"evil"}"#).is_err());
         assert!(from(r#"{"kind":"access","what":"lighting"}"#).is_ok());
         assert!(from(r#"{"kind":"access","what":"everything"}"#).is_err());
+        // The lighting rule is fixed text: multicolor LEDs, and ASUS hidraw interfaces handed to the helper's own
+        // check, which runs from the one place the helper is installed.
+        let rule = Access::Lighting.rule();
+        assert_eq!(rule.lines().count(), 2);
+        assert!(rule.contains("TEST==\"multi_intensity\"") && rule.contains("ATTRS{idVendor}==\"0b05\""));
+        assert!(rule.contains(&format!("RUN+=\"{} hid-access %k\"", crate::ops::BIN)));
+        assert!(!rule.contains("MODE"));
         assert!(from(r#"{"kind":"file","path":"/etc/sudoers"}"#).is_err());
     }
 

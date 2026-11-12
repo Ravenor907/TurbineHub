@@ -171,8 +171,12 @@ pub fn machine(root: &Path, preset: Preset) {
                 w(root, &format!("{fw}/{a}/current_value"), &format!("{now}\n"));
             }
             w(root, "/sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences", "default performance balance_performance balance_power power\n");
-            w(root, "/sys/class/leds/multicolor:rgb:joystick/brightness", "128\n");
-            w(root, "/sys/class/leds/multicolor:rgb:joystick/multi_intensity", "255 0 0\n");
+            // Joystick rings like the ROG Ally's: four parts (two per stick), red, green and blue each.
+            let rings = "/sys/class/leds/ally:rgb:joystick_rings";
+            w(root, &format!("{rings}/brightness"), "128\n");
+            w(root, &format!("{rings}/max_brightness"), "255\n");
+            w(root, &format!("{rings}/multi_index"), "red green blue red green blue red green blue red green blue\n");
+            w(root, &format!("{rings}/multi_intensity"), "255 0 0 255 0 0 255 0 0 255 0 0\n");
             drive(root, "nvme0n1", "NVMe SSD 1TB", 1_000_204_886_016, false, "259", &[("nvme0n1p1", "vfat", "esp", "esp", ""), ("nvme0n1p4", "btrfs", "rootfs", "rootfs-A", ""), ("nvme0n1p8", "ext4", "home", "home", "")]);
             drive(root, "mmcblk0", "SD 512GB", 512_000_000_000, true, "179", &[("mmcblk0p1", "ext4", "", "", "")]);
             mounts(root, &[("mmcblk0p1", "/run/media/deck/sdcard")]);

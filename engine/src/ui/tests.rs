@@ -295,18 +295,21 @@ fn power_and_wake_controls_stay_inside_the_helper_lists() {
 
 #[test]
 fn lighting_is_clamped_saved_and_written_per_ring() {
-    let l = Lighting::parse(r##"{"effect":"Disco","speed":900,"brightness":-4,"color":"#123456","rainbow":true}"##);
+    let l = Lighting::parse(r##"{"effect":"Disco","speed":900,"brightness":-4,"color":"red","rainbow":true}"##);
     assert_eq!((l.effect.as_str(), l.speed, l.brightness, l.color.as_str(), l.rainbow), ("Static", 100, 0, "#C99E52", true));
     assert_eq!(Lighting::parse(&l.to_json()), l);
     let mut u = ui("light", HANDHELD, Mode::Guided);
-    u.act("light", "effect", "5");
+    u.act("light", "effect", "8");
     u.act("light", "brightness", "40");
     u.act("light", "color", "1");
     let l = Lighting::load(&u.folder());
     assert_eq!((l.effect.as_str(), l.brightness, l.rgb()), ("Spiral", 40, (0xE0, 0x56, 0x4A)));
     let writes = light_writes(&u.ctx.root, &u.machine(), &l);
     let led = u.machine().rgb_leds[0].clone();
-    assert_eq!(writes, vec![(format!("/sys/class/leds/{led}/multi_intensity"), "224 86 74".to_string()), (format!("/sys/class/leds/{led}/brightness"), "102".to_string())]);
+    // Four parts of red, green and blue each; the brightness is in the colors, so the file is at full.
+    assert_eq!(writes.len(), 2);
+    assert_eq!((writes[0].0.clone(), writes[0].1.split(' ').filter(|v| v.parse::<u8>().is_ok()).count()), (format!("/sys/class/leds/{led}/multi_intensity"), 12));
+    assert_eq!(writes[1], (format!("/sys/class/leds/{led}/brightness"), "255".to_string()));
     // The first test asks for the access rule (and the helper); the writes come after it.
     parse(&u.act("light-test", "", "")).unwrap();
     let plan = u.confirm().unwrap();

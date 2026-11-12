@@ -263,3 +263,52 @@ fn install_and_uninstall() {
     assert!(!sys.p(ops::STATE_DIR).exists() && !sys.p(ops::POLKIT_RULE).exists());
 }
 
+#[test]
+fn only_asus_lighting_interfaces_are_opened_and_only_for_writing() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut sys = machine("hid");
+    // The Ally's config interface (a keyboard and ASUS lighting), its Dynamic Lighting interface, its gamepad, and
+    // a receiver from another maker that has the same lighting collection.
+    let config: &[u8] = &[0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x81, 0x02, 0xC0, 0x06, 0x31, 0xFF, 0x09, 0x80, 0xA1, 0x01, 0x91, 0x00, 0xC0];
+    let lamp: &[u8] = &[0x05, 0x59, 0x09, 0x01, 0xA1, 0x01, 0xC0];
+    let pad: &[u8] = &[0x05, 0x01, 0x09, 0x05, 0xA1, 0x01, 0xC0];
+    let node = |sys: &Sys<Fake>, n: &str, id: &str, desc: &[u8]| {
+        let d = sys.p(&format!("/sys/class/hidraw/{n}/device"));
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("uevent"), format!("HID_ID=0003:{id}\n")).unwrap();
+        fs::write(d.join("report_descriptor"), desc).unwrap();
+    };
+    fs::create_dir_all(sys.p("/dev")).unwrap();
+    for (n, id, desc) in [("hidraw0", "00000B05:00001B4C", config), ("hidraw1", "00000B05:00001B4C", lamp), ("hidraw2", "00000B05:00001B4C", pad), ("hidraw3", "0000046D:0000C548", config)] {
+        node(&sys, n, id, desc);
+        fs::write(sys.p(&format!("/dev/{n}")), "").unwrap();
+        fs::set_permissions(sys.p(&format!("/dev/{n}")), fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let mode = |sys: &Sys<Fake>, n: &str| fs::metadata(sys.p(&format!("/dev/{n}"))).unwrap().permissions().mode() & 0o777;
+    // Not before the player asked for the lighting rule.
+    assert_eq!(sys.hid_access("hidraw0"), Ok(false));
+    assert_eq!(mode(&sys, "hidraw0"), 0o600);
+    sys.apply(set(r#"{"kind":"access","what":"lighting"}"#)).unwrap();
+    assert!(read(&sys, policy::ACCESS_FILE).contains("hid-access %k"));
+    assert!(sys.run.calls.iter().any(|c| c == "udevadm trigger --action=add --subsystem-match=hidraw"));
+    assert_eq!(sys.hid_access("hidraw0"), Ok(true));
+    assert_eq!(sys.hid_access("hidraw1"), Ok(true));
+    assert_eq!(sys.hid_access("hidraw2"), Ok(false));
+    assert_eq!(sys.hid_access("hidraw3"), Ok(false));
+    // Written by anyone, read by root only.
+    assert_eq!([mode(&sys, "hidraw0"), mode(&sys, "hidraw1"), mode(&sys, "hidraw2"), mode(&sys, "hidraw3")], [0o602, 0o602, 0o600, 0o600]);
+    for bad in ["../hidraw0", "hidraw0/../../etc", "event0", "sda"] {
+        assert!(sys.hid_access(bad).is_err(), "{bad}");
+    }
+    // A link in /dev is never followed.
+    node(&sys, "hidraw4", "00000B05:00001B4C", config);
+    std::os::unix::fs::symlink("../secret", sys.p("/dev/hidraw4")).unwrap();
+    assert!(sys.hid_access("hidraw4").is_err());
+    // At boot, reapply opens them again (a fresh /dev).
+    fs::set_permissions(sys.p("/dev/hidraw0"), fs::Permissions::from_mode(0o600)).unwrap();
+    let _ = sys.reapply();
+    assert_eq!(mode(&sys, "hidraw0"), 0o602);
+    assert_eq!(read(&sys, "/secret"), "do not touch\n");
+    let _ = fs::remove_dir_all(&sys.root);
+}
+

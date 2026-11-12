@@ -236,7 +236,7 @@ fn lighting_and_dock_follow_the_background_helper() {
     Report { at: crate::now(), ..Report::default() }.save(&u.data);
     u.act("light", "color", "2");
     assert_eq!(Lighting::load(&u.folder()).color, COLORS[2].1);
-    assert!(Lighting::parse(r##"{"gameColors":{"steam:1":"#123456","steam:2":"#FFFFFF","steam:3":7}}"##).game_colors.keys().eq(["steam:2"]));
+    assert!(Lighting::parse(r##"{"gameColors":{"steam:1":"#12345G","steam:2":"#FFFFFF","steam:3":7}}"##).game_colors.keys().eq(["steam:2"]));
     // The Dock card says what docking changes.
     let card = |u: &mut Ui| parse(&u.page("machine", "")).unwrap().get("cards").unwrap().as_array().iter().find(|c| c.str_at("id") == Some("dock")).unwrap().str_at("value").unwrap().to_string();
     assert_eq!(card(&mut u), "Nothing changes");
@@ -282,4 +282,51 @@ fn game_boost_says_what_it_still_needs() {
     let j = parse(&u.act("boost", "", "")).unwrap();
     assert_eq!((j.str_at("toast"), j.str_at("open")), (Some("Game Boost starts once the background helper is on. Settings, General."), Some("settings")));
     done("boost");
+}
+
+#[test]
+fn the_lighting_page_puts_the_look_first_and_the_checkup_offers_the_setup() {
+    use super::lighting::PRESETS;
+    let mut u = ui("looks", HANDHELD, Mode::Guided);
+    let page = parse(&u.page("module:lighting", "")).unwrap();
+    // After the one-time setup row: the preview of two rings of two parts, the brightness, the looks as cards.
+    let r = rows(&page);
+    assert_eq!((r[1].str_at("kind"), r[2].str_at("arg"), r[3].str_at("arg")), (Some("preview"), Some("brightness"), Some("preset")));
+    assert_eq!(r[1].get("rings").and_then(Json::as_f64), Some(2.0));
+    assert_eq!(r[1].get("frames").map(|f| (f.as_array().len(), f.as_array()[0].as_array().len())), Some((80, 4)));
+    assert_eq!((r[3].get("cards").and_then(Json::as_bool), r[3].get("options").map(|o| o.as_array().len())), (Some(true), Some(PRESETS.len())));
+    // Picking a look with A: the whole preset, shown as picked.
+    let spiral = PRESETS.iter().position(|p| p.name == "RGB Spiral").unwrap();
+    u.act("light", "preset", &spiral.to_string());
+    let l = Lighting::load(&u.folder());
+    assert_eq!((l.effect.as_str(), l.preset.as_str(), l.chip, l.rainbow), ("Spiral", "RGB Spiral", true, true));
+    let page = parse(&u.page("module:lighting", "")).unwrap();
+    assert_eq!(rows(&page)[3].get("index").and_then(Json::as_f64), Some(spiral as f64));
+    assert!(rows(&page).iter().any(|r| r.str_at("title") == Some("Direction")));
+    // Changing the speed makes it the player's own look.
+    u.act("light", "speed", "80");
+    assert_eq!(Lighting::load(&u.folder()).preset, "");
+    // While a game runs with a look per game, the card picks the game's look.
+    u.act("light", "pergame", "");
+    Report { at: crate::now(), game: Some(("steam:1086940".into(), "Baldur's Gate 3".into(), crate::now() - 600)), ..Report::default() }.save(&u.data);
+    u.act("light", "preset", "7");
+    let l = Lighting::load(&u.folder());
+    assert_eq!((l.effect.as_str(), l.game_colors.get("steam:1086940").map(String::as_str)), ("Spiral", Some("preset:Ember")));
+    assert_eq!(row_titled(&parse(&u.page("module:lighting", "")).unwrap(), "Look for Baldur's Gate 3").get("index").and_then(Json::as_f64), Some(7.0));
+    // Saved choices the lights can't take yet: the checkup says so, and its Fix is the setup.
+    let item = u.facts_now();
+    assert!(item.lights_locked);
+    let fix = crate::checkup::items(&u.machine(), &item).into_iter().find(|i| i.id == "lights").unwrap();
+    assert_eq!(fix.action, ("Fix", "light-test"));
+    parse(&u.act("checkup", "light-test", "")).unwrap();
+    let plan = u.confirm().unwrap();
+    assert!(plan.steps.iter().any(|s| matches!(s, Step::Host(line) if line.iter().any(|a| a.contains("\"access\"")))), "{:?}", plan.steps);
+    // Handed to HueSync: Turbine Hub leaves the lights alone and the checkup stops asking.
+    u.act("light", "huesync", "");
+    assert!(!u.facts_now().lights_locked);
+    assert_eq!(rows(&parse(&u.page("module:lighting", "")).unwrap()).len(), 1);
+    // A lighting report has what Turbine Hub sees of the lights.
+    let text = super::games::report_text(&u, super::lighting::REPORT, "now");
+    assert!(text.contains("Lighting:\n  ally:rgb:joystick_rings: zones 4"), "{text}");
+    done("looks");
 }

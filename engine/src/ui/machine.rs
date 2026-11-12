@@ -7,111 +7,15 @@ use crate::helper::{self, Setting};
 use crate::json::{self, Json};
 use crate::modules;
 use crate::tuneup::{self, State};
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
-pub const EFFECTS: &[&str] = &["Static", "Breathe", "Heartbeat", "Color cycle", "Wave", "Spiral", "Candle", "Twinkle"];
-pub const COLORS: &[(&str, &str)] = &[("Brass", "#C99E52"), ("Red", "#E0564A"), ("Orange", "#E08A3C"), ("Green", "#6FAE8C"), ("Blue", "#6E9CC8"), ("Purple", "#A58BC6"), ("White", "#FFFFFF")];
 const CHARGE: &[u32] = &[60, 70, 80, 90, 100];
 const RATES: &[u32] = &[50, 60, 75, 90, 100, 120, 144, 165, 180, 240, 360];
 const VRR: &[(&str, &str)] = &[("Off", "never"), ("Automatic", "automatic"), ("Always", "always")];
 
-/// The player's lighting and dock choices. The background helper plays the moving effects; Test lights shows the
-/// color and brightness right away.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Lighting {
-    pub effect: String,
-    /// 0 (slow) to 100 (fast).
-    pub speed: u32,
-    /// 0 to 100 percent.
-    pub brightness: u32,
-    /// One of `COLORS`, as "#RRGGBB".
-    pub color: String,
-    pub rainbow: bool,
-    pub per_game: bool,
-    pub battery_level: bool,
-    pub off_when_docked: bool,
-    pub tv_sound_when_docked: bool,
-    /// With `per_game`: the color each game keeps, game id ("steam:1145360") to one of `COLORS`.
-    pub game_colors: BTreeMap<String, String>,
-}
-
-impl Default for Lighting {
-    fn default() -> Self {
-        Lighting { effect: "Static".into(), speed: 50, brightness: 60, color: COLORS[0].1.into(), rainbow: false, per_game: false, battery_level: false, off_when_docked: false, tv_sound_when_docked: false, game_colors: BTreeMap::new() }
-    }
-}
-
-impl Lighting {
-    fn file(folder: &Path) -> PathBuf {
-        folder.join("lighting.json")
-    }
-    pub fn parse(text: &str) -> Lighting {
-        let d = Lighting::default();
-        let Ok(j) = json::parse(text) else { return d };
-        let flag = |k: &str| j.get(k).and_then(Json::as_bool).unwrap_or(false);
-        let pct = |k: &str, def: u32| j.get(k).and_then(Json::as_f64).map(|v| (v.round() as i64).clamp(0, 100) as u32).unwrap_or(def);
-        Lighting {
-            effect: j.str_at("effect").filter(|e| EFFECTS.contains(e)).unwrap_or(&d.effect).to_string(),
-            speed: pct("speed", d.speed),
-            brightness: pct("brightness", d.brightness),
-            color: j.str_at("color").filter(|c| COLORS.iter().any(|(_, h)| h == c)).unwrap_or(&d.color).to_string(),
-            rainbow: flag("rainbow"),
-            per_game: flag("perGame"),
-            battery_level: flag("batteryLevel"),
-            off_when_docked: flag("offWhenDocked"),
-            tv_sound_when_docked: flag("tvSoundWhenDocked"),
-            game_colors: j.get("gameColors").map(Json::entries).unwrap_or(&[]).iter().filter_map(|(id, c)| Some((id.clone(), c.as_str().filter(|c| COLORS.iter().any(|(_, h)| h == c))?.to_string()))).collect(),
-        }
-    }
-    pub fn to_json(&self) -> String {
-        obj! {"effect": s(&self.effect), "speed": n(self.speed as f64), "brightness": n(self.brightness as f64), "color": s(&self.color), "rainbow": b(self.rainbow), "perGame": b(self.per_game), "batteryLevel": b(self.battery_level), "offWhenDocked": b(self.off_when_docked), "tvSoundWhenDocked": b(self.tv_sound_when_docked), "gameColors": Json::Obj(self.game_colors.iter().map(|(id, c)| (id.clone(), s(c))).collect())}.to_text() + "\n"
-    }
-    pub fn load(folder: &Path) -> Lighting {
-        std::fs::read_to_string(Self::file(folder)).map(|t| Lighting::parse(&t)).unwrap_or_default()
-    }
-    pub fn save(&self, folder: &Path) {
-        let _ = crate::write_atomic(&Self::file(folder), self.to_json().as_bytes());
-    }
-    /// The color as red, green and blue, 0 to 255.
-    pub fn rgb(&self) -> (u8, u8, u8) {
-        let h = self.color.trim_start_matches('#');
-        let p = |i: usize| u8::from_str_radix(h.get(i..i + 2).unwrap_or("00"), 16).unwrap_or(0);
-        (p(0), p(2), p(4))
-    }
-}
-
-/// The lighting files to write for the still color and brightness: (path, value) per light. The color file keeps
-/// as many numbers as it holds now (some lights take one color per part).
-pub fn light_writes(root: &Path, m: &Machine, l: &Lighting) -> Vec<(String, String)> {
-    let (r, g, bl) = l.rgb();
-    let mut out = Vec::new();
-    for led in &m.rgb_leds {
-        if led.contains('/') || led.contains("..") {
-            continue;
-        }
-        let dir = format!("/sys/class/leds/{led}");
-        let now = std::fs::read_to_string(root.join(format!("{}/multi_intensity", dir.trim_start_matches('/')))).unwrap_or_default();
-        let sets = (now.split_whitespace().count() / 3).max(1);
-        out.push((format!("{dir}/multi_intensity"), vec![format!("{r} {g} {bl}"); sets].join(" ")));
-        out.push((format!("{dir}/brightness"), (l.brightness * 255 / 100).to_string()));
-    }
-    out
-}
-
-/// What docking changes, in a few words.
-pub(crate) fn dock_words(l: &Lighting) -> String {
-    match (l.off_when_docked, l.tv_sound_when_docked) {
-        (true, true) => "Lights off, sound to the TV",
-        (true, false) => "Lights off",
-        (false, true) => "Sound to the TV",
-        (false, false) => "Nothing changes",
-    }
-    .into()
-}
+pub use super::lighting::{COLORS, EFFECTS, Lighting, dock_words, light_writes};
 
 /// A row that says the background helper is off, on the pages whose controls only work with it. None while it runs.
-fn agent_off_row(ui: &Ui, what: &str) -> Option<Json> {
+pub(crate) fn agent_off_row(ui: &Ui, what: &str) -> Option<Json> {
     (!ui.agent_running()).then(|| with(with(with(with(row("open", "settings", "button", "The background helper is off", &format!("{what} it. Settings, General turns it on.")), "button", s("Settings")), "badge", s("Off")), "tone", s("warn")), "icon", s("external")))
 }
 
@@ -249,38 +153,7 @@ pub(crate) fn module(ui: &mut Ui, id: &str) -> Json {
             }
             ("Display".into(), String::new(), vec![section("", rows)])
         }
-        "lighting" => {
-            let l = Lighting::load(&ui.folder());
-            let effect = with(with(row("light", "effect", "choice", "Effect", ""), "options", arr(EFFECTS.iter().map(|e| s(*e)))), "index", n(EFFECTS.iter().position(|e| *e == l.effect).unwrap_or(0) as f64));
-            let slider = |key: &str, title: &str, v: u32, low: &str, high: &str| {
-                let mut r = with(row("light", key, "slider", title, ""), "value", n(v as f64));
-                for (k, x) in [("min", 0.0), ("max", 100.0), ("step", 10.0)] {
-                    r = with(r, k, n(x));
-                }
-                with(with(with(r, "live", b(true)), "low", s(low)), "high", s(high))
-            };
-            // With colors per game on, the color picked while a game runs is that game's own.
-            let playing = ui.agent().game_now(crate::now()).cloned().filter(|_| l.per_game);
-            let (color_title, color_now) = match &playing {
-                Some((id, name, _)) => (if name.is_empty() { "Color for this game".to_string() } else { format!("Color for {name}") }, l.game_colors.get(id).unwrap_or(&l.color).clone()),
-                None => ("Color".to_string(), l.color.clone()),
-            };
-            let colors = with(with(with(row("light", "color", "choice", &color_title, ""), "options", arr(COLORS.iter().map(|(name, _)| s(*name)))), "swatches", arr(COLORS.iter().map(|(_, h)| s(*h)))), "index", n(COLORS.iter().position(|(_, h)| *h == color_now).unwrap_or(0) as f64));
-            let t = |key: &str, title: &str, line: &str, on: bool| with(row("light", key, "toggle", title, line), "on", b(on));
-            hints.push(hint("x", "Test lights"));
-            extra.push(("x", obj! {"act": s("light-test"), "arg": s("")}));
-            let mut sections = vec![
-                section("Effect", vec![effect, slider("speed", "Speed", l.speed, "Slow", "Fast"), slider("brightness", "Brightness", l.brightness, "0%", "100%")]),
-                section("Colors", vec![colors, t("rainbow", "Rainbow", "Ignore the color above", l.rainbow), t("pergame", "Colors per game", "Pick a color while a game runs and the game keeps it", l.per_game), t("level", "Battery level", "Green, orange or red with the charge", l.battery_level)]),
-            ];
-            let ready = crate::lights::leds(&ui.ctx.root, &m.rgb_leds).iter().all(|led| crate::lights::writable(&ui.ctx.root, led)) || ui.ledger().find_key(&modules::lighting_access().key()).is_some();
-            if let Some(off) = agent_off_row(ui, "Moving effects, colors per game and the battery level need") {
-                sections.insert(0, section("", vec![off]));
-            } else if !ready {
-                sections.insert(0, section("", vec![with(with(row("light-test", "", "button", "The lights need a one-time setup", "Test lights asks for it once. After that the effects play by themselves."), "button", s("Test lights")), "tone", s("warn"))]));
-            }
-            ("Lighting".into(), "The background helper plays the effects. Test lights shows the color and brightness now.".into(), sections)
-        }
+        "lighting" => return super::lighting::page(ui, &m),
         "battery" => {
             let mut rows = Vec::new();
             if let Some(bat) = m.battery() {
@@ -600,47 +473,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
                 }
             })
         }
-        "light" => {
-            let mut l = Lighting::load(&ui.folder());
-            let idx = num.unwrap_or(0) as usize;
-            match arg {
-                "effect" => l.effect = EFFECTS.get(idx)?.to_string(),
-                "color" => {
-                    let color = COLORS.get(idx)?.1.to_string();
-                    match ui.agent().game_now(crate::now()).filter(|_| l.per_game) {
-                        Some((game, _, _)) => drop(l.game_colors.insert(game.clone(), color)),
-                        None => l.color = color,
-                    }
-                }
-                "speed" => l.speed = (num? as u32).min(100),
-                "brightness" => l.brightness = (num? as u32).min(100),
-                "rainbow" => l.rainbow = !l.rainbow,
-                "pergame" => l.per_game = !l.per_game,
-                "level" => l.battery_level = !l.battery_level,
-                "dockoff" => l.off_when_docked = !l.off_when_docked,
-                "docksound" => l.tv_sound_when_docked = !l.tv_sound_when_docked,
-                _ => return None,
-            }
-            l.save(&ui.folder());
-            Some(refresh())
-        }
-        "light-test" => {
-            let l = Lighting::load(&ui.folder());
-            let writes = light_writes(&ui.ctx.root, &m, &l);
-            if writes.is_empty() {
-                return Some(toast("No lights found on this machine."));
-            }
-            let mut p = Plan::new("Show it on the lights?", "Sets the color and brightness now. Moving effects play once the background helper runs.", "Show");
-            let access = modules::lighting_access();
-            let has_access = ui.ledger().find_key(&access.key()).is_some();
-            if !has_access {
-                p.items.push((access.name(), if ui.veteran() { access.exact() } else { "Asked once, so lighting never needs the password again.".into() }));
-                p.steps.push(Step::Host(helper::apply(&access)));
-            }
-            p.steps.extend(writes.into_iter().map(|(path, value)| Step::HostWrite { path, value }));
-            p.done = "Lights set".into();
-            Some(if has_access { dialog(ui, p) } else { with_helper(ui, p) })
-        }
+        "light" | "light-test" | "light-report" => super::lighting::act(ui, action, arg, value),
         "monitor" => {
             let (what, name) = arg.split_once('|')?;
             let d = m.connected_displays().find(|d| output_name(&d.connector) == name)?;

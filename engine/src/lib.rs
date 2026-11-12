@@ -17,6 +17,7 @@ pub mod inflate;
 pub mod json;
 pub mod library;
 pub mod lights;
+pub mod lights_hid;
 pub mod modules;
 pub mod net;
 pub mod nsl;

@@ -10,6 +10,7 @@ pub mod games;
 mod help;
 mod home;
 pub mod launch;
+pub mod lighting;
 pub mod machine;
 pub mod nsl;
 pub mod plan;
@@ -189,7 +190,7 @@ impl Ui {
 
     /// The facts for the checkup, with the newer Turbine Hub among them.
     pub(crate) fn facts_now(&self) -> Facts {
-        Facts { app_update: self.update.clone(), ..self.facts.clone() }
+        Facts { app_update: self.update.clone(), lights_locked: lighting::locked(&self.ctx.root, &self.folder(), &self.machine()), ..self.facts.clone() }
     }
 
     /// What the top bar and the window need at every start and after every change.

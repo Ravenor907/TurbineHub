@@ -26,6 +26,8 @@ pub struct Facts {
     pub not_in_library: bool,
     /// The player blocked a USB device from waking the machine already, or allowed controller wake.
     pub controller_wake_on: bool,
+    /// Lighting choices are saved but the lights aren't open to the background helper (`lighting::locked`).
+    pub lights_locked: bool,
     /// What Desktop Mode's display settings say each screen is set to now (empty in Game Mode, where they can't
     /// be asked).
     pub screens: Vec<ScreenNow>,
@@ -141,6 +143,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     for d in m.drives.iter().filter(|d| d.role == DriveRole::Empty && !d.removable) {
         out.push(item("drive", Level::Look, "drive", "A drive isn't used for games".into(), format!("{}, empty. Add it to Steam as a game library?", if d.model.is_empty() { gb(d.bytes) } else { d.model.clone() }), ("Set up", "drives")));
+    }
+    if f.lights_locked {
+        out.push(item("lights", Level::Look, "light", "The lights need their one-time setup".into(), "Until then your look can't reach them. It's asked once and lasts through restarts and sleep.", ("Fix", "light-test")));
     }
     if !f.updates.is_empty() {
         let n = f.updates.len();

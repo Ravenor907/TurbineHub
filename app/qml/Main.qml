@@ -363,6 +363,9 @@ Window {
             if (!pick) pick = list.find(x => x.firstFocus === true) || list[0]
             focusItem = null
             setFocus(pick, false)
+            // The rebuilt rows are placed by their layouts a moment later, so the highlight is brought into view
+            // again then (a press that reloads a long page left it under the footer).
+            revealAgain.restart()
         }
         // The presses that waited go on now (unless putting the highlight back rebuilt the page again).
         if (!restoring && held.length > 0) {
@@ -371,6 +374,7 @@ Window {
             for (const k of q) press(k)
         }
     }
+    Timer { id: revealAgain; interval: 1; onTriggered: if (app.focusItem) app.reveal(app.focusItem) }
     // Scrolls every list around the item so all of it shows, clear of the fades at the edges. An item can ask for
     // more above it to show with it (`revealFrom`: the heading of its section).
     function reveal(item) {

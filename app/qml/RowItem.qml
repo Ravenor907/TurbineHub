@@ -7,7 +7,10 @@ import QtQuick.Layouts
 //
 // Kinds: toggle (a switch), check (a tick box), slider (Left and Right change it; A applies, or it applies as it
 // moves when the row says `live`), choice (Left and Right move among the options, A picks), button (A presses it),
-// info (words only; it still takes the highlight so a long page scrolls with the D-pad).
+// info (words only; it still takes the highlight so a long page scrolls with the D-pad), preview (a live picture of
+// the lights: `frames` of one color per part, `step` milliseconds apart, drawn as `rings` rings at `level`; it
+// takes no highlight). A choice with `cards` shows its options as cards with a strip of their `palettes`; Up and Down
+// move between the lines of cards.
 //
 // app (required): Main.qml's window. m (required): the row.
 Focusable {
@@ -15,6 +18,7 @@ Focusable {
     required property var m
     readonly property string kind: m.kind
     fid: m.id
+    focusable: kind !== "preview"
     aLabel: kind === "toggle" ? (m.on ? "Turn off" : "Turn on") : kind === "check" ? (m.on ? "Untick" : "Tick") : kind === "slider" ? (m.live ? "" : "Apply") : kind === "choice" ? "Choose" : kind === "button" ? (m.button || "Open") : ""
     implicitHeight: body.implicitHeight + app.px(26)
     tapActivates: kind !== "choice" && kind !== "slider"
@@ -25,6 +29,8 @@ Focusable {
     readonly property var options: m.options || []
     // The state chip sits beside the words unless it would take more than a third of the row.
     readonly property bool chipBelow: (m.badge || "") !== "" && sideChip.implicitWidth > width * 0.3
+    readonly property real cardWidth: app.px(158)
+    readonly property int cardsAcross: Math.max(1, Math.floor((choices.width + app.px(10)) / (cardWidth + app.px(10))))
 
     function send(value) { app.doAct(m.act, m.arg, value) }
     function step(d) {
@@ -44,6 +50,14 @@ Focusable {
             const n = cur + (k === "right" ? 1 : -1)
             if (n < 0 || n >= options.length) return false
             cur = n
+            return true
+        }
+        // Cards: Up and Down stay inside while there is a line of cards that way.
+        if (kind === "choice" && m.cards && (k === "up" || k === "down")) {
+            const n = cur + (k === "down" ? cardsAcross : -cardsAcross)
+            if (n < 0 || n >= options.length) return false
+            cur = n
+            app.reveal(r)
             return true
         }
         if (k === "a" && aLabel !== "") { activated(); return true }
@@ -121,8 +135,62 @@ Focusable {
             }
             Label { app: r.app; visible: text !== ""; text: r.m.high || ""; font.pixelSize: r.app.fpx(14); color: r.app.colors.muted }
         }
+        // The live picture of the lights: each ring split into its parts, glowing in the frame's colors.
+        Item {
+            id: lights
+            visible: r.kind === "preview"
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? r.app.px(100) : 0
+            readonly property var frames: r.kind === "preview" ? (r.m.frames || []) : []
+            readonly property int rings: Math.max(1, r.m.rings || 1)
+            property int frame: 0
+            opacity: r.m.level !== undefined ? r.m.level : 1
+            Timer {
+                interval: Math.max(40, r.m.step || 100)
+                repeat: true
+                running: lights.visible && lights.frames.length > 1 && r.app.motion.on
+                onTriggered: lights.frame = (lights.frame + 1) % lights.frames.length
+            }
+            Row {
+                anchors.centerIn: parent
+                spacing: r.app.px(56)
+                Repeater {
+                    model: lights.rings
+                    Canvas {
+                        id: ring
+                        required property int index
+                        width: r.app.px(96); height: width
+                        readonly property var colors: lights.frames.length > 0 ? lights.frames[lights.frame % lights.frames.length] : []
+                        onColorsChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.reset()
+                            const all = ring.colors
+                            const per = Math.max(1, Math.floor(all.length / lights.rings))
+                            const mine = all.slice(ring.index * per, ring.index * per + per)
+                            const c = width / 2, rad = width / 2 - r.app.px(14)
+                            // The stick in the middle.
+                            ctx.fillStyle = r.app.colors.raised
+                            ctx.beginPath(); ctx.arc(c, c, rad - r.app.px(12), 0, 2 * Math.PI); ctx.fill()
+                            for (let i = 0; i < mine.length; i++) {
+                                const a0 = Math.PI / 2 + i * 2 * Math.PI / mine.length, a1 = a0 + 2 * Math.PI / mine.length
+                                // A soft glow, then the ring itself.
+                                ctx.globalAlpha = 0.3
+                                ctx.strokeStyle = mine[i]
+                                ctx.lineWidth = r.app.px(22)
+                                ctx.beginPath(); ctx.arc(c, c, rad, a0, a1); ctx.stroke()
+                                ctx.globalAlpha = 1
+                                ctx.lineWidth = r.app.px(9)
+                                ctx.beginPath(); ctx.arc(c, c, rad, a0 + 0.04, a1 - 0.04); ctx.stroke()
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // The options of a choice. The one in effect is filled ("selected"); the highlight inside the row is a ring.
         Flow {
+            id: choices
             visible: r.kind === "choice"
             Layout.fillWidth: true
             spacing: r.app.px(10)
@@ -134,17 +202,37 @@ Focusable {
                     required property int index
                     readonly property bool picked: index === r.m.index
                     readonly property bool at: r.focused && index === r.cur
-                    readonly property string swatch: r.m.swatches ? r.m.swatches[index] : ""
-                    width: optRow.implicitWidth + r.app.px(28)
-                    height: r.app.tpx(40)
+                    readonly property string swatch: r.m.swatches && !r.m.cards ? r.m.swatches[index] : ""
+                    readonly property var palette: r.m.cards && r.m.palettes ? r.m.palettes[index] : []
+                    width: r.m.cards ? r.cardWidth : optRow.implicitWidth + r.app.px(28)
+                    height: r.m.cards ? r.app.tpx(82) : r.app.tpx(40)
                     radius: r.app.px(8)
                     color: picked ? r.app.colors.accent : r.app.colors.raised
                     border.width: Math.max(1, r.app.px(2))
                     border.color: at ? r.app.colors.accentHi : picked ? r.app.colors.accent : r.app.colors.line
                     Rectangle { visible: opt.at; anchors.fill: parent; anchors.margins: -r.app.px(4); radius: parent.radius + r.app.px(4); color: "transparent"; border.width: Math.max(2, r.app.px(2)); border.color: r.app.colors.accentHi }
+                    // A card's strip of its colors.
+                    Row {
+                        visible: opt.palette.length > 0
+                        x: r.app.px(10); y: r.app.px(10)
+                        width: parent.width - r.app.px(20)
+                        height: r.app.px(22)
+                        Repeater {
+                            model: opt.palette
+                            Rectangle {
+                                required property var modelData
+                                width: parent.width / Math.max(1, opt.palette.length)
+                                height: parent.height
+                                color: modelData
+                            }
+                        }
+                    }
                     Row {
                         id: optRow
-                        anchors.centerIn: parent
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.verticalCenter: r.m.cards ? undefined : parent.verticalCenter
+                        anchors.bottom: r.m.cards ? parent.bottom : undefined
+                        anchors.bottomMargin: r.app.px(10)
                         spacing: r.app.px(8)
                         Rectangle { visible: opt.swatch !== ""; width: r.app.px(18); height: width; radius: width / 2; color: opt.swatch !== "" ? opt.swatch : "transparent"; border.width: opt.picked ? Math.max(2, r.app.px(2)) : 1; border.color: opt.picked ? r.app.colors.onAccent : r.app.colors.ground; anchors.verticalCenter: parent.verticalCenter }
                         Icon { app: r.app; visible: opt.picked; d: r.app.icons.check; size: 16; tint: r.app.colors.onAccent; anchors.verticalCenter: parent.verticalCenter }

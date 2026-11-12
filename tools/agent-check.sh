@@ -25,7 +25,7 @@ for kind in handheld desktop; do
   need "the running game in its status" '"game":{"id":"steam:1145360","name":"Hades II"'
   if [ $kind = handheld ]; then
     need "the dock's look at the sound outputs" 'would do: Sinks'
-    need "the lights" 'light: multicolor:rgb:joystick shows'
+    need "the lights" 'light: ally:rgb:joystick_rings shows'
   fi
   # Whatever it would run on the host goes through the helper or flatpak-spawn, never sudo.
   if printf '%s\n' "$out" | grep -q -w sudo; then echo "::error title=Background helper on a made-up $kind::it would use sudo"; fail=1; fi

@@ -51,6 +51,13 @@ fn run(verb: &str, arg: Option<&String>, sys: &mut Sys<Host>) -> Result<String, 
         safe_install()?;
         return sys.reapply().map(|f| format!(",\"fixed\":{}", list(&f)));
     }
+    if verb == "hid-access" {
+        // Started by the lighting access rule's udev line, as root. Only ever adds the write bit to an ASUS
+        // lighting interface, and only once the player asked for the rule (see `Sys::hid_access`).
+        safe_install()?;
+        let name = arg.ok_or("Which device?")?;
+        return sys.hid_access(name).map(|opened| format!(",\"opened\":{opened}"));
+    }
     safe_install()?;
     let owner: Owner = sys.owner().ok_or("Turbine Hub's helper isn't set up")?;
     let caller = uid_env("PKEXEC_UID").or_else(|| uid_env("SUDO_UID")).ok_or("Unknown caller")?;

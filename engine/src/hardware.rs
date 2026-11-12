@@ -459,7 +459,8 @@ impl Machine {
             drives: read_drives(&t, home_dev),
             power_limits,
             cpu_epp: t.text("/sys/devices/system/cpu/cpufreq/policy0/energy_performance_available_preferences").split_whitespace().map(String::from).collect(),
-            rgb_leds: t.names("/sys/class/leds").into_iter().filter(|n| n.contains(":rgb:")).collect(),
+            // Every multicolor light: an LED with a color file, whatever it is called (not only "*:rgb:*").
+            rgb_leds: t.names("/sys/class/leds").into_iter().filter(|n| n.contains(":rgb:") || t.p(&format!("/sys/class/leds/{n}/multi_intensity")).exists()).collect(),
             wake_devices,
             windows_boot: windows_boot_entry(efibootmgr, &partition_uuids(&t)),
             steamos,

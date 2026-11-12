@@ -673,7 +673,7 @@ impl Agent {
     /// What the lights should show now, for `lights::frame`.
     pub fn scene<'a>(&'a self, l: &'a Lighting) -> Scene<'a> {
         let reading = self.last.as_ref().map(|(_, x)| x);
-        Scene { lighting: l, game: self.game(), battery: reading.and_then(|x| x.battery_pct), on_battery: reading.is_some_and(|x| x.battery_pct.is_some() && !x.charging), docked: self.docked }
+        Scene { lighting: l, game: self.game(), battery: reading.and_then(|x| x.battery_pct), on_battery: reading.is_some_and(|x| x.battery_pct.is_some() && !x.charging), charging: reading.is_some_and(|x| x.charging), docked: self.docked }
     }
 }
 

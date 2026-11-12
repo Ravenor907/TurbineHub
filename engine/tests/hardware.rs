@@ -37,7 +37,7 @@ fn knows_a_handheld_by_what_it_has() {
     assert_eq!(m.battery().unwrap().charge_limit, Some(100));
     assert_eq!(m.power_limits.len(), 3);
     assert_eq!((m.power_limits[0].name.as_str(), m.power_limits[0].min, m.power_limits[0].max), ("ppt_pl1_spl", 7, 35));
-    assert_eq!(m.rgb_leds, vec!["multicolor:rgb:joystick"]);
+    assert_eq!(m.rgb_leds, vec!["ally:rgb:joystick_rings"]);
     assert_eq!(m.memory_gb, 23);
     assert!(!m.on_tv());
     assert_eq!(m.steamos, "3.9.5");

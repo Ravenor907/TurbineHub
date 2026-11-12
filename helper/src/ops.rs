@@ -1,6 +1,7 @@
 //! The helper's jobs. Every path is under `Sys::root` ("/" for real, a scratch folder in tests) and every program
 //! runs through `Run`, so the tests exercise the real code without touching the machine.
 
+use crate::hid;
 use crate::json::{self, Json, quote};
 use crate::ledger::{Change, Entry, Ledger};
 use crate::policy::{self, Setting, Values};
@@ -369,7 +370,44 @@ impl<R: Run> Sys<R> {
                 }
             }
         }
+        // udev may have met the lighting interfaces before the helper's folder was there at start.
+        self.hid_access_all();
         if errors.is_empty() { Ok(fixed) } else { Err(errors.join("; ")) }
+    }
+
+    /// Opens one hidraw interface for writing by everyone, when it is an ASUS lighting interface (see `hid`) and
+    /// the player asked for the lighting access rule. Run by that rule's udev line for each ASUS hidraw device as it
+    /// appears (at start, and again after a sleep that brings the controller back), and by `reapply`. Only the write
+    /// bit is added: nobody but root can read from the interface, so nothing typed or pressed can be seen through
+    /// it. Answers whether the interface was one of them.
+    pub fn hid_access(&self, name: &str) -> Result<bool, String> {
+        if !hid::node_name_ok(name) {
+            return Err("Not a hidraw device".into());
+        }
+        if self.ledger()?.find_key(&Setting::Access { what: policy::Access::Lighting }.key()).is_none() {
+            return Ok(false);
+        }
+        let dir = self.p(&format!("/sys/class/hidraw/{name}/device"));
+        let uevent = fs::read_to_string(dir.join("uevent")).unwrap_or_default();
+        let desc = fs::read(dir.join("report_descriptor")).unwrap_or_default();
+        if hid::role(&uevent, &desc).is_none() {
+            return Ok(false);
+        }
+        let node = self.p(&format!("/dev/{name}"));
+        let meta = fs::symlink_metadata(&node).map_err(|e| io_err(&format!("look at /dev/{name}"), e))?;
+        if meta.file_type().is_symlink() || meta.is_dir() {
+            return Err(format!("/dev/{name} isn't a device"));
+        }
+        let mode = (meta.permissions().mode() & 0o7777 & !0o004) | 0o002;
+        fs::set_permissions(&node, fs::Permissions::from_mode(mode)).map_err(|e| io_err(&format!("open /dev/{name} for lighting"), e))?;
+        Ok(true)
+    }
+
+    /// `hid_access` for every hidraw interface there is now.
+    fn hid_access_all(&self) {
+        for e in fs::read_dir(self.p("/sys/class/hidraw")).into_iter().flatten().flatten() {
+            let _ = self.hid_access(&e.file_name().to_string_lossy());
+        }
     }
 
     /// Sets a /sys value now without recording it (Game Boost while a game runs). Gone at the next boot.

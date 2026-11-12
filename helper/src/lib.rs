@@ -4,6 +4,7 @@
 
 #[path = "../../engine/src/json.rs"]
 pub mod json;
+pub mod hid;
 pub mod ledger;
 pub mod ops;
 pub mod policy;

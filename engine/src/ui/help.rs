@@ -177,6 +177,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Option<J
         "update-app" => return super::settings::act(ui, "update-app", "", value),
         "help:plugins" => guide("Updating Decky plugins", "Plugins update from Decky's own store, in Steam's quick menu.", &[("1", "Open Steam's quick menu and pick the plug icon."), ("2", "Open the store icon at the top, then Updates."), ("3", "Update each plugin, or all of them.")]),
         "bring" => open("bring"),
+        "light-test" => return super::lighting::act(ui, "light-test", "", value),
         "self-tile" => return super::selftile::act(ui, "self-tile", "add", value),
         "help:panel" => return super::store::act(ui, "panel-guide", "", value),
         "help:nvidia" => guide("Nvidia graphics on SteamOS", "Valve and Nvidia are still working on it, so some things are rough.", &[("Works", "Most games in Desktop Mode and in Game Mode."), ("Rough", "HDR, variable refresh and sleep can misbehave in Game Mode."), ("If a game stutters", "Try it in Desktop Mode, and keep SteamOS up to date: fixes arrive with its updates.")]),

@@ -50,7 +50,7 @@ fonts, icons (`app.icons`) and motion (`app.motion`).
 | Icon | A line icon from path data on a 24 x 24 grid. |
 | Chip | A small state label. |
 | Toggle | A switch as drawn (the row around it takes the press). |
-| RowItem | One engine row: toggle, check, slider, choice, button or info. |
+| RowItem | One engine row: toggle, check, slider, choice (as chips, or as cards with a color strip), button, info, or a live preview of the lights. |
 | RowsView | Sections of rows as a scrolling list, in columns where they fit. |
 | CardTile | A card in a grid: icon, title, state, a line, status and button. |
 | PageHeader | A page's title with where it was opened from. |

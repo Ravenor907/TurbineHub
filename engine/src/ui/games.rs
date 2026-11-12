@@ -442,11 +442,12 @@ pub fn report_text(ui: &Ui, id: &str, when: &str) -> String {
         version: ui.ctx.version.clone(),
         when: when.into(),
         device: vec![format!("Machine: {}", super::top_name(&m)), format!("Processor: {}", m.cpu), format!("Memory: {} GB", m.memory_gb), format!("SteamOS: {}", m.steamos)],
-        screen: "Games".into(),
+        screen: if id == super::lighting::REPORT { "Lighting" } else { "Games" }.into(),
         settings: vec![format!("mode: {:?}", st.mode), format!("game boost: {}", st.game_boost)],
         games,
         log: ui.ledger().entries.iter().map(|e| e.change.words()).collect(),
         launch: Vec::new(),
+        lighting: crate::lights::diagnostics(&ui.ctx.root).into_iter().chain(Some(format!("choices: {}", super::lighting::Lighting::load(&ui.folder()).to_json().trim()))).collect(),
     })
 }
 

@@ -200,7 +200,7 @@ pub fn remove_art(grid: &Path, appid: u32, record: &Path) -> io::Result<Vec<Path
     Ok(removed)
 }
 
-/// Where the Flatpak keeps the art sets (packaging/steam-art/<set>/*.png in the repository).
-pub fn installed_set(set: &str) -> PathBuf {
-    Path::new("/app/share/turbine-mod-manager/steam-art").join(set)
+/// Where the Flatpak keeps Turbine Hub's own art set (packaging/steam-art/*.png in the repository).
+pub fn installed_set() -> PathBuf {
+    Path::new("/app/share/turbinehub/steam-art").to_path_buf()
 }

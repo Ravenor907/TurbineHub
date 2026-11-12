@@ -70,7 +70,7 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
                 scale = with(scale, k, n(v));
             }
             scale = with(with(scale, "unit", s("%")), "live", b(true));
-            vec![
+            let mut rows = vec![
                 choice("mode", "Mode", "Guided explains things. Veteran shows every control.", &["Guided", "Veteran"], if st.mode == Some(Mode::Veteran) { 1 } else { 0 }),
                 scale,
                 with(row("animations", "", "toggle", "Animations", "Fades and slides between screens"), "on", b(st.animations)),
@@ -78,7 +78,9 @@ pub(crate) fn page(ui: &mut Ui, arg: &str) -> Json {
                 with(with(with(row("snapshots", "", "toggle", "Save time machine", &format!("A snapshot of a game's saves each time it starts. The newest {} are kept.", crate::snapshots::KEEP)), "on", b(st.save_snapshots)), "badge", s(if st.save_snapshots && !ui.agent_running() { "Needs the background helper" } else { "" })), "tone", s("warn")),
                 open_row("bring", "Bring it over", "Run the Windows steps again", "Open"),
                 open_row("changes", "Review changes", &match changes { 0 => "Nothing changed yet".to_string(), 1 => "1 system change, with Undo".into(), c => format!("{c} system changes, each with Undo") }, "Review"),
-            ]
+            ];
+            rows.extend(super::selftile::rows(ui));
+            rows
         }
         "look" => vec![
             choice("theme", "Theme", "", THEME_WORDS, THEMES.iter().position(|t| *t == st.theme).unwrap_or(0)),

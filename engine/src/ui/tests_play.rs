@@ -1,6 +1,7 @@
 //! Games, the launch tool, Proton, saves and the Store's search and pages, on the made-up machine.
 use super::games::{Switches, matches};
 use super::launch::{self, Uses};
+use super::selftile;
 use super::plan::Step;
 use super::*;
 use crate::compat_tool as tool;
@@ -478,4 +479,165 @@ fn windows_saves_go_through_ludusavi_into_games_that_can_take_them() {
     parse(&u.act("win-saves", "", "")).unwrap();
     assert_eq!(u.confirm().unwrap().steps.len(), 1);
     done("winsaves");
+}
+
+fn art_set(tag: &str) -> PathBuf {
+    let share = dir(tag).join("share");
+    for part in ["capsule", "wide", "hero", "logo", "icon"] {
+        let f = selftile::art_dir(&share).join(format!("{part}.png"));
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, format!("png {part}")).unwrap();
+    }
+    share
+}
+
+#[test]
+fn turbine_hub_adds_itself_to_the_library_only_while_steam_is_closed() {
+    use selftile::State;
+    let mut u = ui("selftile", HANDHELD);
+    let share = art_set("selftile");
+    let (home, folder) = (u.ctx.home.clone(), u.folder());
+    let file = home.join(".local/share/Steam/userdata/1001/config/shortcuts.vdf");
+    let grid = file.with_file_name("grid");
+    assert_eq!(selftile::state(&home), State::Missing);
+    let general = rows(&parse(&u.page("settings", "")).unwrap());
+    let offer = general.iter().find(|r| r.str_at("title") == Some(selftile::TITLE)).unwrap();
+    assert_eq!((offer.str_at("act"), offer.str_at("arg"), offer.str_at("button")), (Some("self-tile"), Some("add"), Some("Add")));
+    // While Steam runs there is no dialog to confirm, only the steps; and the step itself refuses too.
+    u.steam_running = true;
+    let d = parse(&u.act("self-tile", "add", "")).unwrap();
+    assert_eq!((d.get("dialog").unwrap().str_at("title"), d.get("dialog").unwrap().str_at("confirm")), (Some("Steam has to be closed for this"), Some("")));
+    assert!(u.confirm().is_none());
+    assert!(selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, true).unwrap().is_err());
+    assert!(!file.exists() && !grid.exists());
+    // With Steam closed: one dialog, one step. A cover the player picked is there already and stays.
+    u.steam_running = false;
+    let appid = selftile::tile().appid();
+    std::fs::create_dir_all(&grid).unwrap();
+    std::fs::write(grid.join(format!("{appid}p.png")), "the player's own").unwrap();
+    let d = parse(&u.act("self-tile", "add", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some("Add"));
+    let plan = u.confirm().unwrap();
+    assert_eq!(plan.steps, vec![Step::SelfTile { add: true }]);
+    selftile::run_step(&plan.steps[0], &home, &folder, &share, false).unwrap().unwrap();
+    let list = crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!((list[0].name.as_str(), list[0].exe.as_str(), list[0].launch_options.as_str(), list[0].appid), ("Turbine Hub", "\"/usr/bin/flatpak\"", "run --branch=stable --arch=x86_64 --command=turbinehub io.github.ravenor907.TurbineHub", appid));
+    assert_eq!(crate::shortcuts::find_self(&home).map(|(id, _)| id), Some(appid));
+    assert_eq!(std::fs::read_to_string(grid.join(format!("{appid}p.png"))).unwrap(), "the player's own");
+    for (name, text) in [(format!("{appid}.png"), "png wide"), (format!("{appid}_hero.png"), "png hero"), (format!("{appid}_logo.png"), "png logo"), (format!("{appid}_icon.png"), "png icon")] {
+        assert_eq!(std::fs::read_to_string(grid.join(name)).unwrap(), text);
+    }
+    assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 0 });
+    // Adding again adds no second entry; Settings now names it and offers Remove.
+    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, false).unwrap().unwrap();
+    assert_eq!(crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap().len(), 1);
+    assert_eq!(parse(&u.act("self-tile", "add", "")).unwrap().str_at("toast"), Some("Turbine Hub is in your library already."));
+    let general = rows(&parse(&u.page("settings", "")).unwrap());
+    assert!(general.iter().any(|r| r.str_at("title") == Some(selftile::TITLE) && r.str_at("badge") == Some("In your library")));
+    // A picture cleared in Steam shows as missing, and Fix art puts it back.
+    std::fs::remove_file(grid.join(format!("{appid}_hero.png"))).unwrap();
+    assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 1 });
+    parse(&u.act("self-tile", "art", "")).unwrap();
+    assert_eq!(u.confirm().unwrap().steps, vec![Step::SelfArt]);
+    selftile::run_step(&Step::SelfArt, &home, &folder, &share, true).unwrap().unwrap();
+    assert_eq!(selftile::state(&home), State::Added { ours: true, art_missing: 0 });
+    // Remove: the steps while Steam runs, else the entry and Turbine Hub's own pictures go; the player's stays.
+    u.steam_running = true;
+    assert_eq!(parse(&u.act("self-tile", "remove", "")).unwrap().get("dialog").unwrap().str_at("title"), Some("Remove it in Steam"));
+    u.steam_running = false;
+    let d = parse(&u.act("self-tile", "remove", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().get("danger").and_then(Json::as_bool), Some(true));
+    let plan = u.confirm().unwrap();
+    selftile::run_step(&plan.steps[0], &home, &folder, &share, false).unwrap().unwrap();
+    assert_eq!(selftile::state(&home), State::Missing);
+    assert!(grid.join(format!("{appid}p.png")).exists() && !grid.join(format!("{appid}.png")).exists());
+    assert!(crate::shortcuts::backup_file(&file).exists());
+    // An entry the player added in Steam: Turbine Hub adds only its pictures (not the icon), and never removes it.
+    let mut by_hand = selftile::tile();
+    by_hand.name = "Hub".into();
+    by_hand.launch_options = "run io.github.ravenor907.TurbineHub".into();
+    crate::shortcuts::add_shortcut(&file, &by_hand, "run io.github", false).unwrap();
+    assert_eq!(selftile::state(&home), State::Added { ours: false, art_missing: 4 });
+    selftile::run_step(&Step::SelfTile { add: true }, &home, &folder, &share, false).unwrap().unwrap();
+    assert_eq!(selftile::state(&home), State::Added { ours: false, art_missing: 0 });
+    assert!(!grid.join(format!("{}_icon.png", by_hand.appid())).exists());
+    assert_eq!(parse(&u.act("self-tile", "remove", "")).unwrap().get("dialog").unwrap().str_at("title"), Some("Remove it in Steam"));
+    assert!(selftile::run_step(&Step::SelfTile { add: false }, &home, &folder, &share, false).unwrap().is_err());
+    assert_eq!(crate::shortcuts::parse(&std::fs::read(&file).unwrap()).unwrap().len(), 1);
+    // The made-up PC has it in the library without its pictures: Settings offers Fix art and Remove.
+    let mut pc = ui("selftile-pc", Preset::Desktop);
+    assert_eq!(selftile::state(&pc.ctx.home), State::Added { ours: true, art_missing: 5 });
+    let general = rows(&parse(&pc.page("settings", "")).unwrap());
+    let mine: Vec<Option<&str>> = general.iter().filter(|r| r.str_at("act") == Some("self-tile")).map(|r| r.str_at("button")).collect();
+    assert_eq!(mine, vec![Some("Fix art"), Some("Remove")]);
+    done("selftile");
+    done("selftile-pc");
+}
+
+#[test]
+fn the_first_run_offers_the_library_entry_and_the_checkup_tips_it() {
+    // Ticked from the start, and its step comes before the setup is marked done.
+    let mut u = Ui::sample(&dir("selfpick"), HANDHELD, Some(Mode::Veteran));
+    let all = rows(&parse(&u.page("quick", "")).unwrap());
+    let pick = all.iter().find(|r| r.str_at("title") == Some(selftile::TITLE)).unwrap();
+    assert_eq!((pick.str_at("kind"), pick.get("on").and_then(Json::as_bool)), (Some("check"), Some(true)));
+    parse(&u.act("quick-apply", "", "")).unwrap();
+    let plan = u.confirm().unwrap();
+    let at = plan.steps.iter().position(|x| *x == Step::SelfTile { add: true }).unwrap();
+    assert_eq!(at, plan.steps.len() - 2);
+    // While Steam runs it can't be ticked, and says when it can be done.
+    let mut r = Ui::sample(&dir("selfpick"), HANDHELD, Some(Mode::Guided));
+    r.steam_running = true;
+    let all = rows(&parse(&r.page("quick", "")).unwrap());
+    let pick = all.iter().find(|x| x.str_at("title") == Some(selftile::TITLE)).unwrap();
+    assert_eq!((pick.str_at("kind"), pick.str_at("badge")), (Some("info"), Some("Later, with Steam closed")));
+    parse(&r.act("quick-apply", "", "")).unwrap();
+    assert!(r.confirm().unwrap().steps.iter().all(|x| !matches!(x, Step::SelfTile { .. })));
+    // Guided's picks say where the quick panel is, since Decky Loader is here.
+    assert!(all.iter().all(|x| x.str_at("title") != Some(store::PANEL_TITLE)));
+    let guided = r.page("setup", "picks");
+    assert!(guided.contains(store::PANEL_TITLE) && guided.contains("In Store, Decky plugins") && guided.contains(selftile::TITLE));
+    // The checkup tips it while it is missing, and the tip's button is the same Add.
+    let m = r.machine();
+    let facts = crate::checkup::Facts { not_in_library: true, ..crate::checkup::Facts::default() };
+    let tip = crate::checkup::items(&m, &facts).into_iter().find(|i| i.id == "library").unwrap();
+    assert_eq!((tip.level, tip.action), (crate::checkup::Level::Tip, ("Add", "self-tile")));
+    assert!(crate::checkup::items(&m, &crate::checkup::Facts::default()).iter().all(|i| i.id != "library"));
+    assert_eq!(parse(&r.act("checkup", "self-tile", "")).unwrap().get("dialog").unwrap().str_at("title"), Some("Steam has to be closed for this"));
+    done("selfpick");
+}
+
+#[test]
+fn the_quick_panel_is_found_by_its_package_name_and_installed_through_decky() {
+    let mut u = ui("panel", HANDHELD);
+    let page = parse(&u.page("store", "decky")).unwrap();
+    let row = rows(&page).into_iter().find(|r| r.str_at("title") == Some(store::PANEL_TITLE)).unwrap();
+    assert_eq!((row.str_at("act"), row.str_at("button")), (Some("panel-guide"), Some("How")));
+    let d = parse(&u.act("panel-guide", "", "")).unwrap();
+    let items = d.get("dialog").unwrap().get("items").unwrap().as_array().to_vec();
+    assert_eq!(items.len(), 5);
+    assert!(items.iter().any(|i| i.str_at("line") == Some("https://github.com/Ravenor907/TurbineHub/releases/latest/download/TurbineHub-Decky.zip")));
+    assert!(items[2].str_at("line").unwrap().contains("Install Plugin from URL"));
+    assert_eq!(d.get("dialog").unwrap().str_at("confirm"), Some(""));
+    // Whatever its folder is called, its package.json names it. Another plugin's doesn't count.
+    assert!(!store::panel_installed(&u));
+    let plugins = u.ctx.home.join("homebrew/plugins");
+    std::fs::write(plugins.join("decky-css/package.json"), "{\"name\": \"css-loader\"}").unwrap();
+    assert!(!store::panel_installed(&u));
+    std::fs::create_dir_all(plugins.join("Some Folder")).unwrap();
+    std::fs::write(plugins.join("Some Folder/package.json"), "{\n  \"name\": \"turbinehub-decky\",\n  \"version\": \"0.1.0\"\n}").unwrap();
+    assert!(store::panel_installed(&u));
+    let row = rows(&parse(&u.page("store", "decky")).unwrap()).into_iter().find(|r| r.str_at("title") == Some(store::PANEL_TITLE)).unwrap();
+    assert_eq!((row.str_at("kind"), row.str_at("badge")), (Some("info"), Some("Installed")));
+    assert_eq!(parse(&u.act("panel-guide", "", "")).unwrap().str_at("toast"), Some("The quick panel is installed already."));
+    // Without Decky Loader the steps start with it.
+    let mut tv = ui("panel", Preset::TvPc);
+    std::fs::remove_dir_all(tv.ctx.home.join("homebrew")).unwrap();
+    let d = parse(&tv.act("panel-guide", "", "")).unwrap();
+    assert_eq!(d.get("dialog").unwrap().get("items").unwrap().as_array()[0].str_at("title"), Some("First"));
+    // The name is the one the panel's own package carries.
+    let package = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../decky/package.json")).unwrap();
+    assert_eq!(parse(&package).unwrap().str_at("name"), Some(store::PANEL_PACKAGE));
+    done("panel");
 }

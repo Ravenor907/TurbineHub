@@ -181,6 +181,10 @@ fn step(job: &Job, st: &Step, say: &dyn Fn(String)) -> Result<(), String> {
             let places = turbinehub_engine::saves::Places { folder: &job.folder, data: &job.data, home: &job.home };
             turbinehub_engine::saves::run(work, &places, turbinehub_engine::now(), say, &mut runner).map(|_| ())
         }
+        Step::SelfTile { .. } | Step::SelfArt => {
+            let share = std::env::var("TURBINEHUB_SHARE").unwrap_or_else(|_| "/app/share/turbinehub".into());
+            ui::selftile::run_step(st, &job.home, &job.folder, Path::new(&share), job.steam_running).unwrap_or(Ok(()))
+        }
         Step::TileRemove { url } => {
             let file = turbinehub_engine::shortcuts::tile_file(&job.home).ok_or("Steam's list of non-Steam games wasn't found.")?;
             turbinehub_engine::shortcuts::remove_shortcut(&file, &ui::store::tile_marker(url), job.steam_running).map(|_| ())

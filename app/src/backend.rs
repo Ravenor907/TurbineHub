@@ -151,6 +151,9 @@ fn make_ui() -> Ui {
     if option("no-password").is_some() {
         ui.facts.has_password = Some(false);
     }
+    if option("steam-running").is_some() {
+        ui.steam_running = true;
+    }
     if option("no-tool").is_some() {
         ui.sample_without_tool();
     }
@@ -229,6 +232,7 @@ impl HubRust {
                 ui.ctx.efibootmgr = e;
             }
             let windows_here = ui.machine().drives.iter().any(|d| d.role == turbinehub_engine::hardware::DriveRole::Windows);
+            ui.facts.not_in_library = ui::selftile::missing(ui);
             ui.facts.windows_not_brought = windows_here && !ui.settings().brought.iter().any(|b| b == "windows");
         }
         if let Some(online) = f.online {

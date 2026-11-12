@@ -57,6 +57,26 @@ pub struct Tile {
 
 const DECKY_LINE: &str = "Plugins for Steam's quick menu, from its official release";
 
+pub const PANEL_TITLE: &str = "Turbine Hub quick panel";
+/// The quick panel's name in its package.json, whatever its folder among Decky's plugins is called.
+pub const PANEL_PACKAGE: &str = "turbinehub-decky";
+/// Where Decky Loader gets the quick panel: the zip every release carries.
+pub const PANEL_URL: &str = "https://github.com/Ravenor907/TurbineHub/releases/latest/download/TurbineHub-Decky.zip";
+
+/// Is Turbine Hub's quick panel among Decky's plugins? Read only: each plugin's package.json names it.
+pub fn panel_installed(ui: &Ui) -> bool {
+    std::fs::read_dir(ui.ctx.home.join("homebrew/plugins")).is_ok_and(|d| d.flatten().any(|e| std::fs::read_to_string(e.path().join("package.json")).ok().and_then(|t| json::parse(&t).ok()).is_some_and(|j| j.str_at("name") == Some(PANEL_PACKAGE))))
+}
+
+fn panel_row(ui: &Ui) -> Json {
+    if panel_installed(ui) {
+        with(with(row("none", "", "info", PANEL_TITLE, "Readings and this game's switches in Steam's quick menu"), "badge", s("Installed")), "tone", s("ok"))
+    } else {
+        let line = if decky_installed(ui) { "Readings and this game's switches in Steam's quick menu. Decky Loader installs it." } else { "Readings and this game's switches in Steam's quick menu. Needs Decky Loader." };
+        with(row("panel-guide", "", "button", PANEL_TITLE, line), "button", s("How"))
+    }
+}
+
 /// Services that become a library tile opening the browser full screen.
 pub const TILES: &[Tile] = &[
     Tile { id: "xcloud", name: "Xbox Cloud", url: "https://www.xbox.com/play", line: "Game Pass games, streamed" },
@@ -175,6 +195,7 @@ fn rows(ui: &Ui, sec: &str) -> Vec<Json> {
     match sec {
         "decky" => {
             out.push(decky_row(ui));
+            out.push(panel_row(ui));
             if decky_installed(ui) {
                 out.push(with(row("decky-off", "", "toggle", "Plugins on", "Turn every plugin off to see if one of them causes a problem"), "on", b(!plugins_off(ui))));
                 out.extend(plugins(ui).iter().map(|p| row("none", "", "info", p, "Plugin")));
@@ -211,6 +232,7 @@ fn found(ui: &Ui, q: &str) -> Vec<Json> {
         put(a.name, &format!("{} {}", a.line, a.about), app_row(ui, a));
     }
     put("Decky Loader", &format!("{DECKY_LINE} plugins"), decky_row(ui));
+    put(PANEL_TITLE, "Decky plugin quick menu readings switches", panel_row(ui));
     for (id, name) in NSL {
         put(name, "launcher NonSteamLaunchers", launcher_row(id, name));
     }
@@ -492,6 +514,22 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
             p.steps = tile_steps(ui, t);
             p.done = format!("{} added. It shows after Steam starts again.", t.name);
             Some(dialog(ui, p))
+        }
+        "panel-guide" => {
+            if panel_installed(ui) {
+                return Some(toast("The quick panel is installed already."));
+            }
+            let mut items = vec![
+                ("1", "Open Steam's quick menu, the plug icon, then the gear: Decky Loader's settings."),
+                ("2", "Under General, turn on Developer mode. A Developer page appears."),
+                ("3", "On the Developer page, pick Install Plugin from URL and type the address below."),
+                ("Address", PANEL_URL),
+                ("4", "Confirm. Turbine Hub shows under the plug icon."),
+            ];
+            if !decky_installed(ui) {
+                items.insert(0, ("First", "Install Decky Loader: its row here in Store, Decky plugins."));
+            }
+            Some(guide("Get the Turbine Hub quick panel", "The quick panel puts Turbine Hub's readings and the running game's switches into Steam's quick menu. Decky Loader installs it itself, from Turbine Hub's newest release.", &items))
         }
         "launcher-guide" => {
             let (_, name) = NSL.iter().find(|(id, _)| *id == arg)?;

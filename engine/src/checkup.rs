@@ -22,6 +22,8 @@ pub struct Facts {
     pub has_password: Option<bool>,
     /// A Windows drive was found and not brought over yet.
     pub windows_not_brought: bool,
+    /// Turbine Hub isn't among the Steam library's non-Steam games, so it doesn't open from Game Mode.
+    pub not_in_library: bool,
     /// The player blocked a USB device from waking the machine already, or allowed controller wake.
     pub controller_wake_on: bool,
 }
@@ -94,6 +96,9 @@ pub fn items(m: &Machine, f: &Facts) -> Vec<Item> {
     }
     if f.windows_not_brought {
         out.push(item("windows", Level::Tip, "bring", "Games on your Windows drive can be copied".into(), "Copy them over instead of downloading them again.", ("Bring it over", "bring")));
+    }
+    if f.not_in_library {
+        out.push(item("library", Level::Tip, "games", "Turbine Hub isn't in your Game Mode library".into(), "Add it and it opens from Game Mode like a game.", ("Add", "self-tile")));
     }
     if m.has_nvidia() {
         out.push(item("nvidia", Level::Tip, "gauge", "Nvidia graphics on SteamOS".into(), "Nvidia support on SteamOS is still experimental. Turbine Hub shows what works.", ("How", "help:nvidia")));

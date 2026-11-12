@@ -65,6 +65,11 @@ pub const SHOTS: &[(&str, &str)] = &[
     ("dialog-guide", "--page=home --act=checkup:help:hdmi --machine=tv --mode=guided"),
     ("menu", "--page=home --act=menu: --machine=handheld --mode=guided"),
     ("settings", "--page=settings --machine=handheld --mode=guided"),
+    ("settings-pc", "--page=settings --machine=desktop --mode=guided"),
+    ("dialog-library", "--page=settings --act=self-tile:add --machine=handheld --mode=guided"),
+    ("dialog-library-steam", "--page=settings --act=self-tile:add --machine=handheld --mode=guided --steam-running"),
+    ("dialog-library-remove", "--page=settings --act=self-tile:remove --machine=desktop --mode=guided"),
+    ("dialog-panel", "--page=store --arg=decky --act=panel-guide: --machine=handheld --mode=guided"),
     ("settings-look", "--page=settings --arg=look --machine=handheld --mode=guided"),
     ("settings-updates", "--page=settings --arg=updates --machine=handheld --mode=veteran --offline"),
     ("changes", "--page=changes --machine=handheld --mode=guided"),
@@ -131,6 +136,8 @@ fn home(home: &Path) {
     w(&steam, "compatibilitytools.d/GE-Proton10-4/compatibilitytool.vdf", "\"compatibilitytools\"\n{\n  \"compat_tools\"\n  {\n    \"GE-Proton10-4\"\n    {\n      \"install_path\" \".\"\n    }\n  }\n}\n");
     // Steam's own settings: its Proton for all games, one game on Turbine Hub's tool, one on Turbine Mod Manager's.
     w(&steam, "config/config.vdf", &format!("\"InstallConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"CompatToolMapping\"\n{{\n\"0\"\n{{\n\"name\" \"proton_11\"\n}}\n\"1086940\"\n{{\n\"name\" \"{}\"\n}}\n\"367520\"\n{{\n\"name\" \"{}\"\n}}\n}}\n}}\n}}\n}}\n}}\n", crate::compat_tool::TOOL_NAME, crate::compat_tool::MOD_TOOL_NAME));
+    // A signed-in Steam account, with no non-Steam games yet.
+    let _ = fs::create_dir_all(steam.join("userdata/1001/config"));
     w(home, "homebrew/services/PluginLoader", "");
     w(home, "homebrew/plugins/decky-css/plugin.json", "{\"name\":\"CSS Loader\"}");
     w(home, "homebrew/plugins/protondb/plugin.json", "{\"name\":\"ProtonDB Badges\"}");
@@ -239,6 +246,10 @@ pub(crate) fn build(dir: &Path, preset: Preset, mode: Option<Mode>) -> Ui {
         Preset::Desktop => Facts { current_hz: Some(60), updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), windows_not_brought: true, ..Facts::default() },
         Preset::TvPc => Facts { updates: vec!["Heroic Games Launcher".into()], has_password: Some(true), ..Facts::default() },
     };
+    if preset == Preset::Desktop {
+        // On the PC Turbine Hub is in the Steam library already, added by itself; its pictures aren't there yet.
+        let _ = crate::shortcuts::add_shortcut(&ui.ctx.home.join(".local/share/Steam/userdata/1001/config/shortcuts.vdf"), &super::selftile::tile(), super::selftile::MARKER, false);
+    }
     if preset != Preset::TvPc {
         let mount = dir.join("windows");
         fake::windows_drive(&mount);

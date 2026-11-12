@@ -43,7 +43,12 @@ fn picks_for(ui: &Ui, guided: bool) -> Vec<Pick> {
     let mut out = Vec::new();
     let mut add = |id: &str, group: &'static str, title: &str, note: &str, default: bool, locked: Option<&'static str>, settings: Vec<Setting>, app: Option<&'static str>| out.push(Pick { id: id.into(), group, title: title.into(), note: note.into(), default: default && locked.is_none(), locked, settings, app });
     let has_decky = ui.ctx.home.join("homebrew/services/PluginLoader").exists();
+    add("library", "Essentials", super::selftile::TITLE, "Opens from Game Mode like a game, with its own art", true, super::selftile::pick_lock(ui), Vec::new(), None);
     add("decky", "Essentials", "Decky Loader", "Plugins for Steam's quick menu", ui.decky_tag.is_some(), if has_decky { Some("Installed") } else if ui.decky_tag.is_none() { Some("Needs the internet once") } else { None }, Vec::new(), None);
+    // The quick panel installs through Decky Loader itself, so Guided only says where it is.
+    if guided && has_decky {
+        add("panel", "Essentials", store::PANEL_TITLE, "Turbine Hub in Steam's quick menu while you play", false, Some(if store::panel_installed(ui) { "Installed" } else { "In Store, Decky plugins" }), Vec::new(), None);
+    }
     for (id, title, note, default) in [(LUDUSAVI, "Ludusavi save backups", "Back up and restore saves", true), ("com.vysp3r.ProtonPlus", "ProtonPlus", "Extra Proton versions", true)] {
         add(id, "Essentials", title, note, default, store::is_installed(ui, id).then_some("Installed"), Vec::new(), Some(id));
     }
@@ -246,6 +251,9 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, _value: &str) -> Option<
                 steps.push(Step::Host(helper::job("decky-install", Some(&format!("{{\"tag\":{}}}", json::quote(tag))))));
             }
             steps.extend(go.iter().filter_map(|x| x.app).map(store::install_step));
+            if go.iter().any(|x| x.id == "library") {
+                steps.push(Step::SelfTile { add: true });
+            }
             steps.push(Step::SetupFinished { boost });
             p.steps = steps;
             p.done = "Setup done".into();

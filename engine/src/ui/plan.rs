@@ -42,6 +42,10 @@ pub enum Step {
     Saves(crate::saves::Job),
     /// Takes a tile out of the Steam library again.
     TileRemove { url: String },
+    /// Adds Turbine Hub itself to the Steam library with its art, or takes that entry out again.
+    SelfTile { add: bool },
+    /// Writes Turbine Hub's own library art for its entry, never over the player's pictures.
+    SelfArt,
 }
 
 /// Which password the dialog asks for.
@@ -158,6 +162,7 @@ pub(crate) fn act(ui: &mut Ui, action: &str, arg: &str, value: &str) -> Json {
         .or_else(|| super::games::act(ui, action, arg, value))
         .or_else(|| super::launch::act(ui, action, arg, value))
         .or_else(|| super::saves::act(ui, action, arg, value))
+        .or_else(|| super::selftile::act(ui, action, arg, value))
         .or_else(|| super::machine::act(ui, action, arg, value))
         .or_else(|| super::store::act(ui, action, arg, value))
         .or_else(|| super::bring::act(ui, action, arg, value))

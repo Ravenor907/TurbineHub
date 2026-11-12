@@ -40,6 +40,7 @@
                 "install -Dm644 -t /app/share/turbinehub/fonts fonts/*.ttf",
                 "install -Dm644 -t /app/share/turbinehub/licenses fonts/OFL-*.txt LICENSE",
                 "install -Dm644 -t /app/share/turbinehub/art packaging/art/veteran.jpg",
+                "install -Dm644 -t /app/share/turbinehub/steam-art packaging/steam-art/*.png",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineHub.desktop /app/share/applications/io.github.ravenor907.TurbineHub.desktop",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineHub.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineHub.metainfo.xml",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineHub.svg /app/share/icons/hicolor/scalable/apps/io.github.ravenor907.TurbineHub.svg",

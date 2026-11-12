@@ -13,6 +13,7 @@ pub mod machine;
 pub mod plan;
 mod sample;
 pub mod saves;
+pub mod selftile;
 pub mod settings;
 mod setup;
 pub mod store;

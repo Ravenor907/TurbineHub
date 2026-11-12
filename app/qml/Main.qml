@@ -1180,7 +1180,8 @@ Window {
                 sourceSize: Qt.size(256, 256)
                 mipmap: true
                 anchors.horizontalCenter: parent.horizontalCenter
-                RotationAnimator on rotation { from: 0; to: 360; duration: mo.spin; loops: Animation.Infinite; running: Hub.busy }
+                // Counterclockwise, the way the emblem's blades curve.
+                RotationAnimator on rotation { from: 360; to: 0; duration: mo.spin; loops: Animation.Infinite; running: Hub.busy }
             }
             Label { app: app; text: Hub.busyWords; font.pixelSize: app.fpx(20); anchors.horizontalCenter: parent.horizontalCenter }
             Label { app: app; text: "Keep Turbine Hub open until this is done."; color: c.muted; anchors.horizontalCenter: parent.horizontalCenter }

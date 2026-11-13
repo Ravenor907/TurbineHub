@@ -212,7 +212,15 @@ impl<R: Run> Sys<R> {
             fs::create_dir_all(d).map_err(|e| io_err(&format!("make {}", d.display()), e))?;
         }
         let tmp = path.with_extension("turbinehub-new");
-        fs::write(&tmp, text).map_err(|e| io_err(&format!("write {abs}"), e))?;
+        // The new text is on the disk before it takes the old file's name: a machine that loses power right after
+        // has the old file or the new one, never an empty one (the record of changes is written this way).
+        let put = |tmp: &Path| -> io::Result<()> {
+            use std::io::Write;
+            let mut f = fs::File::create(tmp)?;
+            f.write_all(text.as_bytes())?;
+            f.sync_all()
+        };
+        put(&tmp).map_err(|e| io_err(&format!("write {abs}"), e))?;
         fs::set_permissions(&tmp, fs::Permissions::from_mode(mode)).map_err(|e| io_err("set permissions", e))?;
         fs::rename(&tmp, &path).map_err(|e| io_err(&format!("write {abs}"), e))
     }
